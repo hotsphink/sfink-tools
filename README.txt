@@ -8,6 +8,13 @@ when I break shit.
 
 ----------------------------------------------------------------------
 
+Tools included:
+
+json - Interactive navigation of a JSON file
+debug - Start up a debugger within emacs on various types of files
+
+----------------------------------------------------------------------
+
 json - Interactive navigation of a JSON file
 
 Created to explore a problem with a large sessionstore.js file. It mimics a
@@ -17,7 +24,7 @@ Requires the Perl module 'JSON'. Installable on Fedora with
 
   yum install perl-JSON
 
-Here's the current help message:
+Run json --help for a full help message. Here's an excerpt:
 
 Usage: json <filename.json> [initial-path]
 
@@ -37,15 +44,29 @@ Usage: json <filename.json> [initial-path]
                              at PATH would take up
     load [FILENAME]        - load in the given JSON file (reload current file
                              if no filename given)
-    help                   - show this message
 
-Paths:
+----------------------------------------------------------------------
 
-    PATHs are slash-separated sequences of key names, '.', '..', or '*'.
+debug - Start up a debugger within emacs on various types of files
 
-Delete Specifications:
+debug --help for usage.
 
-    A delete SPEC can be a plain key name, or a range of the format 'M..N',
-    where one of M and N may be optional. M defaults to zero. N defaults to the
-    highest index available. Ranges are inclusive.
+Usual usage is to prepend whatever command you want to debug with 'debug'.
 
+Examples:
+
+debug firefox -no-remote -P BugPictures
+ - runs firefox within gdb within emacs, with the given arguments
+debug -i firefox -no-remote -P NakedBugPictures
+ - same, but stops at the gdb prompt before running firefox
+debug somescript.pl x y z
+ - runs somescript.pl within perldb within emacs, with the given arguments
+
+The script goes to insane lengths to figure out what you really meant to run.
+For example, if you alias ff in your shell to 'firefox -no-remote', you can
+just do
+
+  debug ff
+
+It will discover that there's no command ff in $PATH and start up a subshell,
+look for the alias 'ff', and use that command instead.
