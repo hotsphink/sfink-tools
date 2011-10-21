@@ -1,0 +1,532 @@
+#!/usr/bin/perl
+
+use JSON;
+use File::Basename qw(dirname basename);
+use Term::ReadLine;
+use Getopt::Long;
+use strict;
+use warnings;
+
+sub help {
+    my ($opts) = @_;
+
+    if ($opts->{error}) {
+        print STDERR $opts->{error}, "\n";
+    }
+
+    print <<"END";
+Usage: $0 <filename.json> [initial-path]
+
+    ls [PATH]              - show contents of structure
+    cd PATH                - change current view to PATH
+    cat [PATH]             - display the value at the given PATH
+    delete SPEC            - delete the given key or range of keys (see below
+                             for a description of SPEC)
+    set KEY VALUE          - modify an existing value (VALUE may optionally
+                           - be quoted)
+    grep [-l] PATTERN PATH - search for PATTERN in given PATH
+    write [-pretty] [FILENAME]
+                           - write out the whole structure as JSON. Use '-' as
+                             FILENAME to write to stdout.
+    pretty                 - prettyprint current structure to stdout
+    size PATH              - display how many bytes the JSON of the substructure
+                             at PATH would take up
+    load [FILENAME]        - load in the given JSON file (reload current file
+                             if no filename given)
+    help                   - show this message
+
+Paths:
+
+    PATHs are slash-separated sequences of key names, '.', '..', or '*'.
+
+Delete Specifications:
+
+    A delete SPEC can be a plain key name, or a range of the format 'M..N',
+    where one of M and N may be optional. M defaults to zero. N defaults to the
+    highest index available. Ranges are inclusive.
+END
+
+    exit 1 if $opts->{error};
+    exit 0 if $opts->{exit};
+}
+
+my $term = Term::ReadLine->new("JSON explorer");
+select($term->OUT || \*STDOUT);
+my $attribs = $term->Attribs;
+
+my $MAX = 10;
+my $struct;
+my $current;
+my @current;
+
+GetOptions("h|help!" => sub { help({ exit => 1 }) })
+    or help({ error => 'invalid arguments' });
+
+help({error => 'not enough arguments'}) if @ARGV == 0;
+my $current_file = shift(@ARGV);
+
+load();
+
+if (@ARGV) {
+    my $init_path = shift(@ARGV);
+    if (!chpath($init_path)) {
+        die "No path '$init_path' found, exiting.\n";
+    }
+}
+
+my @completions;
+my $c_i;
+sub completion {
+    my ($text, $generating) = @_;
+
+    if (!$generating) {
+        if ($text =~ m!(.*)/[^/]*$!) {
+            my ($complete, $prefix) = ($1, $2);
+            my $stack = enterPath($current, $1, 1);
+            if ($stack) {
+                @completions = map { "$complete/$_" } get_completions($stack->[-1]);
+            } else {
+                @completions = ();
+            }
+        } else {
+            @completions = get_completions($current->[-1]);
+        }
+    }
+
+    $c_i = $generating ? $c_i + 1 : 0;
+    for (; $c_i < @completions; $c_i++) {
+        my $option = $completions[$c_i];
+        if (index($option, $text) == 0) {
+            $attribs->{completion_append_character} =
+                ($option =~ m!/$! ? "\0" : " ");
+            return $option;
+        }
+    }
+    return undef;
+}
+$attribs->{completion_entry_function} = \&completion;
+
+sub entry_str {
+    my ($obj, $key) = @_;
+    my $str = $key;
+    my $entry = enter($obj, $key, 1);
+    $str .= "/" if defined($entry) && size($entry) > 0;
+    $str .= "?" if !defined($entry);
+    return $str;
+}
+
+sub get_completions {
+    my ($obj) = @_;
+    return map { entry_str($obj, $_) } all_keys($obj);
+}
+
+LS: while(1) {
+    ls($current);
+
+    while (1) {
+        my $prompt = shortjoin(50, @current[1..$#current]);
+        my $input = $term->readline("$prompt> ");
+        last LS if ! defined($input);
+        chomp($input);
+        $term->addhistory($input) if $input =~ /\S/;
+
+        $input =~ s/\s+$//;
+        if ($input =~ /^cd (.*?)$/) {
+            next LS if chpath($1);
+        } elsif ($input =~ /^cat$/) {
+            cat($current);
+        } elsif ($input =~ /^cat (.*?)$/) {
+            cat($current, $1);
+        } elsif ($input =~ /^ls$/) {
+            next LS;
+        } elsif ($input =~ /^ls (.*?)$/) {
+            ls($current, $1);
+        } elsif ($input =~ /^limit (\d+)$/) {
+            $MAX = $1;
+        } elsif ($input =~ /^delete (.*?)$/) {
+            delete_keys($current, $1);
+        } elsif ($input =~ /^set (\S+)[\s=]+(.*)$/) {
+            set_value($current->[-1], $1, $2);
+        } elsif ($input =~ /^grep (-l\s+)?(.*) (\S+)$/) {
+            search($2, $3, defined($1));
+        } elsif ($input =~ /^write (-pretty\s+)?(.*?)$/) {
+            write_file($2, defined($1));
+        } elsif ($input =~ /^write( -pretty)?$/) {
+            write_file($ARGV[0], defined($1));
+        } elsif ($input =~ /^pretty$/) {
+            prettyprint($current->[-1]);
+        } elsif ($input =~ /^load (.*?)$/) {
+            load($1);
+        } elsif ($input =~ /^(load|reload)$/) {
+            load();
+        } elsif ($input =~ /^size (.*?)$/) {
+            print "json size = ", length(to_json(enterPath($current, $1)->[-1])), " bytes\n";
+        } elsif ($input =~ /^size$/) {
+            print "json size = ", length(to_json($current->[-1])), " bytes\n";
+        } else {
+            print "Unrecognized command\n";
+        }
+    }
+}
+
+sub load {
+    my ($file) = @_;
+    $file //= $current_file;
+    my $data = do { local $/; open(my $fh, "<", $file) or die; <$fh>; };
+    $struct = from_json($data, { relaxed => 1 });
+    $current = [ $struct ];
+    @current = ( "[top]" );
+    $current_file = $file;
+}
+
+sub prettyprint {
+    my ($struct) = @_;
+    print to_json($struct, { utf8 => 1, pretty => 1 });
+}
+
+sub write_file {
+    my ($filename, $pretty) = @_;
+
+    my $fh;
+    if ($filename eq '-') {
+        $fh = \*STDOUT;
+    } else {
+        open($fh, ">", "$filename.tmp")
+            or die "create $filename.tmp: $!";
+    }
+
+    my %opts = ( utf8 => 1 );
+    $opts{pretty} = 1 if $pretty;
+    my $json = to_json($struct, \%opts);
+    print $fh $json
+        or die "writing to $filename.tmp: $!";
+
+    return if $filename eq '-';
+
+    close($fh)
+        or die "closing $filename.tmp: $!";
+    if (rename($filename, "$filename.bak")) {
+        rename("$filename.tmp", $filename)
+            or rename("$filename.bak", $filename)
+            or die "ERROR! Old file is in $filename.bak: $!";
+    } else {
+        rename("$filename.tmp", $filename)
+            or die "Failed to create $filename: $!\n";
+    }
+    print "Wrote $filename, length ", (-s $filename), "\n";
+}
+
+sub search {
+    my ($pattern, $path, $listmode) = @_;
+    my $re;
+    my $delim = substr($pattern, 0, 1);
+    if ($delim ne substr($pattern, -1)) {
+        $re = $pattern;
+    } else {
+        $re = substr($pattern, 1, -1);
+    }
+
+    map_path($current, $path, sub {
+        my ($stack, $path) = @_;
+        return if ref($stack->[-1]);
+        return if $stack->[-1] !~ /$re/;
+        print $path;
+        if (!$listmode) {
+            print ": $stack->[-1]";
+        }
+        print "\n";
+             });
+}
+
+sub set_value {
+    my ($struct, $key, $value) = @_;
+    if ($value =~ /^"(.*)"$/) {
+        $value = $1;
+    } elsif ($value =~ /^'(.*)'$/) {
+        $value = $1;
+    }
+    $value =~ s/\\(.)/$1/g;
+
+    if (UNIVERSAL::isa($struct, 'HASH')) {
+        $struct->{$key} = $value;
+    } elsif (UNIVERSAL::isa($struct, 'ARRAY')) {
+        $struct->[$key] = $value;
+    } else {
+        print "At a leaf node\n";
+    }
+}
+
+sub delete_keys {
+    my ($current, $spec) = @_;
+
+    my $dir = dirname($spec);
+    $spec = basename($spec);
+    map_path($current, $dir, sub {
+        my ($stack, $path) = @_;
+        my $struct = $stack->[-1];
+
+        if ($spec =~ /^(\d*)\s*\.\.\s*(\d*)$/) {
+            my ($from, $to) = ($1, $2);
+            $from = 0 if length($from) == 0;
+            $to = $#$struct if length($to) == 0;
+            if ($to > $#$struct) {
+                print "End of range is too high (max $#$struct)\n";
+                return;
+            }
+            splice(@$struct, $from, $to - $from + 1);
+            return 1;
+        } else {
+            if (UNIVERSAL::isa($struct, 'ARRAY')) {
+                if ($spec > $#$struct) {
+                    print "Index is too high (max $#$struct)\n";
+                    return;
+                }
+                splice(@$struct, $spec, 1);
+                return 1;
+            } elsif (exists $struct->{$spec}) {
+                delete $struct->{$spec};
+                return 1;
+            } else {
+                print "No such key '$spec'\n";
+            }
+        }
+    });
+
+    return;
+}
+
+sub joinpath {
+    my ($path, $component) = @_;
+    if (!defined $path) {
+        return $component;
+    } elsif ($path =~ /\/$/) {
+        return $path . $component;
+    } else {
+        return "$path/$component";
+    }
+}
+
+# Callback is invoked with (object, path). 'object' is the structure at the
+# given path. It may be a leaf or a struct.
+sub map_path {
+    my ($stack, $path, $callback, $sofar) = @_;
+
+    $path //= '.';
+
+    # Absolute path
+    if ($path =~ s!^/!!) {
+        $stack = [ $stack->[0] ];
+        $sofar = '/';
+    }
+
+    $path =~ s!/$!!;
+
+    # Split off the first component
+    my ($first, $rest) = $path =~ m!^([^/]+)/(.*)!;
+
+    my $obj = $stack->[-1];
+    if (!defined $rest) {
+        # Single component
+        if ($path eq '*') {
+            for my $key (all_keys($obj)) {
+                $callback->(append($stack, $key), joinpath($sofar, $key));
+            }
+        } elsif ($path eq '.') {
+            $callback->($stack, joinpath($sofar, $path));
+        } elsif ($path eq '..') {
+            $callback->(popstack($stack), joinpath($sofar, $path));
+        } else {
+            my $s = append($stack, $path)
+              or return;
+            $callback->($s, joinpath($sofar, $path));
+        }
+    } else {
+        if ($first eq '*') {
+            for my $key (all_keys($obj)) {
+                my $s = append($stack, $key)
+                  or return;
+                map_path($s, $rest, $callback, joinpath($sofar, $key));
+            }
+        } elsif ($first eq '.') {
+            map_path($stack, $rest, $callback, joinpath($sofar, $first));
+        } elsif ($first eq '..') {
+            map_path(popstack($stack), $rest, $callback, joinpath($sofar, $first));
+        } else {
+            my $s = append($stack, $first)
+              or return;
+            map_path($s, $rest, $callback, joinpath($sofar, $first));
+        }
+    }
+}
+
+sub popstack {
+    my ($stack) = @_;
+    return [ @$stack[0..$#$stack-1] ];
+}
+
+sub ls {
+    my ($current, $lspath) = @_;
+
+    map_path($current, $lspath, sub {
+      my ($stack, $path) = @_;
+      if (size($stack->[-1]) > 0) {
+          print "$path/:\n" unless $path eq '.' && !defined $lspath;
+          for my $key (all_keys($stack->[-1])) {
+              print "  " unless $path eq '.' && !defined $lspath;
+              print entry_str($stack->[-1], $key), "\n";
+          }
+      } else {
+          print $path, "\n";
+      }
+  });
+}
+
+sub cat {
+    my ($current, $path) = @_;
+
+    map_path($current, $path, sub {
+      my ($stack, $path) = @_;
+      if (size($stack->[-1]) > 0) {
+          print "$path/ with ", size($stack->[-1]), " keys\n";
+      } else {
+          print "$path = $stack->[-1]\n";
+      }
+  });
+}
+
+sub printExcess {
+    my ($total, $printed) = @_;
+    print "...plus " . ($total - $printed) . " more, $total total... (limit N to display more than $MAX)\n";
+}
+
+sub enter {
+    my ($struct, $key, $suppress_error) = @_;
+    if (UNIVERSAL::isa($struct, 'HASH')) {
+        return $struct->{$key};
+    } elsif (UNIVERSAL::isa($struct, 'ARRAY')) {
+        if ($key !~ /^\d+$/) {
+            print "Non-numeric key '$key' for array\n" unless $suppress_error;
+            return;
+        }
+        return $struct->[$key];
+    } else {
+        return if $suppress_error;
+        print "No such key '$key'\n" unless $suppress_error;
+        return;
+    }
+}
+
+sub append {
+    my ($stack, $key, $suppress_error) = @_;
+    my $obj = enter($stack->[-1], $key, $suppress_error) // return;
+    return [ @$stack, $obj ];
+}
+
+sub enterPath {
+    my ($stack, $path) = @_;
+    my @stack = @$stack;
+    foreach (split(/\//, $path)) {
+        push @stack, enter($stack[-1], $_)
+            or return;
+    }
+    return \@stack;
+}
+
+sub size {
+    my ($value) = @_;
+
+    if (UNIVERSAL::isa($value, 'HASH')) {
+        return scalar(keys %$value);
+    } elsif (UNIVERSAL::isa($value, 'ARRAY')) {
+        return scalar(@$value);
+    } else {
+        return 0;
+    }
+}
+
+sub chkey {
+    my ($key) = @_;
+
+    if ($key eq '.') {
+        return 1;
+    } elsif ($key eq '..') {
+        if (@current > 1) {
+            pop(@current);
+            pop(@$current);
+            return 1;
+        } else {
+            print "Already at top\n";
+        }
+    } else {
+        my $new = enter($current->[-1], $key)
+          or return;
+        if (!ref($new)) {
+            print "'$key' is a leaf\n";
+        } else {
+            push @current, $key;
+            push @$current, $new;
+            return 1;
+        }
+    }
+
+    return;
+}
+
+sub all_keys {
+    my ($value) = @_;
+    if (UNIVERSAL::isa($value, 'HASH')) {
+        return keys %$value;
+    } elsif (UNIVERSAL::isa($value, 'ARRAY')) {
+        return 0 .. $#$value;
+    } else {
+        return;
+    }
+}
+
+sub chpath {
+    my ($path) = @_;
+    my $old_current = $current;
+    my @old_current = @current;
+
+    if ($path =~ s!^/!!) {
+        $current = [ $struct ];
+        splice(@current, 1);
+    }
+
+    foreach (split(/\//, $path)) {
+        if (!chkey($_)) {
+            $current = $old_current;
+            @current = @old_current;
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+# This isn't exactly right, but it's kinda close
+sub shortjoin {
+    my $maxlen = shift;
+
+    my (@head, @tail);
+    my $left = $maxlen - 1;
+    while (@_ > 0 && $left > 0) {
+        if ($left > length($_[-1]) + 1) {
+            unshift @tail, pop(@_);
+            $left -= length($tail[-1]) + 1;
+            last if @_ == 0;
+            if ($left > length($_[0]) + 1) {
+                push @head, shift(@_);
+                $left -= length($head[-1]) + 1;
+            }
+        } else {
+            last;
+        }
+    }
+
+    if (@_ > 0) {
+        push @head, "...";
+    }
+
+    return join("/", "", @head, @tail);
+}
