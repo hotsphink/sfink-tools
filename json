@@ -310,7 +310,9 @@ sub joinpath {
 }
 
 sub path_stacks {
-    my ($stack, $obj, $component, $sofar, $suppress_errors) = @_;
+    my ($stack, $obj, $component, $sofar, $suppress_errors, $container_only) = @_;
+    # $container_only is probably still not quite right, since I think an
+    # alternate group might be sometimes container-only, sometimes not
 
     my @stacks;
     if ($component eq '*') {
@@ -318,15 +320,20 @@ sub path_stacks {
             my $s = append($stack, $key, 'no-errors') // next;
             push @stacks, [ $s, joinpath($sofar, $key) ];
         }
-    } elsif ($component eq '**') {
+    } elsif ($component eq '**' && !$container_only) {
         for my $path (all_leaf_paths($obj)) {
             my $s = appendPath($stack, $path, 'no-errors') // next;
             push @stacks, [ $s, joinpath($sofar, $path) ];
         }
-    } elsif ($component eq '**/') {
+    } elsif ($component eq '**' && $container_only) {
         for my $path (all_container_paths($obj)) {
             my $s = appendPath($stack, $path, 'no-errors') // next;
             push @stacks, [ $s, joinpath($sofar, $path) ];
+        }
+    } elsif ($component =~ /^\{(.*)\}$/) {
+        my $guts = $1;
+        for my $alt (split(/,/, $guts)) {
+            push @stacks, path_stacks($stack, $obj, $alt, $sofar, $suppress_errors, $container_only);
         }
     } else {
         $sofar = joinpath($sofar, $component);
@@ -371,8 +378,7 @@ sub map_path {
         }
     } else {
         # "$first/$rest"
-        $first = '**/' if $first eq '**';
-        foreach (path_stacks($stack, $obj, $first, $sofar, $suppress_errors)) {
+        foreach (path_stacks($stack, $obj, $first, $sofar, $suppress_errors, 1)) {
             my ($stack, $sofar) = @$_;
             $suppress_errors ||= $first =~ /^[\*\{]/;
             map_path($stack, $rest, $callback, $sofar, $suppress_errors);
@@ -388,7 +394,6 @@ sub popstack {
 sub ls {
     my ($current, $lspath) = @_;
 
-    $DB::single = 1;
     map_path($current, $lspath, sub {
       my ($stack, $path) = @_;
       if (size($stack->[-1]) > 0) {
