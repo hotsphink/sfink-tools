@@ -309,6 +309,41 @@ sub joinpath {
     }
 }
 
+sub path_stacks {
+    my ($stack, $obj, $component, $sofar, $suppress_errors) = @_;
+
+    my @stacks;
+    if ($component eq '*') {
+        for my $key (all_keys($obj)) {
+            my $s = append($stack, $key, 'no-errors') // next;
+            push @stacks, [ $s, joinpath($sofar, $key) ];
+        }
+    } elsif ($component eq '**') {
+        for my $path (all_leaf_paths($obj)) {
+            my $s = appendPath($stack, $path, 'no-errors') // next;
+            push @stacks, [ $s, joinpath($sofar, $path) ];
+        }
+    } elsif ($component eq '**/') {
+        for my $path (all_container_paths($obj)) {
+            my $s = appendPath($stack, $path, 'no-errors') // next;
+            push @stacks, [ $s, joinpath($sofar, $path) ];
+        }
+    } else {
+        $sofar = joinpath($sofar, $component);
+        if ($component eq '.') {
+            push @stacks, [ $stack, $sofar ];
+        } elsif ($component eq '..') {
+            push @stacks, [ popstack($stack), $sofar ];
+        } else {
+            my $s = append($stack, $component, $suppress_errors)
+                or return;
+            push @stacks, [ $s, $sofar ];
+        }
+    }
+
+    return @stacks;
+}
+
 # Callback is invoked with (object, path). 'object' is the structure at the
 # given path. It may be a leaf or a struct.
 sub map_path {
@@ -329,49 +364,18 @@ sub map_path {
 
     my $obj = $stack->[-1];
     if (!defined $rest) {
-        # Single component
-        if ($path eq '*') {
-            for my $key (all_keys($obj)) {
-                my $newstack = append($stack, $key, 'no-errors') // next;
-                $callback->($newstack, joinpath($sofar, $key));
-            }
-        } elsif ($path eq '**') {
-            for my $path (all_leaf_paths($obj)) {
-                my $s = appendPath($stack, $path, 'no-errors') // next;
-                $callback->($s, joinpath($sofar, $path));
-            }
-        } elsif ($path eq '.') {
-            $callback->($stack, joinpath($sofar, $path));
-        } elsif ($path eq '..') {
-            $callback->(popstack($stack), joinpath($sofar, $path));
-        } else {
-            my $s = append($stack, $path, $suppress_errors)
-              or return;
-            $callback->($s, joinpath($sofar, $path));
+        # Single component "$path"
+        foreach (path_stacks($stack, $obj, $path, $sofar, $suppress_errors)) {
+            my ($stack, $sofar) = @$_;
+            $callback->($stack, $sofar);
         }
     } else {
-        if ($first eq '*') {
-            for my $key (all_keys($obj)) {
-                my $s = append($stack, $key) // next;
-                map_path($s, $rest, $callback, joinpath($sofar, $key),
-                         'no-errors');
-            }
-        } elsif ($first eq '**') {
-            for my $path (all_container_paths($obj)) {
-                my $s = appendPath($stack, $path, 1) // next;
-                map_path($s, $rest, $callback, joinpath($sofar, $path),
-                    'no-errors');
-            }
-        } elsif ($first eq '.') {
-            map_path($stack, $rest, $callback, joinpath($sofar, $first),
-                     $suppress_errors);
-        } elsif ($first eq '..') {
-            map_path(popstack($stack), $rest, $callback, joinpath($sofar, $first),
-                     $suppress_errors);
-        } else {
-            my $s = append($stack, $first, $suppress_errors)
-              or return;
-            map_path($s, $rest, $callback, joinpath($sofar, $first), $suppress_errors);
+        # "$first/$rest"
+        $first = '**/' if $first eq '**';
+        foreach (path_stacks($stack, $obj, $first, $sofar, $suppress_errors)) {
+            my ($stack, $sofar) = @$_;
+            $suppress_errors ||= $first =~ /^[\*\{]/;
+            map_path($stack, $rest, $callback, $sofar, $suppress_errors);
         }
     }
 }
@@ -384,6 +388,7 @@ sub popstack {
 sub ls {
     my ($current, $lspath) = @_;
 
+    $DB::single = 1;
     map_path($current, $lspath, sub {
       my ($stack, $path) = @_;
       if (size($stack->[-1]) > 0) {
