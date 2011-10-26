@@ -37,7 +37,8 @@ Usage: $0 <filename.json> [initial-path]
 
 Paths:
 
-    PATHs are slash-separated sequences of key names, '.', '..', or '*'.
+    PATHs are slash-separated sequences of key names, '.', '..', '*', or '**'.
+    '**' means a recursive search.
 
 Delete Specifications:
 
@@ -131,7 +132,9 @@ LS: while(1) {
         $term->addhistory($input) if $input =~ /\S/;
 
         $input =~ s/\s+$//;
-        if ($input =~ /^cd (.*?)$/) {
+        if ($input eq 'help') {
+            help();
+        } elsif ($input =~ /^cd (.*?)$/) {
             next LS if chpath($1);
         } elsif ($input =~ /^cat$/) {
             cat($current);
@@ -235,7 +238,7 @@ sub search {
             print ": $stack->[-1]";
         }
         print "\n";
-             });
+    });
 }
 
 sub set_value {
@@ -309,7 +312,7 @@ sub joinpath {
 # Callback is invoked with (object, path). 'object' is the structure at the
 # given path. It may be a leaf or a struct.
 sub map_path {
-    my ($stack, $path, $callback, $sofar) = @_;
+    my ($stack, $path, $callback, $sofar, $suppress_errors) = @_;
 
     $path //= '.';
 
@@ -329,32 +332,46 @@ sub map_path {
         # Single component
         if ($path eq '*') {
             for my $key (all_keys($obj)) {
-                $callback->(append($stack, $key), joinpath($sofar, $key));
+                my $newstack = append($stack, $key, 'no-errors') // next;
+                $callback->($newstack, joinpath($sofar, $key));
+            }
+        } elsif ($path eq '**') {
+            for my $path (all_leaf_paths($obj)) {
+                my $s = appendPath($stack, $path, 'no-errors') // next;
+                $callback->($s, joinpath($sofar, $path));
             }
         } elsif ($path eq '.') {
             $callback->($stack, joinpath($sofar, $path));
         } elsif ($path eq '..') {
             $callback->(popstack($stack), joinpath($sofar, $path));
         } else {
-            my $s = append($stack, $path)
+            my $s = append($stack, $path, $suppress_errors)
               or return;
             $callback->($s, joinpath($sofar, $path));
         }
     } else {
         if ($first eq '*') {
             for my $key (all_keys($obj)) {
-                my $s = append($stack, $key)
-                  or return;
-                map_path($s, $rest, $callback, joinpath($sofar, $key));
+                my $s = append($stack, $key) // next;
+                map_path($s, $rest, $callback, joinpath($sofar, $key),
+                         'no-errors');
+            }
+        } elsif ($first eq '**') {
+            for my $path (all_container_paths($obj)) {
+                my $s = appendPath($stack, $path, 1) // next;
+                map_path($s, $rest, $callback, joinpath($sofar, $path),
+                    'no-errors');
             }
         } elsif ($first eq '.') {
-            map_path($stack, $rest, $callback, joinpath($sofar, $first));
+            map_path($stack, $rest, $callback, joinpath($sofar, $first),
+                     $suppress_errors);
         } elsif ($first eq '..') {
-            map_path(popstack($stack), $rest, $callback, joinpath($sofar, $first));
+            map_path(popstack($stack), $rest, $callback, joinpath($sofar, $first),
+                     $suppress_errors);
         } else {
-            my $s = append($stack, $first)
+            my $s = append($stack, $first, $suppress_errors)
               or return;
-            map_path($s, $rest, $callback, joinpath($sofar, $first));
+            map_path($s, $rest, $callback, joinpath($sofar, $first), $suppress_errors);
         }
     }
 }
@@ -422,6 +439,14 @@ sub append {
     return [ @$stack, $obj ];
 }
 
+sub appendPath {
+    my ($stack, $path, $suppress_error) = @_;
+    for my $component (split(/\//, $path)) {
+        $stack = append($stack, $component, 1) // return;
+    }
+    return $stack;
+}
+
 sub enterPath {
     my ($stack, $path) = @_;
     my @stack = @$stack;
@@ -481,6 +506,43 @@ sub all_keys {
     } else {
         return;
     }
+}
+
+# FIXME: Does not distinguish between a leaf value and an empty container
+sub all_leaf_paths {
+    my ($obj) = @_;
+    return $obj if ! ref($obj);
+
+    my @paths;
+    for my $key (all_keys($obj)) {
+        my $entry = enter($obj, $key, 'no-errors');
+        if (ref($entry)) {
+            for my $path (all_leaf_paths($entry)) {
+                push @paths, "$key/$path";
+            }
+        } else {
+            push @paths, $key;
+        }
+    }
+
+    return @paths;
+}
+
+sub all_container_paths {
+    my ($obj) = @_;
+    return if ! ref($obj);
+
+    my @paths;
+    for my $key (all_keys($obj)) {
+        my $entry = enter($obj, $key, 'no-errors');
+        next if ! ref($entry);
+        push @paths, $key;
+        for my $path (all_container_paths($entry)) {
+            push @paths, "$key/$path";
+        }
+    }
+
+    return @paths;
 }
 
 sub chpath {
