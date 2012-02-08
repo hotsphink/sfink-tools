@@ -35,6 +35,7 @@ Usage: json <filename.json> [initial-path]
                              for a description of SPEC)
     set KEY VALUE          - modify an existing value (VALUE may optionally
                            - be quoted)
+    mv PATH PATH           - move a subtree
     grep [-l] PATTERN PATH - search for PATTERN in given PATH
     write [-pretty] [FILENAME]
                            - write out the whole structure as JSON. Use '-' as
