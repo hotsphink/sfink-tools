@@ -495,7 +495,8 @@ sub cat {
     map_path($current, $path, sub {
         my ($stack, $path) = @_;
         if (size($stack->[-1]) > 0) {
-            print "$path/ with ", size($stack->[-1]), " keys\n";
+            print "$path/ with ", size($stack->[-1]), " keys:\n";
+            print to_json($stack->[-1]), "\n";
         } elsif (! ref $stack->[-1]) {
             print "$path = $stack->[-1]\n";
         } elsif (UNIVERSAL::isa($stack->[-1], 'ARRAY')) {
