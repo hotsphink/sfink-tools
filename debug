@@ -1,7 +1,10 @@
 #!/usr/bin/perl
 
-# This script opens up an emacs window with the given program running
-# under a debugger, all automagic-like:
+# This script opens up an emacs window with the given program running under a
+# debugger, all automagic-like. Usual usage is to prepend 'debug' to the
+# command line you're running. It generally works to pass it to driver scripts
+# that invoke gdb for you as well (eg use --debugger=debug in place of
+# --debugger=gdb). It autodetects which sort of debugger to use:
 #
 #  - For binaries, the debugger will be gdb
 #  - For perl scripts, it will be perldb
@@ -9,6 +12,8 @@
 #    general, huh?) and use the -g flag
 #  - For cases I'm not going to document and don't currently remember, run
 #    under the Effects Engine (it doesn't exist; nothing to see here.)
+#  - If expicitly requested, the debugger will be jorendb. But by default,
+#    running a JS file will use gdb.
 #
 # The command given may be a regular command in $PATH, a shell alias,
 # or even a shell function (of a very restricted and undocumented syntax).
@@ -24,6 +29,8 @@
 use strict;
 use warnings;
 use File::Temp qw(tempdir);
+use Cwd qw(abs_path);
+use File::Basename qw(dirname);
 
 my $TMPDIR = tempdir(CLEANUP => 1);
 
@@ -34,30 +41,48 @@ if ($ENV{DEBUG_EDITOR}) {
   @EMACS = $ENV{DEBUG_EDITOR} =~ /(\".*?\"|\'.*?\'|\S+)/g;
 }
 
-my $gdb = "/home/sfink/src/archer/gdb/gdb";
-$gdb = "gdb" if (! -x $gdb);
+# my $gdb = "/home/sfink/src/gdb-CVS/gdb/gdb";
+# my $gdb = "/home/sfink/src/archer/gdb/gdb";
+my $gdb = "gdb";
+# $gdb = "gdb" if (! -x $gdb);
 
 my $PERL = "/usr/bin/perl";
 $PERL = "perl" if (! -x $PERL);
 
 my %opt = ( interactive => $ENV{GDB_INTERACTIVE},
-            force_perl => undef,
-            force_gdb => undef,
           );
 
-$opt{interactive} = 1 if $ENV{DBG} && $ENV{DBG} eq 'wait';
+$opt{interactive} = 1 if ($ENV{DBG} || '') eq 'startup';
+
+my $debugger;
+my $jorendb;
 
 # Ugh... custom arg handling because this script is supposed to be a
 # transparent wrapper, and so can't use a standard getopt-ish handler.
 my @local_args;
-while (@ARGV && $ARGV[0] =~ /^-/) {
+while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
   local $_ = shift(@ARGV);
+
+  if (defined $1) {
+      $ENV{$1} = $2;
+      next;
+  }
+
   if ($_ eq '-i') {
     $opt{interactive} = 1;
   } elsif ($_ eq '-p') {
-    $opt{force_perl} = 1;
-  } elsif ($_ eq '--notperl' || $_ eq '--gdb') {
-    $opt{force_gdb} = 1;
+    die if $debugger;
+    $debugger = 'perl';
+  } elsif ($_ eq '--gdb') {
+    die if $debugger;
+    $debugger = 'gdb';
+  } elsif ($_ eq '--js' || $_ eq '-j') {
+    die if $debugger;
+    $debugger = 'jorendb';
+  } elsif (/^--js=(.*)/) {
+    die if $debugger;
+    $debugger = 'jorendb';
+    $jorendb = $1;
   } elsif ($_ eq '--check') {
     $opt{pattern} = shift(@ARGV);
   } elsif (/^--check=(.*)/) {
@@ -73,10 +98,6 @@ while (@ARGV && $ARGV[0] =~ /^-/) {
   push @local_args, $_;
 }
 
-if ($opt{force_perl} && $opt{force_gdb}) {
-    die "You don't really know what you're doing, do you?";
-}
-
 sub usage {
   my ($msg) = @_;
   if (defined $msg) {
@@ -84,26 +105,29 @@ sub usage {
     print $msg, "\n\n";
   }
   print <<'END';
-Usage: debug [options] <program> args...
+Usage: debug [env=VAL...] [options] <program> args...
 
    -h               Display this help message
    --version        Print out the version of this script
    -i               Interactive mode; do not start running the program
    -p               Perl mode (useful when autodetection not possible)
-   --notperl        Gdb mode
    --gdb            Gdb mode
-   --check PATTERN  Umm... insert a startup check into emacs that kills
-                    emacs if the given pattern is found in the output buffer.
-                    Err... I have no memory of what this was for. Must've
-                    been useful, to go to the trouble of implementing it.
+   --js[=PATH]      Jorendb mode
+   --check PATTERN  Run the command and scan its output for PATTERN. If it is
+                    found, kill emacs and continue. This is useful when you
+                    want to embed a call to 'debug' into the invocation of a
+                    helper program, but you only want to debug some of the
+                    runs of that helper program (eg the ones that crash, or
+                    report a problem or whatever.) Perhaps this should be
+                    named --continue-if or something.
 
 Various environment variables can affect the operation. Let's see...
   $DBG :
      set to qr/EXPRESSION/ to only fire up emacs for programs
-     that match the given regex. Useful when you're running
+     that match the given regex. Useful when you are running
      a program that runs another program that runs the one you
      want to debug. Or, as a wholly pointless special case, if
-     this is set to "wait" then it is the same as GDB_INTERACTIVE.
+     this is set to "startup" then it is the same as GDB_INTERACTIVE.
   $DBG_DISPLAY :
      if this is set, it will be given to gdb to use as the $DISPLAY
      for the debugger emacs window. This is to allow running the debug
@@ -125,7 +149,7 @@ END
 
 my ($COMMAND, @args) = @ARGV;
 
-# Allow the command to be an alias.
+# Allow the command to be an alias. Hackety hack hack hack.
 if ($COMMAND !~ m!/!) {
   chomp(my $which = qx!which $COMMAND 2>/dev/null!);
   if ($which =~ m!/!) {
@@ -142,8 +166,8 @@ if ($COMMAND !~ m!/!) {
         # rid of them.
         $token =~ s/^\W+//;
 
-        $expansion =~ s/^\'// && $expansion =~ s/\'$//;
-        $expansion =~ s/^\"// && $expansion =~ s/\"$//;
+        $expansion = $1 if $expansion =~ /^'(.*)'$/;
+        $expansion = $1 if $expansion =~ /^"(.*)"$/;
         if ($token eq $COMMAND) {
           print "  setting COMMAND to $expansion\n";
           $COMMAND = $expansion;
@@ -189,7 +213,7 @@ if (`file -L $COMMAND` =~ /shell script/) {
     if (@local_args) {
         push @debug_args, "-a", join(" ", @local_args);
     }
-    exec($COMMAND, "-g", "-d" => $0, @debug_args, @args);
+    exec($COMMAND, "-g", "-d" => $0, @debug_args, @args) or die;
 }
 
 # Check whether we should skip debugging this invocation
@@ -197,50 +221,15 @@ if (`file -L $COMMAND` =~ /shell script/) {
 if ($ENV{DBG} && $ENV{DBG} =~ /qr/) {
         my $pattern = eval $ENV{DBG};
         if (join(" ", @ARGV) !~ $pattern) {
-            exec(@ARGV);
+            exec(@ARGV) or die;
         }
 }
 
 mkdir("$TMPDIR/debug-args", 0777);
 unlink(glob("$TMPDIR/debug-args/*"));
 
-# Figure out whether to run the perl debugger, and if so, massage the
-# command line.
-#
-# Case 1: debug perl -I /tmp somescript.pl a b c
-#  - COMMAND=perl somescript.pl
-#  - args=a b c
-# Case 2: debug somescript.pl a b c
-#  - COMMAND=perl somescript.pl
-#  - args=a b c
-# Case 3: debug perl -I /tmp -e 'print "1\n"' a b c
-#  - COMMAND=perl -e 1
-#  - args=-e 'print "1\n"' a b c
-# Case 4: debug -p firefox -I /tmp spot.xml
-#  - COMMAND=firefox
-#  - args=spot.xml
-#  - FIXME
-# Case 5: debug -p reactor -I /tmp -e 'print "1\n"' spot.xml
-#  - COMMAND=reactor
-#  - args=spot.xml
-#
-my $debug_perl;
-if ($opt{force_gdb}) {
-    # Do not treat as perl
-} elsif ($COMMAND =~ /\bperl$/) {
-    $debug_perl = 1;
-    fix_spaces(\@args);
-    my $fi = perl_upto_filename(@args);
-    $COMMAND = join(" ", $COMMAND, splice(@args, 0, $fi + 1));
-} elsif (`file -L $COMMAND` =~ /perl/) {
-    $debug_perl = 1;
-    $COMMAND = "$PERL -d $COMMAND";
-} elsif ($opt{force_perl}) {
-    $debug_perl = 1;
-    fix_spaces(\@args);
-    $COMMAND = join(" ", map { protect($_) } $COMMAND, "-d", @args);
-}
-
+# Find the dividing point in "perl -a -b -c somefile.pl" between the perl
+# invocation with its arguments, and the script to be invoked.
 sub perl_upto_filename {
   my $i = 0;
   while ($i < @_) {
@@ -253,10 +242,10 @@ sub perl_upto_filename {
         }
       } else {
         if ($_[$i] =~ /^-\w*e$/) {
-          # Bundle of options like -lne (or just -e)
+          # Bundle of options containing -e, eg '-lne' or just '-e'
           $i++; # Skip script
 #        } elsif ($_[$i] =~ /^-.$/) {
-#          $i++; # Skip argument
+#          $i++; # Skip single-char option argument BAD IDEA b/c it may not have an arg
         } else {
           # Assume no argument or argument bundled with option eg -I/tmp
         }
@@ -279,7 +268,7 @@ sub perl_upto_filename {
 # because it's the first argument that doesn't start with a dash. So prefix
 # it with "-1;" just so it starts with a dash.
 #
-# I could do by replacing -e ... with just the filename where I wrote the
+# I could replace -e ... with just the filename where I wrote the
 # script, but that wouldn't behave the same for
 #
 #   perl -e 'print ' -e '"Hello\n"'
@@ -290,7 +279,7 @@ sub perl_upto_filename {
 #   -1;print-1;"Hello\n"
 #
 # But it works when you aren't being crazy and splitting individual lines
-# up with multiple -e's.
+# up with multiple -e's. 
 #
 # This subroutine also smushes -I /foo into -I/foo to accommodate the
 # same gud brain damage.
@@ -300,18 +289,18 @@ sub fix_spaces {
   my $e_ctr = 0;
 
   for (my $i = 0; $i < @$array; ++$i) {
-    if ($array->[$i] eq '-e') {
-      my $fn = "$TMPDIR/debug-args/expr-$e_ctr.pl";
-      $e_ctr++;
-      open(my $fh, ">", $fn) or die "Unable to write $fn: $!";
-      print $fh $array->[$i+1];
-      close $fh;
-      $array->[$i+1] = "-1;do'$fn'";
-      ++$i;
-    } elsif ($array->[$i] eq '-I') {
-      $array->[$i] .= $array->[$i+1];
-      splice(@$array, $i + 1, 1);
-    }
+      if ($array->[$i] =~ /^-.*e$/) {
+          my $fn = "$TMPDIR/debug-args/expr-$e_ctr.pl";
+          $e_ctr++;
+          open(my $fh, ">", $fn) or die "Unable to write $fn: $!";
+          print $fh $array->[$i+1], "\n";
+          close $fh;
+          $array->[$i+1] = "-1;do'$fn'";
+          ++$i;
+      } elsif ($array->[$i] eq '-I') {
+          $array->[$i] .= $array->[$i+1];
+          splice(@$array, $i + 1, 1);
+      }
   }
 }
 
@@ -321,24 +310,129 @@ sub protect {
     return $_;
 }
 
-if ($debug_perl) {
+# Figure out whether to run the perl debugger, and if so, massage the
+# command line.
+#
+# Case 1: debug perl -I /tmp somescript.pl a b c
+#  - COMMAND=perl somescript.pl
+#  - args=a b c
+# Case 2: debug somescript.pl a b c
+#  - COMMAND=perl somescript.pl
+#  - args=a b c
+# Case 3: debug perl -I /tmp -e 'print "1\n"' a b c
+#  - COMMAND=perl -e 1
+#  - args=-e 'print "1\n"' a b c
+# Case 4: debug -p firefox -I /tmp spot.html
+#  - COMMAND=firefox
+#  - args=spot.html
+#  - FIXME
+# Case 5: debug -p reactor -I /tmp -e 'print "1\n"' spot.xml
+#  - COMMAND=reactor
+#  - args=spot.xml
+#
+my $debug_perl;
+if (! $debugger) {
+    if ($COMMAND =~ /\bperl$/) {
+        $debugger = 'perl';
+        fix_spaces(\@args);
+        my $fi = perl_upto_filename(@args);
+        $COMMAND = join(" ", $COMMAND, "-d", splice(@args, 0, $fi + 1));
+    } elsif (`file -L $COMMAND` =~ /[pP]erl/) {
+        $debugger = 'perl';
+        $COMMAND = "$PERL -d $COMMAND";
+# Want to default to gdb
+#    } elsif ($COMMAND =~ /\bjs$/) {
+#        $debugger = 'jorendb';
+    } else {
+        $debugger = 'gdb';
+    }
+} elsif ($debugger eq 'perl') {
+    fix_spaces(\@args);
+    $COMMAND = join(" ", map { protect($_) } $COMMAND, "-d", @args);
+}
+
+if ($debugger eq 'perl') {
   my $argfile = "$TMPDIR/debug-args/perl-args-$$";
   open(ARGFILE, ">$argfile") or die "create $argfile: $!";
   print ARGFILE "$_\n" foreach (@args);
   close ARGFILE;
 
-  exec(@EMACS, "--eval", qq[(progn (perldb "$COMMAND") (insert-string "chdir('$ENV{CWD}')") (comint-send-input) (insert-string "chomp(\@DB::ARGS=`cat $argfile`)") (comint-send-input) (insert-string "\@ARGV=\@DB::ARGS") (comint-send-input))]);
+  my $eval = <<"END";
+(perldb "$COMMAND")
+(insert-string "chdir('$ENV{CWD}')")
+(comint-send-input)
+(insert-string "chomp(\@DB::ARGS=`cat $argfile`)")
+(comint-send-input)
+(insert-string "\@ARGV=\@DB::ARGS")
+(comint-send-input)
+END
+
+# For whatever reason, the process sentinel stuff doesn't take here
+#
+#   unless ($opt{interactive}) {
+#       $eval .= <<"END";
+# (set-process-sentinel
+#  (get-buffer-process (current-buffer))
+#  (lambda (process event)
+#   (if (equal event "finished\n") (kill-emacs))))
+# (insert-string "DB::NonStop(1)")
+# (comint-send-input)
+# (insert-string "c")
+# (comint-send-input)
+# END
+#   }
+
+  $eval =~ s/\n/ /g;
+
+  exec(@EMACS, "--eval", "(progn $eval)") or die;
+} elsif ($debugger eq 'jorendb') {
+  if (grep { $_ eq '--fuzzing-safe' } @args) {
+    die "jorendb requires fuzzing-unsafe functions";
+  }
+
+  $COMMAND = Cwd::abs_path($COMMAND);
+  if (!$jorendb) {
+      $jorendb = Cwd::abs_path(dirname($COMMAND) . "/../../../../js/examples");
+      if (!$jorendb) {
+          $jorendb = Cwd::abs_path(dirname($COMMAND) . "/../../../js/examples");
+      }
+  }
+  die "cannot find jorendb.js" if !$jorendb;
+  if (! -f $jorendb) {
+    $jorendb .= "/jorendb.js";
+  }
+  die "cannot find jorendb.js" if ! -f $jorendb;
+      
+  unshift(@args, "-f", $jorendb, "--");
+
+  my $cwd = Cwd::getcwd();
+  print "setting default-directory = $cwd\n";
+
+  # Very basic quoting. Needs to be compatible with emacs's
+  # split-and-quote-strings, which you can check against
+  # combine-and-quote-strings.
+  @args = map { s/ /\\ /g; $_ } @args;
+
+  my $eval = <<"END";
+(let ((default-directory "$cwd")
+      (gud-chdir-before-run nil))
+ (cd "$cwd")
+ (gud-gdb "$COMMAND @args"))
+END
+  $eval =~ s/\n/ /g;
+
+#  exec("debug", "-i", @EMACS, "--eval", "(progn $eval)") or die;
+  exec(@EMACS, "--eval", "(progn $eval)") or die;
 }
 
 # From here on, we're going to use gdb
-else {
-  # The rx* aliases actually point to shell scripts, so grab the binary
-  # out of them.
-  if (`file $COMMAND` =~ /shell script/) {
+
+# The rx* aliases actually point to shell scripts, so grab the binary
+# out of them.
+if (`file $COMMAND` =~ /shell script/) {
     chomp($COMMAND = `$COMMAND --path`);
     die "Cannot run debug on shell scripts" if $COMMAND !~ /\w/;
     $COMMAND .= "/reactor";
-  }
 }
 
 # Set the arguments
@@ -346,22 +440,28 @@ my $fname = "$TMPDIR/debug-args/c-args-$$";
 open(ARGS, ">$fname") or die "create $fname: $!";
 my $str = "set args ";
 foreach (@args) {
-  if (/'/) {
-    # Problem: whatever gdb does to pass args to the shell doesn't seem
-    # to handle backslashed single quotes very well.
-    if (/"/) {
-      # We're screwed. Just use the backslashes.
-      warn "Warning: arguments contain both single- and double-quotes. I have no way of protecting them properly.\n";
-      s/\'/\\\'/g;
-      $str .= "'$_' ";
+    # Yet another hack. I haven't figured out a way to pass through newlines
+    # embedded within arguments. So far, replacing them with a space has been
+    # ok. Obviously, it's not really accurate.
+    s/\n/ /g;
+
+    if (/'/) {
+        # Problem: whatever gdb does to pass args to the shell doesn't seem
+        # to handle backslashed single quotes very well.
+        if (/"/) {
+            # We're screwed. Just use the backslashes.
+            warn "Warning: arguments contain both single- and double-quotes. 'debug' has no way of protecting them properly.\n";
+            s/\'/\\\'/g;
+            $str .= "'$_' ";
+        } else {
+            $str .= "\"$_\" ";
+        }
     } else {
-      $str .= "\"$_\" ";
+        s/\'/\\\'/g;
+        $str .= "'$_' ";
     }
-  } else {
-    s/\'/\\\'/g;
-    $str .= "'$_' ";
-  }
-}      
+}
+
 chop($str) if @args;
 print ARGS $str, "\n";
 my $init_eval = <<"END";
@@ -373,6 +473,9 @@ END
 # (insert-string "set annotate 3")
 # (comint-send-input)
 
+# if DBG_DISPLAY is defined in the environment, run the debugged command with
+# its DISPLAY set to the current $DISPLAY, if any, but run emacs itself with
+# DISPLAY=$DBG_DISPLAY.
 if (defined $ENV{DBG_DISPLAY}) {
   my $app_display = $ENV{DISPLAY};
   $ENV{DISPLAY} = $ENV{DBG_DISPLAY};
@@ -392,7 +495,9 @@ unless ($opt{interactive}) {
 END
 }
 
-# WTF was I doing here?
+# If the given pattern is seen in the output, discard this whole debug session
+# and exit. We're probably being called by some driver script that will
+# keep going.
 if ($opt{pattern}) {
   $init_eval .= <<"END";
   (beginning-of-buffer)
@@ -401,9 +506,11 @@ END
 # (search-buffer "$opt{pattern}" '(insert "Stopping") '(kill-emacs))
 }
 
-exec(@EMACS, "--eval", "(progn (gdb \"$gdb --annotate=3 $COMMAND\") $init_eval)");
+#exec(@EMACS, "--eval", "(progn (gud-gdb \"$gdb --annotate=3 $COMMAND\") $init_eval)");
+exec(@EMACS, "--eval", "(progn (gud-gdb \"$gdb --fullname $COMMAND\") $init_eval)");
+#exec(@EMACS, "--eval", "(progn (gdb \"$gdb -i=mi $COMMAND\") $init_eval)");
 
-# Copyright (c) 2002-2011 by Steve Fink. All rights reserved.
+# Copyright 2002-2013 by Steve Fink. All rights reserved.
 #
 # You may do anything you want with this script, as long as you don't
 # use it to directly or indirectly cause harm to any mythical
@@ -413,7 +520,11 @@ exec(@EMACS, "--eval", "(progn (gdb \"$gdb --annotate=3 $COMMAND\") $init_eval)"
 #
 # But if you're nice, you'll properly document all the funky options, clean it
 # up, and send it back to me at sphink@gmail.com. And you seem like a really
-# nice person to me. (I am not; somebody actually did this once, and I
-# completely ignored him. But then, he also removed the non-Perl stuff, which
+# nice person to me. (I, however, am not; somebody actually did this once, and
+# I completely ignored him. But then, he also removed the non-Perl stuff, which
 # is probably a good idea -- this ought to be split into language-specific
-# scripts.)
+# scripts. But I use the gdb portion far more than the perl portion these
+# days.)
+#
+# If someone can make this work as smoothly with Python, that would be awesome.
+# So far, though, I'm finding pdb to be pretty limited.
