@@ -1,0 +1,244 @@
+#!/usr/bin/perl
+
+# Recover the panel on a single display, briefly:
+# wmctrl -x -r xfce4-panel.Xfce4-panel -e 0,0,1200,384,3
+
+use strict;
+use warnings;
+use Getopt::Long;
+
+my $do_get;
+my $do_single;
+my $do_shrink;
+my $do_std_3mon;
+my $above;
+my $fmt_cmd;
+GetOptions("g|get!" => \$do_get,
+           "s|single!" => \$do_single,
+           "shrink|resize!" => \$do_shrink,
+           "xr" => \$do_std_3mon,
+           "above!" => \$above,
+           "cmd!" => \$fmt_cmd,
+          )
+  or die "bad dog!\n";
+
+sub get_workspaces {
+    my @workspaces;
+
+    open(my $fh, "wmctrl -d |");
+    while(<$fh>) {
+        chomp;
+        my ($n, $active, $dims, $vp, $wapos, $wadims, $name) =
+          /^(\d+)\s+(\S)\s+DG: (\S+)\s+VP: (\S+)\s+WA: (\S+) (\S+)\s+(.*)/;
+        my $ws = { 'active' => ($active eq '*'),
+                   'name' => $name };
+        my ($w, $h) = split(/x/, $dims);
+        $ws->{desktop_geometry} = [ $w, $h ];
+        my ($x, $y) = split(/,/, $wadims);
+        $ws->{viewport_position} = [ $x, $y ];
+        ($x, $y) = split(/,/, $wapos);
+        $ws->{workarea_pos} = [ $x, $y ];
+        ($w, $h) = split(/x/, $wadims);
+        $ws->{workarea_geometry} = [ $w, $h ];
+        $workspaces[$n] = $ws;
+    }
+
+    return \@workspaces;
+}
+
+my $workspace;
+
+{
+    my $workspaces = get_workspaces();
+    ($workspace) = grep { $_->{active} } @$workspaces;
+    print("viewport size = $workspace->{workarea_geometry}[0] x $workspace->{workarea_geometry}[1]\n");
+}
+
+sub get_windows {
+    my %windows;
+
+    open(my $fh, "wmctrl -x -l -G |");
+    while(<$fh>) {
+        my ($id, $desktop, $x, $y, $w, $h, $name) = split(/\s+/, $_);
+        $windows{$id} = { id => $id,
+                          desktop => $desktop,
+                          pos => [ $x, $y ],
+                          size => [ $w, $h ],
+                          name => $name,
+                        };
+    }
+
+    return \%windows;
+}
+
+sub coord {
+    return join(",", @{ shift() });
+}
+
+my %windows = %{ get_windows() };
+
+# Made-up numbers that I pretended to understand and give names to.
+my $border = [ 6, 46 ];
+
+if ($do_std_3mon) {
+    xrandr_3mon();
+    exit 0;
+}
+
+if ($do_get || $do_single || $do_shrink) {
+    while (my ($id, $win) = each %windows) {
+        #next if $win->{name} =~ /xfce4-panel/;
+        my @pos = @{ $win->{pos} };
+
+        my $h = $win->{size}[1];
+        my $pos = coord(\@pos);
+        if ($do_shrink) {
+            my $ws_height = $workspace->{workarea_geometry}[1];
+            if ($h > $ws_height - $pos[1]) {
+                $h = $ws_height - $pos[1];
+            }
+        }
+        my $size = coord([ $win->{size}[0], $h ]);
+
+        if ($do_shrink) {
+            if ($pos[1] + $win->{size}[1] > $workspace->{workarea_geometry}[1]) {
+                print("shrinking $win->{name}\n");
+                system("wmctrl", "-x", "-r", $win->{name}, "-e", "0,$pos,$size");
+                system("wmctrl", "-i", "-r", $id, "-e", "0,$pos,$size");
+            }
+        }
+
+        if (@ARGV) {
+            my $found = 0;
+            for (@ARGV) {
+                $found ||= (index($win->{name}, $_) != -1);
+            }
+            next if ! $found;
+        }
+
+        if ($do_get) {
+            if ($fmt_cmd) {
+                print("  wmctrl -x -r $win->{name} -e 0,$pos,$size\n");
+            } else {
+                print <<"END";
+        { name => '$win->{name}',
+          coords => '0,$pos,$size' },
+END
+            }
+        }
+    }
+
+    if ($do_get || $do_shrink) {
+        exit(0);
+    }
+}
+
+my %DB = (
+    'single' => [
+        { name => 'nvidia-settings.Nvidia-settings',
+          coords => '0,862,1433,499,316' },
+        { name => 'Irc.Chatzilla',
+          coords => '0,0,0,1841,1050' },
+    ],
+    'above' => [
+        { name => 'Navigator.Firefox',
+          coords => '0,0,0,1914,1131' },
+        { name => 'Irc.Chatzilla',
+          coords => '0,0,1200,1400,1050' },
+        { name => 'Mail.Thunderbird',
+          coords => '0,0,0,1914,1134' },
+    ],
+    'dual' => [
+        { name => 'Navigator.Firefox',
+          coords => '0,0,0,1914,1131' },
+        { name => 'Irc.Chatzilla',
+          coords => '0,1926,0,1429,1050' },
+        { name => 'Mail.Thunderbird',
+          coords => '0,0,0,1914,1134' },
+        { name => 'gkrellm.Gkrellm',
+          coords => '0,3361,0,212,749' },
+    ],
+    'triple' => [
+        { name => 'Mail.Thunderbird',
+          coords => '0,6,76,1914,1120' },
+        { name => 'Navigator.Firefox',
+          coords => '0,6,76,1914,1120' },
+        { name => 'gkrellm.Gkrellm',
+          coords => '0,0,1200,212,1055' },
+        { name => 'Irc.Chatzilla',
+          coords => '0,2202,46,1638,1054' },
+        { name => 'VidyoDesktop.VidyoDesktop',
+          coords => '0,1546,1246,374,400' },
+        ],
+);
+
+my %no_decorations = ( 'gkrellm.Gkrellm' => 1 );
+
+my $positions;
+
+my $displays = get_xrandr();
+
+if ($do_single) {
+    $positions = $DB{single};
+} elsif ($above) {
+    $positions = $DB{above};
+} elsif (keys %$displays == 2) {
+    system("xrandr", "--output", "DP-0", "--left-of", "LVDS-0");
+    $positions = $DB{dual};
+} elsif (keys %$displays == 3) {
+    #system("xrandr", "--output", "DP-0", "--left-of", "LVDS-0");
+    $positions = $DB{triple};
+}
+
+if ($positions) {
+    for my $win (@$positions) {
+        my ($gravity, $x, $y, $w, $h) = split(/,/, $win->{coords});
+
+        unless ($no_decorations{$win->{name}}) {
+            $x -= $border->[0];
+            $y -= $border->[1];
+        }
+
+        my $coords = "$gravity,$x,$y,$w,$h";
+        print join(" ", "wmctrl", "-x", "-r" => $win->{name}, "-e" => $coords, "\n");
+        system("wmctrl", "-x", "-r" => $win->{name}, "-e" => $coords);
+    }
+}
+
+my %arrangement = (
+    'Navigator.Firefox' => 0,
+    'Irc.Chatzilla' => ($do_single ? 2 : -1),
+    'Mail.Thunderbird' => 1,
+    'gkrellm.Gkrellm' => -1,
+    'VidyoDesktop.VidyoDesktop' => -1,
+);
+
+while (my ($name, $ws) = each %arrangement) {
+    print join(" ", "wmctrl", "-x", "-r" => $name, "-t" => $ws), "\n";
+    system("wmctrl", "-x", "-r" => $name, "-t" => $ws);
+}
+
+# wmctrl -r DailyLog -t -1
+
+unless ($do_single) {
+    system("wmctrl", "-x", "-r" => "gkrellm.Gkrellm", "-b" => "add,skip_taskbar");
+    system("wmctrl", "-x", "-r" => "Irc.Chatzilla", "-b" => "add,skip_taskbar");
+}
+
+sub get_xrandr {
+    my %displays;
+
+    open(my $fh, "xrandr |");
+    while(<$fh>) {
+        if (/^(\S+) connected (?:primary )?(\S+)/) {
+            $displays{$1} = $2;
+        }
+    }
+
+    return \%displays;
+}
+
+sub xrandr_3mon {
+    system("xrandr --output VGA-0 --mode 1920x1200 --output LVDS-0 --mode 1920x1080 --output DP-0 --mode 1920x1080");
+    system("xrandr --output VGA-0 --output LVDS-0 --below VGA-0 --output DP-0 --right-of VGA-0");
+}
