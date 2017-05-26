@@ -1,16 +1,19 @@
-= Intro =
+Intro
+=====
 
 I thought I'd write up one of those periodic posts describing my workflow. My workflow is not the best possible one for everyone. Nor is it the best possible one for me, since I'm a creature of habit and cling to some well-known tools. But I think it's sometimes helpful to look at what someone else is doing and see what you might be able to steal.
 
 This is going to be more of a summary overview than an in-depth description or tutorial, because there's a lot to cover and I don't know what would be helpful to other people, so I figure I'd just put up an outline and people can ask for detail on what they're interested in. Or not, in which case I won't need to spend a lot of time on something irrelevant.
 
-= Code Management =
+Code Management
+===============
 
 I formerly used mq, and when I'd finally had enough of it, I tried to make my vanilla hg workflow similar to it and provide the same benefits.
 
 I use phases heavily to keep track of what's "mine". If you're pushing to any personal repositories, be sure to mark them non-publishing.
 
-== Pulling from upstream ==
+Pulling from upstream
+---------------------
 
 I use the mozilla-unified repository. Put this in your ~/.hgrc:
 
@@ -27,7 +30,8 @@ I will usually rebase on top of inbound. `./mach mercurial-setup` should set you
 
 That assumes you're currently updated to a "patch stack" that you want to rebase, probably with a bookmark at its head.
 
-== What's my state? ==
+What's my state?
+----------------
 
 I like having an easy way to see my current "patch stack" and what I'm working on. My main tool for this is an alias `hg ls`:
 
@@ -71,9 +75,10 @@ That works for a single stack of patches underneath a root bookmark. To see all 
     [alias]
     lsb = log -r 'bookmark() and not public()' -T '{pad("{bookmarks}", 30)} {desc|firstline}\n'
 
-== Working on code ==
+Working on code
+---------------
 
-=== Updating, bookmarking ===
+### Updating, bookmarking
 
 When starting on something new, I'll update to 'inbound' (feel free to use 'central' if you don't want to live dangerously. Given that you'll have to rebase before landing anyway, 'central' is probably a much smarter choice.) Then I'll create a bookmark for the feature/fix I'm working on:
 
@@ -83,7 +88,7 @@ When starting on something new, I'll update to 'inbound' (feel free to use 'cent
 
 Notice the clunky name "remove.xul". I formerly used '-' to separate words in my bookmark names, but '-' is a revset operator. It'll still work for many things (and I think it'd work with everything if you did eg `hg log -r 'bookmark("remove-xul")'`, but that's too much typing). Using periods as separators, that's just `hg log -r remove.xul`.
 
-=== Making commits ===
+### Making commits
 
 I will start out just editing code. Once it's in a reasonable state, or I need to switch to something else, I'll commit normally:
 
@@ -149,7 +154,7 @@ Now press 'c' to commit the changes. Whee! Use `hg ls` to see that everything is
 
 From my above example, you might think I use one changeset per bug. That's very bug-dependent; many times I'll have a whole set of patches for one bug, and I'll have multiple bugs in my patch stack at one time. If you do that too, be sure to put the bug number in your commit message early to avoid getting confused[4].
 
-=== Splitting out changes for multiple patches ===
+### Splitting out changes for multiple patches
 
 I'm not very disciplined about keeping my changes separate, and often end up in a situation where my working directory has changes that belong to multiple patches. Mercurial handles this well. If some of the changes should be applied to the topmost patch, use
 
@@ -168,7 +173,7 @@ And if you accidentally get it wrong and amend a patch with stuff that doesn't b
 
 That will empty out the top patch, leaving the changes in your working directory, then bring up the interface to allow you to re-select just the stuff that belongs in that top patch. The remnants will be in your working directory, so proceed as usual.
 
-=== Navigating through your stack ===
+### Navigating through your stack
 
 When I want to work on a patch "deeper" in the stack, I use `hg update -r <rev>` or `hg prev` to update to it, then make my changes and `hg amend` to include them into the changeset. If I am not at the top changeset, this will invalidate all of the other patches. The easiest way to fix this up is to use `hg next --evolve` to update to the old child and automatically rebase it on top of my update changeset.
 
@@ -179,7 +184,7 @@ The normal workflow with evolve would be to run `hg evolve -a` to automatically 
 
 to advance as far as possible until the head changeset is reached, or a conflict occurs. YMMV.
 
-=== Resolving conflicts ===
+### Resolving conflicts
 
 Speaking of conflicts, all this revision control craziness doesn't come for free. I'm not 100% happy with it, but the merge tool I am happiest with is kdiff3:
 
@@ -195,7 +200,7 @@ Speaking of conflicts, all this revision control craziness doesn't come for free
 
 I don't remember what all that crap is for. It was mostly an attempt to get it to label the different patches being merged correctly, but I did it in the mq days, and these days I ignore the titles anyway. I kind of wish I *did* know which was which. Don't use the kdiff3.executable setting, since you don't have kdiff3-wrapper. The rest is probably fine. Actually, kdiff3-wrapper was pretty useful back in the day; kdiff3 has a bad habit of clearing the execute (a la chmod +x) bit when merging. I don't know if it still has that issue?
 
-=== Uploading patches to bugs ===
+### Uploading patches to bugs
 
 I'm an old fart, so I almost always upload patches to bugzilla and request review there insead of using MozReview. If I already have a bug, the procedure is generally
 
@@ -224,7 +229,7 @@ Oh, by the way, if you're nervous about it automatically doing something stupid 
 
 If I need to upload multiple patches, I'll update to each in turn (often using `hg next` and `hg prev`, which come with evolve) and run `hg bzexport` for each.
 
-=== Uploading again ===
+### Uploading again
 
 I'm sloppy and frequently don't get things right on the first try, so I'll need to upload again. Now this is a little tricky, because you want to mark the earlier versions as obsolete. In mq times, this was pretty straightforward: your patches had names, and it could just find the bug's patch attachment with the matching name. Without names, it's harder. You might think that it would be easiest to look for a matching commit message, and you'd probably be right, but it turns out that I tend to screw up my early attempts enough that I have to change what my patches do, and that necessitates updating the commit message.
 
@@ -236,11 +241,11 @@ Remember to use the -r flag again when you re-upload. You don't need the bug num
 
 (the lack of -e there means it won't even bother to bring up an editor for a new comment to go along with the updated attachment. If you want the comment, use `-e`. Or `--comment "another attempt"` if you prefer.)
 
-=== Incorporating review comments ===
+### Incorporating review comments
 
 I've already covered this. Update to the approprate patch, make your changes, `hg amend`, `hg advance` to clean up any conflicts as early as possible.
 
-=== Landing ===
+### Landing
 
 Update to the appropriate patch. Use `hg amend -m` to update the commit message, adding the "r=fitzgen". Or if I need to do a bunch of them, `hg che` (or just `hg chistedit`), go to each relevant patch, use 'm' to change the action to 'mess' (short for "message"), 'c' to commit to this histedit action string, edit the messages in your $EDITOR.
 
@@ -258,7 +263,7 @@ And this part is a lie; I actually use my `hg trychooser` extension which has a 
 
     % hg trychooser -m 'try: -b do -p all -u all[x64]'
 
-=== Forking your stack ===
+### Forking your stack
 
 If you commit a changeset on top of a non-top patch, you will fork your stack. The usual reason is that you've updated to some changeset, made a change, and run `hg commit`. You now have multiple heads. hg will tell you "created new head". Which is ok, except it's not, because it's much more confusing than having a simple linear patch stack. (Or rather, a bunch of linear patch stacks, each with a bookmark at its head.)
 
@@ -277,11 +282,12 @@ It will leave you updated to your new head, or rather the changeset that was for
 
 (if you're not used to the crazy revset abbreviations, you may prefer to write that as `hg update -r 'heads(descendants(.))'`. I'm trying not to use too many abbreviations in this doc, but typing out "descendants" makes my fingers tired.)
 
-== Workspace management ==
+Workspace management
+--------------------
 
 So being able to jump all over your various feature bookmarks and things is cool, but I'm working with C++ here, and I hate touching files unnecessarily because it means a slow and painful rebuild. Personally, I keep two checkouts, ~/src/mozilla and ~/src/mozilla2. If I were more disciplined about disk space, I'd probably have a few more. Most people have several more. I used to have clever schemes of updating a master repository and then having all the others pull from it, but newer hg (and my DSL, I guess) is fast enough that I now just `hg pull unified` manually whenever I need to. I use the default objdir, located in the top directory of my source checkout, because I like to be able to run hg commands from within the objdir. But I suspect it messes me up because hg and watchman have to deal with a whole bunch of files within the checkout area that they don't care about.
 
-=== watchman ===
+### watchman
 
 Oh yeah, watchman. It makes many operations way, way faster. Or at least it did; recently, it often slows things down before it gives up and times out. Yeah, I ought to file a bug on it.
 
@@ -292,9 +298,10 @@ I can't remember how to set up watchman, sorry. It looks like I built it from so
 
 Maybe ./mach bootstrap sets up watchman for you these days? And ./mach mercurial-setup sets up fsmonitor? I don't know.
 
-== Debugging ==
+Debugging
+---------
 
-=== debug ===
+### debug
 
 I have this crazy Perl script that I've hacked in various horrible ways over the years. It's awful, and awfully useful. If I'm running the JS shell, I do
 
@@ -326,7 +333,7 @@ to run the given test with hopefully the appropriate binary running under gdb in
 
 to bring up Emacs running jorendb[5].
 
-=== rr ===
+### rr
 
 I love me my rr. I have a .gdbinit.py startup file that creates a handy command for displaying the event number and tick count to keep me oriented chronologically:
 
@@ -359,4 +366,4 @@ I have a .gdbinit file with some funky commands to set hardware watchpoints on G
 
 [4] When I have one patch per bug, I'll usually use `hg bzexport --update` to fill in the bug numbers. Especially since I normally file the bug in the first place with `hg bzexport --new`, so I don't even have a bug number until I do that.
 
-[5] jorendb simple-minded JS debugger that jorendorff wrote, I think to test the Debugger API. I suspect he's amused that I attempt to use it for anything practical. I'm sure the number of people for whom it is relevant is vanishingly small, but I love having it when I need it. (It's for the JS shell only. Nobody uses the JS shell for any serious scripting; why would you, when you have web browser and Node?) (I'm Nobody.)
+[5] jorendb is a relatively simple JS debugger that jorendorff wrote, I think to test the Debugger API. I suspect he's amused that I attempt to use it for anything practical. I'm sure the number of people for whom it is relevant is vanishingly small, but I love having it when I need it. (It's for the JS shell only. Nobody uses the JS shell for any serious scripting; why would you, when you have web browser and Node?) (I'm Nobody.)
