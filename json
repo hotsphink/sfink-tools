@@ -10,6 +10,8 @@ use warnings;
 my $json = JSON->new->utf8->relaxed;
 my $pjson = JSON->new->utf8->relaxed->canonical->pretty;
 
+# transform markers/name/* /threads/2/stringArray/{value}
+
 sub help {
     my ($opts) = @_;
 
@@ -18,7 +20,7 @@ sub help {
     }
 
     print <<"END";
-Usage: $0 <filename.json> [initial-path]
+Usage: $0 <filename.json> [initial-path] [-e COMMAND]
 
     ls [PATH]              - show contents of structure
     cd PATH                - change current view to PATH
@@ -26,12 +28,15 @@ Usage: $0 <filename.json> [initial-path]
     delete SPEC            - delete the given key or range of keys (see below
                              for a description of SPEC)
     set KEY VALUE          - modify an existing value (VALUE may optionally
-                           - be quoted)
+                             be quoted)
+    transform PATH LOOkUP  - for every value VSRC found at PATH, convert LOOKUP
+                             to a new path by substituting "{value}" with VSRC,
+                             and replace VSRC with the value found at that path
     mv PATH PATH           - move a subtree
     mmv PATTERN PATH DEST  - move all immediate children in PATH matching
                              PATTERN to DEST
     grep [-l] PATTERN PATH - search for PATTERN in given PATH
-    write [-pretty] [FILENAME]
+    write [--pretty|--noindent] [FILENAME]
                            - write out the whole structure as JSON. Use '-' as
                              FILENAME to write to stdout.
     pretty                 - prettyprint current structure to stdout
@@ -71,7 +76,8 @@ if (defined $ENV{TERM}) {
 }
 
 my $term = Term::ReadLine->new("JSON explorer");
-select($term->OUT || \*STDOUT) if (-t STDOUT);
+our $oldout = select($term->OUT || \*STDOUT) if (-t STDOUT);
+END { select($oldout) if $oldout; }
 my $attribs = $term->Attribs;
 
 my $MAX = 10;
@@ -204,16 +210,22 @@ LS: while(1) {
             delete_keys($current, $1);
         } elsif ($input =~ /^set (\S+)[\s=]+(.*)$/) {
             set_value($current->[-1], $1, $2);
+        } elsif ($input =~ /^transform (\S+)\s+(.*)$/) {
+            transform($current, $1, $2);
+        } elsif ($input =~ /^push (.*)$/) {
+            push_value($current->[-1], $1);
+        } elsif ($input =~ /^unshift (.*)$/) {
+            unshift_value($current->[-1], $1);
         } elsif ($input =~ /^mv (\S+) (\S+)$/) {
             mv($current, $1, $2);
-        } elsif ($input =~ /^grep (-l\s+)?(.*) (\S+)$/) {
-            search($2, $3, defined($1));
+        } elsif ($input =~ /^grep (?:(-l|--cd)\s+)?(.*) (\S+)$/) {
+            search($2, $3, $1);
         } elsif ($input =~ /^mmv (.*) (\S+) (\S+)$/) {
             movegroup($1, $2, $3);
-        } elsif ($input =~ /^write (-pretty\s+)?(.*?)$/) {
-            write_file($2, defined($1));
-        } elsif ($input =~ /^write( -pretty)?$/) {
-            write_file($ARGV[0], defined($1));
+        } elsif ($input =~ /^write (?:(--\w+)\s*)?(.*?)$/) {
+            write_file($2, $1);
+        } elsif ($input =~ /^write(?: (--\w+))?$/) {
+            write_file($ARGV[0], $2);
         } elsif ($input =~ /^pretty$/) {
             prettyprint($current->[-1]);
         } elsif ($input =~ /^load (.*?)$/) {
@@ -225,9 +237,9 @@ LS: while(1) {
         } elsif ($input =~ /^export (.*?)$/) {
             export($current->[-1], $1);
         } elsif ($input =~ /^size (.*?)$/) {
-            print "json size = ", length($json->encode(enterPath($current, $1)->[-1])), " bytes\n";
+            show_size($current, $1);
         } elsif ($input =~ /^size$/) {
-            print "json size = ", length($json->encode($current->[-1])), " bytes\n";
+            show_size($current);
         } elsif ($input =~ /^quit$/) {
             quit();
         } else {
@@ -239,12 +251,13 @@ LS: while(1) {
 sub load {
     my ($file) = @_;
     $file //= $current_file;
-    my $data;
-    if ($file eq '-') {
-        $data = do { local $/; <STDIN> };
-    } else {
-        $data = do { local $/; open(my $fh, "<", $file) or die "open $file: $!"; <$fh> };
-    }
+    use IO::Zlib;
+    # Sadly, IO::Zlib ignores $/ so there's no good way to slurp a file.
+    my $data = do {
+        local $/; # Maybe someday...
+        my $fh = IO::Zlib->new($file, 'r') or die "open $file: $!";
+        join('', $fh->getlines)
+    };
     eval {
         $struct = $json->decode($data);
     };
@@ -265,8 +278,8 @@ sub export {
     my ($struct, $file) = @_;
     
     open(my $fh, ">", $file) or die "create $file: $!";
-    my %opts = ( utf8 => 1, canonical => 1 );
-    print $fh $pjson->encode($struct)
+    my $json = $pjson->utf8->canonical;
+    print $fh $json->encode($struct)
         or die "writing to $file: $!";
 }
 
@@ -307,8 +320,9 @@ sub prettyprint {
 }
 
 sub write_file {
-    my ($filename, $pretty) = @_;
-    $filename //= $current_file;
+    my ($filename, $arg) = @_;
+    $filename ||= $current_file;
+    $arg ||= '';
 
     my $fh;
     if ($filename eq '-') {
@@ -318,9 +332,11 @@ sub write_file {
             or die "create $filename.tmp: $!";
     }
 
-    my %opts = ( utf8 => 1, canonical => 1 );
-    $opts{pretty} = 1 if $pretty;
-    print $fh $pjson->encode($struct)
+    my $json = $json->utf8; #->canonical;
+    $json = $json->pretty if $arg;
+    my $out = $json->encode($struct);
+    $out =~ s/^\s+//mg if $arg eq '--noindent';
+    print $fh $out
         or die "writing to $filename.tmp: $!";
 
     return if $filename eq '-';
@@ -340,26 +356,40 @@ sub write_file {
 }
 
 sub search {
-    my ($pattern, $path, $listmode) = @_;
+    my ($pattern, $path, $args) = @_;
+    $args ||= '';
 
     my $re;
     my $delim = substr($pattern, 0, 1);
-    if ($delim ne substr($pattern, -1)) {
+    if (length($delim) < 2 || $delim ne substr($pattern, -1)) {
         $re = $pattern;
     } else {
         $re = substr($pattern, 1, -1);
     }
 
+    my @matchfiles;
     map_path($current, $path, sub {
         my ($stack, $path) = @_;
         return if ref($stack->[-1]);
         return if $stack->[-1] !~ /$re/;
-        print $path;
-        if (!$listmode) {
-            print ": $stack->[-1]";
+        if ($args ne '--cd') {
+            print $path;
+            if (!$args) {
+                print ": $stack->[-1]";
+            }
+            print "\n";
         }
-        print "\n";
+        push @matchfiles, $path;
     }) or print "Path $path not found\n";
+
+    if ($args eq '--cd') {
+        return if @matchfiles == 0; # Already warned
+        if (@matchfiles > 1) {
+            print "Multiple matches; ambiguous destination\n";
+            return;
+        }
+        chpath(dirname($matchfiles[0]));
+    }
 }
 
 sub movegroup {
@@ -430,16 +460,83 @@ sub movegroup {
     }
 }
 
+sub parse_value {
+    my ($value_str) = @_;
+    return $1 if $value_str =~ /^"(.*)"$/;
+    return $1 if $value_str =~ /^'(.*)'$/;
+
+    return 0 + $value_str if $value_str =~ /^\d+$/;
+
+    # TODO: parse JSON literals or something
+    return {} if $value_str eq '{}';
+    return [] if  $value_str eq '[]';
+
+    $value_str =~ s/\\(.)/$1/g;
+    return $value_str;
+}
+
+sub push_value {
+    my ($struct, $value) = @_;
+
+    if (!UNIVERSAL::isa($struct, 'ARRAY')) {
+        print "Cannot push; not an array\n";
+        return;
+    }
+
+    push @$struct, parse_value($value);
+}
+
+sub unshift_value {
+    my ($struct, $value) = @_;
+
+    if (!UNIVERSAL::isa($struct, 'ARRAY')) {
+        print "Cannot push; not an array\n";
+        return;
+    }
+
+    unshift @$struct, parse_value($value);
+}
+
+sub clone {
+    my ($value) = @_;
+    return $value if ! ref $value;
+    return $json->decode($json->encode($value));
+}
+
+sub change_element {
+    my ($struct, $key, $value) = @_;
+    if (UNIVERSAL::isa($struct, 'HASH')) {
+        $struct->{$key} = $value;
+    } elsif (UNIVERSAL::isa($struct, 'ARRAY')) {
+        $struct->[$key] = $value;
+    } else {
+        print "At a leaf node\n";
+    }
+}
+
 sub set_value {
     my ($struct, $key, $value) = @_;
-    if ($value =~ /^"(.*)"$/) {
-        $value = $1;
-    } elsif ($value =~ /^'(.*)'$/) {
-        $value = $1;
-    }
-    $value =~ s/\\(.)/$1/g;
-    if ($value =~ /^\d+$/) {
-        $value = 0+$value;
+    $value = parse_value($value);
+
+    if ($key =~ m!([^/]+)/(.*)!) {
+        my ($dir, $subkey) = ($1, $2);
+        
+        if (UNIVERSAL::isa($struct, 'HASH')) {
+            if (exists $struct->{$dir}) {
+                return set_value($struct->{$dir}, $subkey, $value);
+            } else {
+                return set_value($struct->{$dir} = {}, $subkey, $value);
+            }
+        } elsif (UNIVERSAL::isa($struct, 'ARRAY')) {
+            if ($dir < @$struct) {
+                return set_value($struct->[$dir], $subkey, $value);
+            } else {
+                return set_value($struct->[$dir] = {}, $subkey, $value);
+            }
+        } else {
+            print "At a leaf node\n";
+            return;
+        }
     }
 
     if (UNIVERSAL::isa($struct, 'HASH')) {
@@ -532,7 +629,7 @@ sub path_stacks {
         }
     } else {
         $sofar = joinpath($sofar, $component);
-        if ($component eq '.') {
+        if ($component eq '.' || $component eq '') {
             push @stacks, [ $stack, $sofar ];
         } elsif ($component eq '..') {
             push @stacks, [ popstack($stack), $sofar ];
@@ -591,16 +688,47 @@ sub popstack {
     return [ @$stack[0..$#$stack-1] ];
 }
 
+sub transform {
+    my ($current, $path, $lookup) = @_;
+    map_path($current, $path, sub {
+        my ($stack, $path) = @_;
+        if (ref $stack->[-1]) {
+            print "Can only operate on simple values\n";
+        } else {
+            (my $new_lookup = $lookup) =~ s/\{value\}/$stack->[-1]/g;
+            my @found;
+            map_path($current, $new_lookup, sub {
+                my ($lstack, $lpath) = @_;
+                push @found, $lstack->[-1];
+            });
+            if (@found != 1) {
+                print "LOOKUP $new_lookup resolved to no or multiple locations\n";
+            } else {
+                change_element($stack->[-2], $stack->[-1], clone($found[0]));
+            }
+        }
+    });
+}
+
 sub ls {
     my ($current, $lspath) = @_;
 
     map_path($current, $lspath, sub {
         my ($stack, $path) = @_;
-        if (size($stack->[-1]) > 0) {
-            print "$path/:\n" unless $path eq '.' && !defined $lspath;
-            for my $key (all_keys($stack->[-1])) {
-                print "  " unless $path eq '.' && !defined $lspath;
-                print entry_str($stack->[-1], $key), "\n";
+        if (num_elements($stack->[-1]) > 0) {
+            unless (!defined $lspath && $path eq '.') {
+                print $path;
+                print "/" unless $path =~ /\/$/;
+                print "\n"
+            }
+            my $prefix = ($path eq '.' && !defined $lspath) ? "" : "  ";
+            my $stacktop = $stack->[-1];
+            if (UNIVERSAL::isa($stacktop, 'ARRAY') && @$stacktop >= 8) {
+                print "${prefix}indexes 0 .. $#$stacktop\n";
+            } else {
+                for my $key (all_keys($stacktop)) {
+                    print $prefix, entry_str($stacktop, $key), "\n";
+                }
             }
         } else {
             print $path, "\n";
@@ -668,20 +796,32 @@ sub mv {
     }
 }
 
+sub show_size {
+    my ($current, $path) = @_;
+    my $show_keys = defined($path);
+
+    map_path($current, $path || '.', sub {
+        my ($stack, $path) = @_;
+        my $len = length($json->allow_nonref->encode($stack->[-1]));
+        if ($show_keys) {
+            print "$path = $len bytes\n";
+        } else {
+            print "$len bytes\n";
+        }
+    }) or print "Path $path not found\n";
+}
+
 sub cat {
     my ($current, $nokeys, $path) = @_;
 
     map_path($current, $path, sub {
         my ($stack, $path) = @_;
-        if (size($stack->[-1]) > 0) {
-            print "$path/ with ", size($stack->[-1]), " keys:\n";
+        if (num_elements($stack->[-1]) > 0) {
+            print "$path/ with ", num_elements($stack->[-1]), " keys:\n";
             print $pjson->encode($stack->[-1]), "\n";
         } elsif (! ref $stack->[-1]) {
-            if ($nokeys) {
-                print "$stack->[-1]\n";
-            } else {
-                print "$path = $stack->[-1]\n";
-            }
+            print "$path = " unless $nokeys;
+            print "$stack->[-1]\n";
         } elsif (UNIVERSAL::isa($stack->[-1], 'ARRAY')) {
             print "empty array\n";
         } else {
@@ -700,10 +840,16 @@ sub enter {
     if (UNIVERSAL::isa($struct, 'HASH')) {
         return $struct->{$key};
     } elsif (UNIVERSAL::isa($struct, 'ARRAY')) {
-        if ($key !~ /^\d+$/) {
+        if ($key !~ /^-?\d+$/) {
             print "Non-numeric key '$key' for array\n" unless $suppress_error;
             return;
         }
+
+        return if @$struct == 0;
+
+        # This is horrible. Handle negative indexes.
+        $_[1] = ($key + @$struct) % @$struct;
+
         return $struct->[$key];
     } else {
         return if $suppress_error;
@@ -736,7 +882,7 @@ sub enterPath {
     return \@stack;
 }
 
-sub size {
+sub num_elements {
     my ($value) = @_;
 
     if (UNIVERSAL::isa($value, 'HASH')) {

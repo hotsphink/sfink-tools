@@ -11,16 +11,70 @@ my $do_get;
 my $do_single;
 my $do_shrink;
 my $do_std_3mon;
+my $do_std_2mon;
+my $do_std_1mon;
+my $do_panel;
+my $do_wtf;
 my $above;
 my $fmt_cmd;
 GetOptions("g|get!" => \$do_get,
            "s|single!" => \$do_single,
            "shrink|resize!" => \$do_shrink,
            "xr" => \$do_std_3mon,
+           "xr3" => \$do_std_3mon,
+           "xr2" => \$do_std_2mon,
+           "xr1" => \$do_std_1mon,
+           "panel" => \$do_panel,
            "above!" => \$above,
            "cmd!" => \$fmt_cmd,
+           "wtf" => \$do_wtf,
           )
   or die "bad dog!\n";
+
+if ($do_wtf) {
+    system("xrandr --output DP-1 --mode 1920x1200");
+    system("xrandr --output DP-2 --mode 1920x1080");
+    exit(0);
+}
+
+# If nothing specified, figure out appropriate default based on connected
+# displays.
+if (!$do_std_1mon && !$do_single && !$do_std_3mon) {
+    my $displays = get_displays();
+    my $num_displays = 0 + keys %$displays;
+    my $num_on_displays = () = grep { defined } values %$displays;
+    print("num displays = $num_displays num connected = $num_on_displays\n");
+    $do_std_1mon = 1 if $num_displays == 1;
+    $do_std_2mon = 1 if $num_displays == 2 && $num_on_displays != 2;
+    $do_std_3mon = 1 if $num_displays == 3 && $num_on_displays != 3;
+}
+
+if ($do_std_1mon) {
+    xrandr_1mon();
+    $do_single = 1;
+    $do_shrink = 1;
+}
+
+if ($do_panel) {
+    exec("wmctrl", "-x",
+         "-r" => "xfce4-panel.Xfce4-panel",
+         "-e" => "0,0,1200,384,3")
+        or die;
+}
+
+sub get_displays {
+    my %displays;
+    
+    open(my $fh, "-|", "xrandr");
+    while(<$fh>) {
+        my ($display, $connection, $size) = /^(\S+) (connected|disconnected) (?:(?:\w+ )?(\d+x\d+\+\d+\+\d+))?/;
+        next if !$display;
+        if ($connection eq 'connected') {
+            $displays{$display} = $size;
+        }
+    }
+    return \%displays;
+}
 
 sub get_workspaces {
     my @workspaces;
@@ -78,29 +132,50 @@ sub coord {
 my %windows = %{ get_windows() };
 
 # Made-up numbers that I pretended to understand and give names to.
+#
+# If I send something to x=0, it goes right to the edge (yay!) and wmctrl -l
+# reports it as being at 6.
+#
+# If I send something to y=0..30, it ends up right underneath the panel, and
+# reports y=76. If I send it to some other y, it reports y+46.
+#
+# Widths: set => report
+#  900 => 896
+# 1900 => 1897
+# 1920 => 1918
+#  100 => 98
+#   80 => 77
+#   40 => 49 from above, 40 from below
+# 0-35 => 35
+#   36 => 36
+#
 my $border = [ 6, 46 ];
 
+xrandr_2mon() if $do_std_2mon;
+xrandr_3mon() if $do_std_3mon;
+    
 if ($do_std_3mon) {
-    xrandr_3mon();
     exit 0;
 }
 
 if ($do_get || $do_single || $do_shrink) {
     while (my ($id, $win) = each %windows) {
-        #next if $win->{name} =~ /xfce4-panel/;
+        next if $win->{name} =~ /xfce4-panel/;
         my @pos = @{ $win->{pos} };
 
         my $h = $win->{size}[1];
         my $pos = coord(\@pos);
         if ($do_shrink) {
             my $ws_height = $workspace->{workarea_geometry}[1];
-            if ($h > $ws_height - $pos[1]) {
+            if ($h > $ws_height - $pos[1] + $border->[1]) {
+                # Extends too far down.
                 $h = $ws_height - $pos[1];
             }
         }
         my $size = coord([ $win->{size}[0], $h ]);
 
         if ($do_shrink) {
+            print "$pos[1] + $win->{size}[1] > $workspace->{workarea_geometry}[1]\n";
             if ($pos[1] + $win->{size}[1] > $workspace->{workarea_geometry}[1]) {
                 print("shrinking $win->{name}\n");
                 system("wmctrl", "-x", "-r", $win->{name}, "-e", "0,$pos,$size");
@@ -138,7 +213,9 @@ my %DB = (
         { name => 'nvidia-settings.Nvidia-settings',
           coords => '0,862,1433,499,316' },
         { name => 'Irc.Chatzilla',
-          coords => '0,0,0,1841,1050' },
+          coords => '0,228,76,1692,1015' },
+        { name => 'Navigator.Firefox',
+          coords => '0,0,0,1914,1131' },
     ],
     'above' => [
         { name => 'Navigator.Firefox',
@@ -160,13 +237,13 @@ my %DB = (
     ],
     'triple' => [
         { name => 'Mail.Thunderbird',
-          coords => '0,6,76,1914,1120' },
+          coords => '0,6,76,1914,1020' },
         { name => 'Navigator.Firefox',
-          coords => '0,6,76,1914,1120' },
+          coords => '0,6,76,1914,1020' },
         { name => 'gkrellm.Gkrellm',
           coords => '0,0,1200,212,1055' },
         { name => 'Irc.Chatzilla',
-          coords => '0,2202,46,1638,1054' },
+          coords => '0,2202,46,1638,1200' },
         { name => 'VidyoDesktop.VidyoDesktop',
           coords => '0,1546,1246,374,400' },
         ],
@@ -209,7 +286,7 @@ my %arrangement = (
     'Navigator.Firefox' => 0,
     'Irc.Chatzilla' => ($do_single ? 2 : -1),
     'Mail.Thunderbird' => 1,
-    'gkrellm.Gkrellm' => -1,
+    'gkrellm.Gkrellm' => ($do_single ? 3 : -1),
     'VidyoDesktop.VidyoDesktop' => -1,
 );
 
@@ -239,6 +316,20 @@ sub get_xrandr {
 }
 
 sub xrandr_3mon {
-    system("xrandr --output VGA-0 --mode 1920x1200 --output LVDS-0 --mode 1920x1080 --output DP-0 --mode 1920x1080");
-    system("xrandr --output VGA-0 --output LVDS-0 --below VGA-0 --output DP-0 --right-of VGA-0");
+    print("Doing xrandr configuration for 3 displays\n");
+    system("xrandr --output eDP-1 --pos 0x1200 --scale 0.5x0.5 --below DP-1 --output DP-1 --pos 1920x0 --output DP-2 --pos 0x120");
+    #system("xrandr --output eDP-1 --pos 0x1200 --scale 0.5x0.5 --output DP-1 --pos 1920x0 --output DP-2 --pos 0x120");
+    #system("xrandr --output VGA-0 --mode 1920x1200 --output LVDS-0 --mode 1920x1080 --output DP-0 --mode 1920x1080");
+    #system("xrandr --output VGA-0 --output LVDS-0 --below VGA-0 --output DP-0 --right-of VGA-0");
+}
+
+sub xrandr_2mon {
+    print("Doing xrandr configuration for 2 displays\n");
+    system("xrandr --output eDP-1 --pos 0x1200 --scale 0.5x0.5 --output DP-1 --pos 0x0");
+    #system("xrandr --output eDP-1 --pos 0x120 --scale 0.5x0.5 --output DP-1 --pos 0x1200");
+}
+
+sub xrandr_1mon {
+    print("Doing xrandr configuration for 1 display");
+    system("xrandr --output eDP-1 --scale 0.5x0.5");
 }

@@ -10,9 +10,7 @@
 #  - For perl scripts, it will be perldb
 #  - For shell scripts, assume we're running firefox (yeah, nice and
 #    general, huh?) and use the -g flag
-#  - For cases I'm not going to document and don't currently remember, run
-#    under the Effects Engine (it doesn't exist; nothing to see here.)
-#  - If expicitly requested, the debugger will be jorendb. But by default,
+#  - If expicitly requested via --js, the debugger will be jorendb. But by default,
 #    running a JS file will use gdb.
 #
 # The command given may be a regular command in $PATH, a shell alias,
@@ -21,7 +19,7 @@
 # Yes, this script is a complete and utter hack. I've grafted on various
 # bits of new functionality over time, and not in a principled way. It's
 # probably only useful for my idiosyncratic ways of doing things. But I
-# love it all the same, so screw off.
+# love it all the same and use it heavily, so screw off.
 #
 # Use --help to see a usage description.
 #
@@ -34,7 +32,7 @@ use File::Basename qw(dirname);
 
 my $TMPDIR = tempdir(CLEANUP => 1);
 
-our $VERSION = "1.1";
+our $VERSION = "1.2";
 
 my @EMACS = qw(emacs);
 if ($ENV{DEBUG_EDITOR}) {
@@ -49,13 +47,19 @@ my $gdb = "gdb";
 my $PERL = "/usr/bin/perl";
 $PERL = "perl" if (! -x $PERL);
 
-my %opt = ( interactive => $ENV{GDB_INTERACTIVE},
-          );
+my $PYTHON = $ENV{PYTHON} || "/usr/bin/python";
+$PYTHON = "python" if (! -x $PYTHON);
+
+my %opt = (
+    interactive => $ENV{GDB_INTERACTIVE},
+);
 
 $opt{interactive} = 1 if ($ENV{DBG} || '') eq 'startup';
 
 my $debugger;
 my $jorendb;
+my $rrpid;
+my $rr_args = '';
 
 # Ugh... custom arg handling because this script is supposed to be a
 # transparent wrapper, and so can't use a standard getopt-ish handler.
@@ -76,6 +80,17 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
   } elsif ($_ eq '--gdb') {
     die if $debugger;
     $debugger = 'gdb';
+  } elsif ($_ eq '--record') {
+    die if $debugger;
+    $debugger = 'record';
+  } elsif ($_ =~ /--rrpid=(.*)/) {
+    $rrpid = $1;
+  } elsif ($_ eq '--rrargs') {
+    $rr_args = shift(@ARGV);
+  } elsif ($_ =~ /--rrargs=(.*)/) {
+    $rr_args = $1;
+  } elsif ($_ eq '--rrpid') {
+    $rrpid = shift(@ARGV);
   } elsif ($_ eq '--js' || $_ eq '-j') {
     die if $debugger;
     $debugger = 'jorendb';
@@ -98,6 +113,8 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
   push @local_args, $_;
 }
 
+my @rr_args = split(/\s+/, $rr_args);
+
 sub usage {
   my ($msg) = @_;
   if (defined $msg) {
@@ -112,7 +129,9 @@ Usage: debug [env=VAL...] [options] <program> args...
    -i               Interactive mode; do not start running the program
    -p               Perl mode (useful when autodetection not possible)
    --gdb            Gdb mode
-   --js[=PATH]      Jorendb mode
+   --record         Record under rr, then replay
+   --rrpid=PID      The pid to debug (default is to guess; crashes are preferred)
+   --js[=PATH]      Jorendb mode, with optional PATH to jorendb.js
    --check PATTERN  Run the command and scan its output for PATTERN. If it is
                     found, kill emacs and continue. This is useful when you
                     want to embed a call to 'debug' into the invocation of a
@@ -126,14 +145,13 @@ Various environment variables can affect the operation. Let's see...
      set to qr/EXPRESSION/ to only fire up emacs for programs
      that match the given regex. Useful when you are running
      a program that runs another program that runs the one you
-     want to debug. Or, as a wholly pointless special case, if
+     want to debug. Or, as a wholly redundant special case, if
      this is set to "startup" then it is the same as GDB_INTERACTIVE.
   $DBG_DISPLAY :
-     if this is set, it will be given to gdb to use as the $DISPLAY
-     for the debugger emacs window. This is to allow running the debug
-     window on one display (text terminal, probably) and sending the X
-     output of the debugged process to another. Currently only works for
-     gdb, not perldb.
+     if set, gdb uses it as $DISPLAY for the debugger emacs window. This
+     is to allow running the debug window on one display (text terminal,
+     probably) and sending the X output of the debugged process to another.
+     Currently only works for gdb, not perldb.
   $GDB_INITFILE :
      gdb will execute this file when it starts up.
      There are better ways of doing this, you know.
@@ -148,9 +166,35 @@ END
 }
 
 my ($COMMAND, @args) = @ARGV;
+if (! defined $COMMAND) {
+    $debugger = 'rr';
+    $rrpid ||= choose_pid_for_rr();
+    $COMMAND = '';
+    $opt{interactive} = 1;
+}
+
+sub choose_pid_for_rr {
+    # Find a process from the last run that crashed. Use the first one that
+    # exited with a signal, falling back to the first nonzero exit code,
+    # falling back to the last process.
+    open(my $fh, "rr ps |");
+    my @info;
+    while(<$fh>) {
+        chomp;
+        push @info, [ split(/\t/) ];
+    }
+    die "rr ps format changed!" if shift(@info)->[2] ne 'EXIT';
+    foreach (@info) {
+        return $_->[0] if $_->[2] < 0; # Exited with signal
+    }
+    foreach (@info) {
+        return $_->[0] if $_->[2]; # Exited with error
+    }
+    return $info[-1][0];
+}
 
 # Allow the command to be an alias. Hackety hack hack hack.
-if ($COMMAND !~ m!/!) {
+if ($COMMAND && $COMMAND !~ m!/!) {
   chomp(my $which = qx!which $COMMAND 2>/dev/null!);
   if ($which =~ m!/!) {
     $COMMAND = $which;
@@ -179,7 +223,7 @@ if ($COMMAND !~ m!/!) {
 }
 
 # Or even a shell function (of a very restricted syntax)
-if ($COMMAND !~ m!/!) {
+if ($COMMAND && $COMMAND !~ m!/!) {
   chomp(my $which = qx!$ENV{SHELL} -i -c 'whence -f $COMMAND'!);
   $which =~ s/^.*\n\s*//;
   $which =~ s/}$//;
@@ -205,17 +249,6 @@ $COMMAND =~ s!/+!/!g;
 
 chomp($ENV{CWD} = `pwd`);
 
-# Special case for Mozilla: if the command is a shell script, then use
-# -g to rerun, passing in this script as the debugger. This will only make
-# sense for a Mozilla run script.
-if (`file -L $COMMAND` =~ /shell script/) {
-    my @debug_args;
-    if (@local_args) {
-        push @debug_args, "-a", join(" ", @local_args);
-    }
-    exec($COMMAND, "-g", "-d" => $0, @debug_args, @args) or die;
-}
-
 # Check whether we should skip debugging this invocation
 # (if DBG is set to qr/something/ that doesn't match the command line)
 if ($ENV{DBG} && $ENV{DBG} =~ /qr/) {
@@ -229,8 +262,9 @@ mkdir("$TMPDIR/debug-args", 0777);
 unlink(glob("$TMPDIR/debug-args/*"));
 
 # Find the dividing point in "perl -a -b -c somefile.pl" between the perl
-# invocation with its arguments, and the script to be invoked.
-sub perl_upto_filename {
+# invocation with its arguments, and the script to be invoked. Also used for
+# python; so far, they've been close enough.
+sub scriptname_index {
   my $i = 0;
   while ($i < @_) {
     if ($_[$i] =~ /^-/) {
@@ -268,18 +302,8 @@ sub perl_upto_filename {
 # because it's the first argument that doesn't start with a dash. So prefix
 # it with "-1;" just so it starts with a dash.
 #
-# I could replace -e ... with just the filename where I wrote the
-# script, but that wouldn't behave the same for
-#
-#   perl -e 'print ' -e '"Hello\n"'
-#
-# On the other hand, this doesn't work for that one either, because your
-# script ends up being
-#
-#   -1;print-1;"Hello\n"
-#
-# But it works when you aren't being crazy and splitting individual lines
-# up with multiple -e's. 
+# I could replace -e ... with just the filename where I wrote the script, but
+# that means handling -e vs -ne differently, and it's too much trouble.
 #
 # This subroutine also smushes -I /foo into -I/foo to accommodate the
 # same gud brain damage.
@@ -292,11 +316,11 @@ sub fix_spaces {
       if ($array->[$i] =~ /^-.*e$/) {
           my $fn = "$TMPDIR/debug-args/expr-$e_ctr.pl";
           $e_ctr++;
-          open(my $fh, ">", $fn) or die "Unable to write $fn: $!";
-          print $fh $array->[$i+1], "\n";
-          close $fh;
-          $array->[$i+1] = "-1;do'$fn'";
           ++$i;
+          open(my $fh, ">", $fn) or die "Unable to write $fn: $!";
+          print $fh $array->[$i], "\n";
+          close $fh;
+          $array->[$i] = "-1;do'$fn'";
       } elsif ($array->[$i] eq '-I') {
           $array->[$i] .= $array->[$i+1];
           splice(@$array, $i + 1, 1);
@@ -306,7 +330,7 @@ sub fix_spaces {
 
 sub protect {
     local $_ = shift;
-    s/([\'\"\\])/\\$1/g;
+    s/([\'\"\\ ])/\\$1/g;
     return $_;
 }
 
@@ -330,26 +354,49 @@ sub protect {
 #  - COMMAND=reactor
 #  - args=spot.xml
 #
-my $debug_perl;
 if (! $debugger) {
     if ($COMMAND =~ /\bperl$/) {
         $debugger = 'perl';
         fix_spaces(\@args);
-        my $fi = perl_upto_filename(@args);
+        my $fi = scriptname_index(@args);
         $COMMAND = join(" ", $COMMAND, "-d", splice(@args, 0, $fi + 1));
     } elsif (`file -L $COMMAND` =~ /[pP]erl/) {
         $debugger = 'perl';
         $COMMAND = "$PERL -d $COMMAND";
-# Want to default to gdb
-#    } elsif ($COMMAND =~ /\bjs$/) {
-#        $debugger = 'jorendb';
-    } else {
-        $debugger = 'gdb';
     }
 } elsif ($debugger eq 'perl') {
     fix_spaces(\@args);
     $COMMAND = join(" ", map { protect($_) } $COMMAND, "-d", @args);
 }
+
+sub is_python_script {
+    my ($file) = @_;
+    return 1 if `file -L $file` =~ /[pP]ython/;
+
+    # Look for python scripts masquerading as shell scripts
+    system("grep", "-q", 'exec python.*\\$\@', $file);
+    return ($? == 0);
+}
+
+# Similar set of cases for python
+if (! $debugger) {
+    if ($COMMAND =~ /\bpython/) {
+        $debugger = 'python';
+    } elsif (is_python_script($COMMAND)) {
+        $debugger = 'python';
+        unshift(@args, $COMMAND);
+        $COMMAND = $PYTHON;
+    }
+
+    if ($debugger && $debugger eq 'python') {
+        my $idx = scriptname_index(@args);
+        @args = map { qq(\\"$_\\") } @args;
+        splice(@args, $idx, 0, "-m", "pdb");
+        $COMMAND = join(" ", $COMMAND, @args);
+    }
+}
+
+$debugger ||= 'gdb';
 
 if ($debugger eq 'perl') {
   my $argfile = "$TMPDIR/debug-args/perl-args-$$";
@@ -385,6 +432,18 @@ END
   $eval =~ s/\n/ /g;
 
   exec(@EMACS, "--eval", "(progn $eval)") or die;
+} elsif ($debugger eq 'python') {
+    print "COMMAND=$COMMAND\n";
+  my $eval = <<"END";
+(pdb "$COMMAND")
+(comint-send-input)
+(require 'python)
+(add-hook 'comint-output-filter-functions 'python-pdbtrack-comint-output-filter-function t))
+END
+
+  $eval =~ s/\n/ /g;
+
+  exec(@EMACS, "--eval", "(progn $eval)") or die;
 } elsif ($debugger eq 'jorendb') {
   if (grep { $_ eq '--fuzzing-safe' } @args) {
     die "jorendb requires fuzzing-unsafe functions";
@@ -410,8 +469,8 @@ END
 
   # Very basic quoting. Needs to be compatible with emacs's
   # split-and-quote-strings, which you can check against
-  # combine-and-quote-strings.
-  @args = map { s/ /\\ /g; $_ } @args;
+  # combine-and-quote-strings. Basically, 'foo bar' -> '\"foo bar\"'.
+  @args = map { / / ? "\\\"$_\\\"" : $_ } @args;
 
   my $eval = <<"END";
 (let ((default-directory "$cwd")
@@ -421,19 +480,10 @@ END
 END
   $eval =~ s/\n/ /g;
 
-#  exec("debug", "-i", @EMACS, "--eval", "(progn $eval)") or die;
   exec(@EMACS, "--eval", "(progn $eval)") or die;
 }
 
-# From here on, we're going to use gdb
-
-# The rx* aliases actually point to shell scripts, so grab the binary
-# out of them.
-if (`file $COMMAND` =~ /shell script/) {
-    chomp($COMMAND = `$COMMAND --path`);
-    die "Cannot run debug on shell scripts" if $COMMAND !~ /\w/;
-    $COMMAND .= "/reactor";
-}
+# From here on, we're going to use gdb or rr.
 
 # Set the arguments
 my $fname = "$TMPDIR/debug-args/c-args-$$";
@@ -469,9 +519,9 @@ my $init_eval = <<"END";
  (comint-send-input)
  (insert-string "cd $ENV{CWD}")
  (comint-send-input)
+ (insert-string "set annotate 1")
+ (comint-send-input)
 END
-# (insert-string "set annotate 3")
-# (comint-send-input)
 
 # if DBG_DISPLAY is defined in the environment, run the debugged command with
 # its DISPLAY set to the current $DISPLAY, if any, but run emacs itself with
@@ -506,24 +556,29 @@ END
 # (search-buffer "$opt{pattern}" '(insert "Stopping") '(kill-emacs))
 }
 
-#exec(@EMACS, "--eval", "(progn (gud-gdb \"$gdb --annotate=3 $COMMAND\") $init_eval)");
-exec(@EMACS, "--eval", "(progn (gud-gdb \"$gdb --fullname $COMMAND\") $init_eval)");
-#exec(@EMACS, "--eval", "(progn (gdb \"$gdb -i=mi $COMMAND\") $init_eval)");
+if ($debugger eq 'rr') {
+    exec(@EMACS, "--eval", "(progn (gud-gdb \"rr replay -p $rrpid $rr_args\") $init_eval)");
+} elsif ($debugger eq 'record') {
+    print "Running " . join(" ", 'rr', 'record', @rr_args, $COMMAND, @args) . "\n";
+    system('rr', 'record', @rr_args, $COMMAND, @args);
+    exec($0);
+} else {
+    exec(@EMACS, "--eval", "(progn (gud-gdb \"$gdb --fullname $COMMAND\") $init_eval)");
+}
 
-# Copyright 2002-2013 by Steve Fink. All rights reserved.
+# Copyright 2002-2016 by Steve Fink. All rights reserved.
 #
 # You may do anything you want with this script, as long as you don't
 # use it to directly or indirectly cause harm to any mythical
 # creatures. Only real creatures may be harmed by the running of this
-# script. Oh, and you can't remove my copyright notice either, no
-# matter how much you mutate the script itself.
+# script.
 #
 # But if you're nice, you'll properly document all the funky options, clean it
 # up, and send it back to me at sphink@gmail.com. And you seem like a really
 # nice person to me. (I, however, am not; somebody actually did this once, and
 # I completely ignored him. But then, he also removed the non-Perl stuff, which
 # is probably a good idea -- this ought to be split into language-specific
-# scripts. But I use the gdb portion far more than the perl portion these
+# scripts. But I use the gdb portion far more than the Perl portion these
 # days.)
 #
 # If someone can make this work as smoothly with Python, that would be awesome.
