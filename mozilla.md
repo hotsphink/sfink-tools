@@ -291,11 +291,12 @@ It will leave you updated to your new head, or rather the changeset that was for
 (if you're not used to the crazy revset abbreviations, you may prefer to write that as `hg update -r 'heads(descendants(.))'`. I'm trying not to use too many abbreviations in this doc, but typing out "descendants" makes my fingers tired.)
 
 Workspace management
---------------------
+====================
 
 So being able to jump all over your various feature bookmarks and things is cool, but I'm working with C++ here, and I hate touching files unnecessarily because it means a slow and painful rebuild. Personally, I keep two checkouts, ~/src/mozilla and ~/src/mozilla2. If I were more disciplined about disk space, I'd probably have a few more. Most people have several more. I used to have clever schemes of updating a master repository and then having all the others pull from it, but newer hg (and my DSL, I guess) is fast enough that I now just `hg pull unified` manually whenever I need to. I use the default objdir, located in the top directory of my source checkout, because I like to be able to run hg commands from within the objdir. But I suspect it messes me up because hg and watchman have to deal with a whole bunch of files within the checkout area that they don't care about.
 
-### watchman
+watchman
+--------
 
 Oh yeah, watchman. It makes many operations way, way faster. Or at least it did; recently, it often slows things down before it gives up and times out. Yeah, I ought to file a bug on it.
 
@@ -307,9 +308,10 @@ I can't remember how to set up watchman, sorry. It looks like I built it from so
 Maybe ./mach bootstrap sets up watchman for you these days? And ./mach mercurial-setup sets up fsmonitor? I don't know.
 
 Debugging
----------
+=========
 
-### debug
+debug
+-----
 
 I have this crazy Perl script that I've hacked in various horrible ways over the years. It's awful, and awfully useful. If I'm running the JS shell, I do
 
@@ -341,7 +343,8 @@ to run the given test with hopefully the appropriate binary running under gdb in
 
 to bring up Emacs running jorendb[5].
 
-### rr
+rr
+--
 
 I love me my rr. I have a .gdbinit.py startup file that creates a handy command for displaying the event number and tick count to keep me oriented chronologically:
 
