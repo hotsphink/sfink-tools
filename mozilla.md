@@ -35,12 +35,14 @@ What's my state?
 
 I like having an easy way to see my current "patch stack" and what I'm working on. My main tool for this is an alias `hg ls`:
 
+```shell
     % hg ls
     418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
     418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
     418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers 
     418165|9b790021a607   Bug 1367900 - Record the values and thresholds for GC triggers 
     418171|5e12353100f6   Bug 1167452 - Incrementalize weakmap marking weakmap.incremental
+```
 
 You can't see the colors (sorry, I should probably figure out how to do that.) But the first line is orange, and is the public[1] revision that my current patch stack is based on. The remaining lines are the ancestry of my current checkout. Note the weird format: I have it display changeset number and revision hash separated by a vertical bar because then I can double-click the hash and copy it. If I were smarter, I would teach my terminal to work with the normal ':' separator.
 
@@ -104,6 +106,7 @@ But often, I will get distracted and begin working on a different feature. I *co
 
 When I want to go back to working on the original feature, I *still* won't bother to clean things up, because I'm a bad and lazy person. Instead, I'll just start making a bunch of micro-commits pertaining to various of the patches in my current stack. I use a naming convention in the patch descriptions of "M-<which feature I'm changing>". So after a little while, my patch stack might look like:
 
+```shell
     418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
     418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
     418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers 
@@ -113,7 +116,8 @@ When I want to go back to working on the original feature, I *still* won't bothe
     418173|deadbeef4dad   M-static
     418174|deadbeef4dad   M-triggers
     418175|deadbeef4dad   M-weakmap
-    418176|deadbeef4dad   M-triggers 
+    418176|deadbeef4dad   M-triggers
+```
 
 What a mess, huh? Now comes the fun part. I'm a huge fan of the 'chistedit' extension[3]. But the default 'histedit' will do the same thing with your own editor; I just really like the curses interface. I have an alias to make chistedit use a reasonable default for which revisions to show, which I suspect is no longer needed now that histedit has something reasonable builtin. But mine is:
 
@@ -122,6 +126,7 @@ What a mess, huh? Now comes the fun part. I'm a huge fan of the 'chistedit' exte
 
 Now `hg che` will bring up a curses interface showing your patch stack. Use j/k to move the highlight around the list. Highlight one of the patches, maybe M-triggers, and then use J/K (K in this case) to move it up or down in the list. Reshuffle the patches until you have your modification patches sitting directly underneath the main patch, eg
 
+```shell
     pick  418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
     pick  418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
     pick  418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers 
@@ -132,9 +137,11 @@ Now `hg che` will bring up a curses interface showing your patch stack. Use j/k 
     pick  418176|deadbeef4dad   M-triggers 
     pick  418171|5e12353100f6   Bug 1167452 - Incrementalize weakmap marking
     pick  418175|deadbeef4dad   M-weakmap
+```
 
 Now use 'r' to "roll" these patches into their parents. You should end up with something like:
 
+```shell
     pick  418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
     pick  418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
     pick  418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers 
@@ -145,6 +152,7 @@ Now use 'r' to "roll" these patches into their parents. You should end up with s
     roll^ 418176|deadbeef4dad
     pick  418171|5e12353100f6   Bug 1167452 - Incrementalize weakmap marking
     roll^ 418175|deadbeef4dad
+```
 
 Notice how the caret shows the direction your are rolling up your patch to, and that the descriptions are gone. If you like giving your micro-commits good descriptions, you might want to use 'f' for "fold" instead, in which case all of your descriptions will be smushed together instead.
 
