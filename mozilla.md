@@ -44,7 +44,7 @@ I like having an easy way to see my current "patch stack" and what I'm working o
     418171|5e12353100f6   Bug 1167452 - Incrementalize weakmap marking weakmap.incremental
 ```
 
-You can't see the colors (sorry, I should probably figure out how to do that.) But the first line is orange, and is the public[1] revision that my current patch stack is based on. The remaining lines are the ancestry of my current checkout. Note the weird format: I have it display changeset number and revision hash separated by a vertical bar because then I can double-click the hash and copy it. If I were smarter, I would teach my terminal to work with the normal ':' separator.
+You can't see the colors (sorry, I should probably figure out how to do that.) But the first line is orange, and is the public<sup id="a1">[1](#f1)</sup> revision that my current patch stack is based on. The remaining lines are the ancestry of my current checkout. Note the weird format: I have it display changeset number and revision hash separated by a vertical bar because then I can double-click the hash and copy it. If I were smarter, I would teach my terminal to work with the normal ':' separator.
 
 "weakmap.incremental" is green in my terminal. It's a bookmark name. Bookmarks are my way of keeping track of multiple things I'm working on. They're sort of feature branches, except I have a bad habit of piling up a bunch of unrelated things in my "patch stack". If they start interfering with each other, I'll rebase them onto the tip of my mozilla-inbound checkout and give them their own bookmark names:
 
@@ -363,7 +363,7 @@ I have a .gdbinit file with some funky commands to set hardware watchpoints on G
 
 ----
 
-[1] "public" is the name of a mercurial phase. It means a changeset that has been pushed to mozilla-inbound or similar. Stuff you're working on will ordinarily be in the "draft" phase until you push it.
+<b id="f1">[1]</b> "public" is the name of a mercurial phase. It means a changeset that has been pushed to mozilla-inbound or similar. Stuff you're working on will ordinarily be in the "draft" phase until you push it. [↩](#a1)
 
 [2] Install evolve by cloning `hg clone https://bitbucket.org/marmoute/mutable-history` somewhere, then adding it into your ~/.hgrc:
 
