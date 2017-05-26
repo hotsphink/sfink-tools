@@ -154,11 +154,11 @@ Now use 'r' to "roll" these patches into their parents. You should end up with s
     roll^ 418175|deadbeef4dad
 ```
 
-Notice how the caret shows the direction your are rolling up your patch to, and that the descriptions are gone. If you like giving your micro-commits good descriptions, you might want to use 'f' for "fold" instead, in which case all of your descriptions will be smushed together instead.
+Notice how the caret shows the direction your are rolling up your patch to, and that the descriptions are gone. If you like giving your micro-commits good descriptions, you might want to use 'f' for "fold" instead, in which case all of your descriptions will be smushed together.
 
 Now press 'c' to commit the changes. Whee! Use `hg ls` to see that everything is nice and pretty.
 
-(chistedit has other nice tricks. Use 'v' to see the patch. j/k still work, allowing you to scan up and down through the stack of patches. Or 'm', which will bring up an editor after you 'c' commit the changes, allowing you to edit the commit message for each patch so marked.)
+(chistedit has other nice tricks. Use 'v' to see the patch. j/k now go up and down a line at a time. Space goes down a page, page up/down work. J/K now switch between patches. Oops, I just noticed I didn't update the help to include that. 'v' to return back to the patch list. Now try 'm', which will bring up an editor after you 'c' commit the changes, allowing you to edit the commit message for each patch so marked.)
 
 From my above example, you might think I use one changeset per bug. That's very bug-dependent; many times I'll have a whole set of patches for one bug, and I'll have multiple bugs in my patch stack at one time. If you do that too, be sure to put the bug number in your commit message early to avoid getting confused[4].
 
