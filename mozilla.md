@@ -35,7 +35,7 @@ What's my state?
 
 I like having an easy way to see my current "patch stack" and what I'm working on. My main tool for this is an alias `hg ls`:
 
-```shell
+```null
     % hg ls
     418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
     418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
