@@ -117,9 +117,10 @@ class PythonLog(gdb.Command):
         gdb.Command.__init__(self, "log", gdb.COMMAND_USER)
         self.LogFile = None
 
-    def openlog(self, filename):
+    def openlog(self, filename, quiet=False):
         self.LogFile = open(filename, "a+")
-        print("Logging to %s" % (self.LogFile.name,))
+        if not quiet:
+            print("Logging to %s" % (self.LogFile.name,))
 
     def stoplog(self):
         self.LogFile = False
@@ -182,9 +183,11 @@ class PythonLog(gdb.Command):
                 if current < (message[0], message[1]):
                     place = i
                     break
-
-        for i, message in enumerate(messages):
-            print("%s%s" % ("=> " if i == place else "   ", message[3]))
+            for i, message in enumerate(messages):
+                print("%s%s" % ("=> " if i == place else "   ", message[3]))
+        else:
+            for message in messages:
+                print(message)
 
     def edit(self):
         if not self.LogFile:
@@ -194,7 +197,7 @@ class PythonLog(gdb.Command):
         filename = self.LogFile.name
         self.LogFile.close()
         os.system(os.environ.get('EDITOR', 'emacs') + " " + filename)
-        self.openlog(filename)
+        self.openlog(filename, quiet=True)
 
 logger = PythonLog()
 

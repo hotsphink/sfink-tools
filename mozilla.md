@@ -359,7 +359,27 @@ Or I can make rr display that output on every prompt:
     Run till exit from #0 blah blah
     (rr 545/267619)
 
-I have a .gdbinit file with some funky commands to set hardware watchpoints on GC mark bits so I can 'continue' and 'reverse-continue' through an execution to find where the mark bits are set. And strangely dear to my heart is the 'rfin' command, which is just an easier to type alias for 'reverse-finish'.
+I have a .gdbinit file with some funky commands to set hardware watchpoints on GC mark bits so I can 'continue' and 'reverse-continue' through an execution to find where the mark bits are set. And strangely dear to my heart is the 'rfin' command, which is just an easier to type alias for 'reverse-finish'. Other gdb commands:
+
+    (rr) log some message for $thread  # $thread is replaced by eg T1
+    (rr) log another message with $1 in it  # gdb convenience vars ok
+    (rr) rn # reverse-next
+    (rr) log a third message with {3+4} in it  # {gdb expr}
+    (rr) log -dump
+    562/8443 some message for T2
+    562/8443 another message with 0x7ff687749c00 in it
+    346/945 a third message with 7 in it
+    (rr) log -sorted
+       346/945 a third message with 7 in it
+    => 562/8443 some message for T2
+       562/8443 another message with 0x7ff687749c00 in it
+    (rr) log -edit  # brings up $EDITOR on your full log file
+
+The idea is to be able to move around in time, logging various things, and then use `log -sorted` to display the log messages *in chronological order according to the execution*. (Note that when you do this, the next point in time coming up will be labeled with "=>" to show you when you are.)
+
+Note that the default log filename is based on the process ID, and will append entries across multiple `rr replay` runs. Use `set logfile <filename>` to switch to a different file.
+
+Finally, there's a simple `pp` command, where `pp foo` is equivalent to `python print(foo)`.
 
 ----
 
