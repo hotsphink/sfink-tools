@@ -8,9 +8,10 @@ import re
 
 RUNNING_RR = None
 
-print(os.environ)
-
 def running_rr():
+    '''Detect whether running under rr. Note that this must not be called during initial
+       execution of this script, because at that time the 'when' command will not yet exist.
+    '''
     global RUNNING_RR
     if RUNNING_RR is not None:
         return RUNNING_RR
@@ -167,6 +168,8 @@ class PythonLog(gdb.Command):
         os.system(os.environ.get('EDITOR', 'emacs') + " " + filename)
         self.openlog(filename)
 
+logger = PythonLog()
+
 class ParameterLogFile(gdb.Parameter):
     def __init__(self):
         super(ParameterLogFile, self).__init__('logfile', gdb.COMMAND_SUPPORT, gdb.PARAM_STRING)
@@ -183,8 +186,4 @@ class ParameterLogFile(gdb.Parameter):
     def get_show_string(self, svalue):
         return self.logfile
 
-if running_rr():
-    logger = PythonLog()
-    ParameterLogFile()
-
-print("RUNNING RR = %s" % (running_rr()))
+ParameterLogFile()
