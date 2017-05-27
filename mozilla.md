@@ -376,7 +376,17 @@ I have a .gdbinit file with some funky commands to set hardware watchpoints on G
        562/8443 also, obj is now 0x7ff687749c00
     (rr) log -edit  # brings up $EDITOR on your full log file
 
-The idea is to be able to move around in time, logging various things, and then use `log -sorted` to display the log messages *in chronological order according to the execution*. (Note that when you do this, the next point in time coming up will be labeled with "=>" to show you when you are.)
+The idea is to be able to move around in time, logging various things, and then use `log -sorted` to display the log messages *in chronological order according to the execution*. (Note that when you do this, the next point in time coming up will be labeled with "=>" to show you when you are.) You might consider using this in conjunction with `command` as a simple way of automatically tracing the evolution of some value:
+
+    (rr) b HashTable::put
+    Breakpoint 1 set at HashTable::put(Entry)
+    (rr) comm 1
+    > log [$thread] in put(), table size is now {mEntries}
+    > cont
+    > end
+    (rr) c
+
+Boom! You now have the value of mEntries every time put() is called. (But watch out for log messages in breakpoints; it will execute the log command every time you encounter the breakpoint, so if you go forwards and backwards across the breakpoint several times, you'll end up with a bunch of duplicate entries in your log. `log -edit` is useful for manually cleaning those up.)
 
 Note that the default log filename is based on the process ID, and will append entries across multiple `rr replay` runs. Use `set logfile <filename>` to switch to a different file.
 
