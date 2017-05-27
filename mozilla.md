@@ -361,18 +361,19 @@ Or I can make rr display that output on every prompt:
 
 I have a .gdbinit file with some funky commands to set hardware watchpoints on GC mark bits so I can 'continue' and 'reverse-continue' through an execution to find where the mark bits are set. And strangely dear to my heart is the 'rfin' command, which is just an easier to type alias for 'reverse-finish'. Other gdb commands:
 
-    (rr) log some message for $thread  # $thread is replaced by eg T1
-    (rr) log another message with $1 in it  # gdb convenience vars ok
-    (rr) rn # reverse-next
-    (rr) log a third message with {3+4} in it  # {gdb expr}
+    (rr) log $thread sees the bad value  # $thread is replaced by eg T1
+    (rr) log also, obj is now $1         # gdb convenience vars ok
+    (rr) rfin
+    (rr) log {$2+4} bytes are required   # {any gdb expr}
+    (rr) n
     (rr) log -dump
-    562/8443 some message for T2
-    562/8443 another message with 0x7ff687749c00 in it
-    346/945 a third message with 7 in it
+    562/8443 T2 sees the bad value
+    562/8443 also, obj is now 0x7ff687749c00
+    346/945 7 bytes are required
     (rr) log -sorted
-       346/945 a third message with 7 in it
-    => 562/8443 some message for T2
-       562/8443 another message with 0x7ff687749c00 in it
+       346/945 7 bytes are required
+    => 562/8443 T2 sees the bad value
+       562/8443 also, obj is now 0x7ff687749c00
     (rr) log -edit  # brings up $EDITOR on your full log file
 
 The idea is to be able to move around in time, logging various things, and then use `log -sorted` to display the log messages *in chronological order according to the execution*. (Note that when you do this, the next point in time coming up will be labeled with "=>" to show you when you are.)
