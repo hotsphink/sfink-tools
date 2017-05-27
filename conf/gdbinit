@@ -1,0 +1,146 @@
+# .gdbinit file for debugging Mozilla
+
+set unwindonsignal on
+
+set debug-file-directory /usr/lib/debug
+
+add-auto-load-safe-path ~/src
+
+python import os
+python import sys
+
+# Show the concrete types behind nsIFoo
+set print object on
+set print static-members off
+
+def pmethod
+        p/a *(void**)(*((PRUint64*)mCallee) + 8 * mVTableIndex)
+end
+
+# Manual stackwalk, depending on frame pointers
+# Usage: dumbbt [limit] [rbp] [rsp]
+def dumbbt
+  set $limit = 200
+  set $f0 = $rbp
+  set $f1 = $rsp
+  if $argc > 2
+    set $f1 = $arg2
+  end
+  if $argc > 1
+    set $f0 = $arg1
+  end
+  if $argc > 0
+    set $limit = $arg0
+  end
+
+  set $depth = 0
+  set $ra = $rip
+  while ($f0 > 0 && $depth < $limit)
+    python
+print "Frame %s: %s .. %s = %s" % (gdb.parse_and_eval('$depth'),
+                                   gdb.parse_and_eval('$f0'),
+                                   gdb.parse_and_eval('$f1'),
+                                   gdb.parse_and_eval('(void(*)())$ra'))
+    end
+    set $ra = ((void**)$f0)[1]
+    set $depth = $depth + 1
+    set $f1 = $f0
+    set $f0 = ((void**)$f0)[0]
+  end
+end
+
+# from 10 20 'p strlen("%s")'
+def pyrange
+  python for x in xrange($arg0, $arg1): gdb.execute($arg2 % (x,))
+end
+
+def loudstep
+  disp/i $pc
+  set $i = 0
+  while ($i < $arg0)
+    si
+    set $i = $i + 1
+  end
+end
+
+# construct <type>
+# Do Not Trust
+def construct
+  p $obj = ($arg0 *) operator new(sizeof($arg0), malloc(sizeof($arg0)))
+end
+
+def showstring
+  x/($1.Length())s $1.BeginReading()
+end
+
+# reappend "stem" "tail" [limit]
+# Example: reappend "p obj->shape" "->parent" 3
+python
+class RepeatedAppend(gdb.Command):
+  """Run a command, appending a "tail" to the command on every iteration, until an error or [limit] is reached"""
+  def __init__(self):
+    #super(Repeat, self).__init__("rep", gdb.COMMAND_USER)
+    gdb.Command.__init__(self, "reappend", gdb.COMMAND_USER)
+
+  def invoke(self, arg, from_tty):
+    args = gdb.string_to_argv(arg)
+    cmd = args[0]
+    tail = args[1]
+    limit = int(args[2]) if len(args) > 2 else 9999
+    for i in xrange(limit):
+      print("Executing %s + %s x %d" % (args[0], args[1], limit))
+      gdb.execute(cmd)
+      cmd = cmd + tail
+
+RepeatedAppend()
+end
+
+# repeat "command" [limit]
+# Example: rep $->parent 20
+python
+class Repeat(gdb.Command):
+  """Repeat command [limit] times or until an error is hit"""
+  def __init__(self):
+    gdb.Command.__init__(self, "repeat", gdb.COMMAND_USER)
+
+  def invoke(self, arg, from_tty):
+    args = gdb.string_to_argv(arg)
+    cmd = args[0]
+    limit = int(args[1]) if len(args) > 1 else 9999
+    for i in xrange(limit):
+      print("%d: executing %s" % (i, cmd))
+      gdb.execute(cmd)
+
+Repeat()
+end
+
+def skips
+  skip file RootingAPI.h
+  skip file GCAPI.h
+end
+
+def rfin
+  reverse-finish
+end
+
+def watchmark
+  # First arg is the gc cell address
+  # Second arg is the color
+  #
+  # Note that it is often handy to make the resulting watchpoint conditional on
+  # having a matching address (since it will be breaking for anything sharing the
+  # mark word)
+  set $word = js::debug::GetMarkWordAddress($arg0)
+  set $mask = js::debug::GetMarkMask($arg0, $arg1)
+  watch -l *$word
+end
+
+python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.py")).read())
+
+def promptnow
+python
+def myprompt(current_prompt):
+  return "myprompt " + current_prompt + ":"
+gdb.prompt_hook = myprompt
+end
+end
