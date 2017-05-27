@@ -1,10 +1,6 @@
 Steve Fink's collection of random tools
 
-These are tools that I think might be useful to other people. So far, I've just
-been uploading them to my people.mozilla.org account, but I realized that
-hosting them in a DVCS makes it much easier for people to (1) check if there
-are any updates, and (2) grab those updates. And maybe (3) recover old versions
-when I break shit.
+These are tools that I think might be useful to other people.
 
 ----------------------------------------------------------------------
 
@@ -12,6 +8,8 @@ Tools included:
 
 json - Interactive navigation of a JSON file
 debug - Start up a debugger within emacs on various types of files
+em - Start up emacs on the files touched by a patch, on a relevant line number
+derange - Ignore this
 
 ----------------------------------------------------------------------
 
@@ -22,7 +20,7 @@ UNIX shell prompt, allowing you to cd, ls, grep, and similar.
 
 Requires the Perl module 'JSON'. Installable on Fedora with
 
-  yum install perl-JSON
+  dnf install perl-JSON
 
 Run json --help for a full help message. Here's an excerpt:
 
@@ -71,3 +69,23 @@ just do
 
 It will discover that there's no command ff in $PATH and start up a subshell,
 look for the alias 'ff', and use that command instead.
+
+----------------------------------------------------------------------
+
+em - Edit files relevant to a patch
+
+1. em foo.txt:33 will run emacs +33 foo.txt
+   so will em foo.txt:33: (easier cut & paste of trailing colon for error messages)
+   and foo.txt will be found anywhere in the current hg tree (if not in cwd)
+2. em with no args will run emacs on the files changed in the cwd, or if none, then
+   by the cwd's parent rev
+3. em 01faf51a0acc will run emacs on the files changed by that rev.
+4. em foo.txt.rej will run emacs on both foo.txt and foo.txt.rej, but at the lines
+   containing the first patch hunk and the line number of the original that it
+   applies to (ok, so this is probably where this script jumped the shark.)
+
+----------------------------------------------------------------------
+
+derange - an old script for automatically positioning the windows on my desktop
+
+Not really useful to anyone else. Or me, for that matter.

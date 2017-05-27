@@ -1,0 +1,119 @@
+#!/usr/bin/perl
+
+# 1. em foo.txt:33 will run emacs +33 foo.txt
+#    so will em foo.txt:33: (easier cut & paste of trailing colon for error messages)
+#    and foo.txt will be found anywhere in the current hg tree (if not in cwd)
+# 2. em with no args will run emacs on the files changed in the cwd, or if none, then
+#    by the cwd's parent rev
+# 3. em 01faf51a0acc will run emacs on the files changed by that rev.
+# 4. em foo.txt.rej will run emacs on both foo.txt and foo.txt.rej, but at the lines
+#    containing the first patch hunk and the line number of the original that it
+#    applies to (ok, so this is probably where this script jumped the shark.)
+
+use strict;
+use warnings;
+
+my $ROOTDIR;
+my $TOPROOTDIR;
+my $MQROOTDIR;
+
+my @final_args;
+my $magic = 0;
+my $revision = '.';
+
+my $verbose;
+if (@ARGV && ($ARGV[0] eq '-v' || $ARGV[0] eq '--verbose')) {
+    $verbose = 1;
+    shift(@ARGV);
+}
+
+my $use_client;
+if (@ARGV && ($ARGV[0] eq '-c' || $ARGV[0] eq '--client')) {
+    $use_client = 1;
+    shift(@ARGV);
+}
+
+ARG: for my $arg (@ARGV) {
+    if ($arg =~ /^[-+]/) {
+        push @final_args, $arg;
+        next;
+    }
+
+    # Check for filename:lineno.
+    if ($arg =~ /(.*):(\d+):?$/) {
+        # Might be filename:77 or filename:77: (the latter comes from a simple
+        # copy/paste of an error message). Convert to opening the appropriate
+        # line.
+        push @final_args, "+$2";
+        $arg = $1;
+    }
+
+    # Check for a path relative to the hg root, or failing that, anywhere in
+    # the repo.
+    if (! -r $arg) {
+        chomp($ROOTDIR = $TOPROOTDIR ||= qx(hg root));
+        if (-r "$ROOTDIR/$arg") {
+            $arg = "$ROOTDIR/$arg";
+        } else {
+            chomp($ROOTDIR = $MQROOTDIR ||= qx(hg root --mq 2>/dev/null));
+            if (-r "$ROOTDIR/$arg") {
+                $arg = "$ROOTDIR/$arg";
+            } else {
+                chomp(my $path = qx(hg files "relglob:$arg"));
+                if (-r $path) {
+                    $arg = $path;
+                } else {
+                    $revision = $arg;
+                    next;
+                }
+            }
+        }
+    }
+
+    # Check for a reject file.
+    if ($arg =~ /(.*)\.rej$/) {
+        my $orig = $1;
+        open(my $fh, "<", $arg) or die "open $arg: $!";
+        my $hunkstart;
+        my $context = 0;
+        while(<$fh>) {
+            if (/^\@\@ -(\d+)/) {
+                $hunkstart = $1;
+            } elsif (defined($hunkstart)) {
+                if (/^ /) {
+                    ++$context;
+                } else {
+                    # Open the original file at the first changed line number,
+                    # and the reject file at the first hunk.
+                    push @final_args, ("+" . ($hunkstart + $context), $orig,
+                                       "+" . ($context + 3 + 1),      $arg);
+                    next ARG;
+                }
+            }
+        }
+
+        push @final_args, ($orig, $arg);
+        $magic = 1;
+    } else {
+        push @final_args, $arg;
+    }
+}
+
+if (@final_args == 0) {
+    chomp($ROOTDIR = $TOPROOTDIR ||= qx(hg root));
+
+    print "Looking for changes in working directory...\n"
+        if $verbose;
+    my @files;
+    chomp(@files = qx(hg diff | diffstat -l -p1));
+    if (@files == 0) {
+        print "Using changes from $revision\n"
+            if $verbose;
+        chomp(@files = qx(hg export --hidden $revision | diffstat -l -p1));
+    }
+    push @final_args, map { "$ROOTDIR/$_" } @files;
+}
+
+my $cmd = $use_client ? "emacsclient" : "emacs";
+print "Running: $cmd @final_args\n" if $magic;
+exec($cmd, @final_args);
