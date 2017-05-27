@@ -1,6 +1,12 @@
 # $_when_ticks function.
 # $_when functions
 # set rrprompt on
+# now
+# set logfile /tmp/mylog.txt
+# log some message
+# log -dump
+# log -sorted
+# log -edit
 
 import gdb
 import os
@@ -113,23 +119,45 @@ class PythonLog(gdb.Command):
 
     def openlog(self, filename):
         self.LogFile = open(filename, "a+")
-        print("Opened %s" % (self.LogFile.name,))
+        print("Logging to %s" % (self.LogFile.name,))
 
     def stoplog(self):
         self.LogFile = False
 
+    def default_log_filename(self):
+        tid = gdb.selected_thread().ptid[0]
+        return os.path.join(os.environ['HOME'], "rr-session-%s.log" % (tid,))
+
     def invoke(self, arg, from_tty):
-        if '-sorted'.startswith(arg):
-            self.dump(sort=True)
-        elif '-dump'.startswith(arg):
-            self.dump()
-        elif '-edit'.startswith(arg):
-            self.edit()
-        else:
-            if self.LogFile is None:
-                self.openlog(os.path.join(os.environ['HOME'], "rr-session.log"))
-            if self.LogFile:
-                self.LogFile.write("%s %s\n" % (now(), arg))
+        if arg.startswith('-'):
+            if '-sorted'.startswith(arg):
+                self.dump(sort=True)
+            elif '-dump'.startswith(arg):
+                self.dump()
+            elif '-edit'.startswith(arg):
+                self.edit()
+            else:
+                print("unknown log option")
+            return
+
+        if self.LogFile is None:
+            self.openlog(self.default_log_filename())
+        if not self.LogFile:
+            return
+
+        # Replace {expr} with the result of evaluating the (gdb) expression expr.
+        # Allow one level of curly bracket nesting within expr.
+        out = re.sub(r'\{((?:\{[^\}]*\}|\\\}|[^\}])*)\}',
+                     lambda m: str(gdb.parse_and_eval(m.group(1))),
+                     arg)
+
+        # Replace $thread with "T3", where 3 is the gdb's notion of thread number.
+        out = out.replace("$thread", "T" + str(gdb.selected_thread().num))
+
+        # Let gdb handle other $ vars.
+        out = re.sub(r'(\$\w+)', lambda m: str(gdb.parse_and_eval(m.group(1))), out)
+
+        self.LogFile.write("%s %s\n" % (now(), out))
 
     def dump(self, sort=False):
         if not self.LogFile:
@@ -187,3 +215,13 @@ class ParameterLogFile(gdb.Parameter):
         return self.logfile
 
 ParameterLogFile()
+
+class PythonPrint(gdb.Command):
+    """Print the value of the python expression given"""
+    def __init__(self):
+        gdb.Command.__init__(self, "pp", gdb.COMMAND_USER)
+
+    def invoke(self, arg, from_tty):
+        print(eval(arg))
+
+PythonPrint()

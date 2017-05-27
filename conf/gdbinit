@@ -136,11 +136,3 @@ def watchmark
 end
 
 python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.py")).read())
-
-def promptnow
-python
-def myprompt(current_prompt):
-  return "myprompt " + current_prompt + ":"
-gdb.prompt_hook = myprompt
-end
-end
