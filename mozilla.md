@@ -407,7 +407,7 @@ The idea is to be able to move around in time, logging various things, and then 
 
 Boom! You now have the value of mEntries every time put() is called. Or consider doing that with a hardware watchpoint. (But watch out for log messages in breakpoints; it will execute the log command every time you encounter the breakpoint, so if you go forwards and backwards across the breakpoint several times, you'll end up with a bunch of duplicate entries in your log. `log -edit` is useful for manually cleaning those up.)
 
-Note that the default log filename is based on the process ID, and will append entries across multiple `rr replay` runs. Use `set logfile <filename>` to switch to a different file.
+Note that the default log filename is based on the process ID, and the logging will append entries across multiple `rr replay` runs. So if you run muliple sessions of `rr replay` on the same process recording, all of your log messages will be collected together. Use `set logfile <filename>` to switch to a different file.
 
 Finally, there's a simple `pp` command, where `pp foo` is equivalent to `python print(foo)`.
 
