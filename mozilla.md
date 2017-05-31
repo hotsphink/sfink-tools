@@ -1,26 +1,33 @@
 Intro
 =====
 
-I thought I'd write up one of those periodic posts describing my workflow. My workflow is not the best possible one for everyone. Nor is it the best possible one for me, since I'm a creature of habit and cling to some well-known tools. But I think it's sometimes helpful to look at what someone else is doing and see what you might be able to steal.
+I thought I'd write up one of those periodic posts describing my workflow. My workflow is not best for everyone. Nor is it the best possible one for me, since I'm a creature of habit and cling to comfortable tools. But it can be helpful to look at what others do, and see what you might be able to steal.
 
-This is going to be more of a summary overview than an in-depth description or tutorial, because there's a lot to cover and I don't know what would be helpful to other people, so I figure I'd just put up an outline and people can ask for detail on what they're interested in. Or not, in which case I won't need to spend a lot of time on something irrelevant.
+This is going to be more of a summary overview than an in-depth description or tutorial. I am happy to expand on bits you are curious about.
+
+A number of things here use local crap that I've piled up over time. I've published a repository containing some of them. At the moment, I have it uploaded to two difference places. I don't know how long I'll keep them in sync before giving up on one:
+
+* (mercurial) https://bitbucket.org/sfink/sfink-tools
+* (git) https://github.com/hotsphink/sfink-tools
 
 Code Management
 ===============
 
-I formerly used mq, and when I'd finally had enough of it, I tried to make my vanilla hg workflow similar to it and provide the same benefits.
+I use mercurial. I like mercurial. I used git first, for quite a while, but it just doesn't stick in my brain.
+
+I formerly used mq, and when I'd finally had enough of it, I tried to make my vanilla hg workflow provide as many of the same benefits as possible. I also use evolve[1], though it's mostly just to make some things nicer.
 
 I use phases heavily to keep track of what's "mine". If you're pushing to any personal repositories, be sure to mark them non-publishing.
 
 Pulling from upstream
 ---------------------
 
-I use the mozilla-unified repository. Put this in your ~/.hgrc:
+I use the mozilla-unified repository. I have this in my ~/.hgrc:
 
     [paths]
     unified = https://hg.mozilla.org/mozilla-unified
 
-and then you can pull with
+so I can pull with
 
     % hg pull unified
 
@@ -28,14 +35,14 @@ I will usually rebase on top of inbound. `./mach mercurial-setup` should set you
 
     % hg rebase -d inbound
 
-That assumes you're currently updated to a "patch stack" that you want to rebase, probably with a bookmark at its head.
+That assumes you are currently updated to the "patch stack" that you want to rebase, probably with a bookmark at its head.
 
 What's my state?
 ----------------
 
-I like having an easy way to see my current "patch stack" and what I'm working on. My main tool for this is an alias `hg ls`:
+The biggest thing I missed from mq was an easy way to see my current "patch stack". My main tool for this is an alias `hg ls`:
 
-```null
+```
     % hg ls
     418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
     418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
@@ -44,14 +51,13 @@ I like having an easy way to see my current "patch stack" and what I'm working o
     418171|5e12353100f6   Bug 1167452 - Incrementalize weakmap marking weakmap.incremental
 ```
 
-You can't see the colors (sorry, I should probably figure out how to do that.) But the first line is orange, and is the public<sup id="a1">[1](#f1)</sup> revision that my current patch stack is based on. The remaining lines are the ancestry of my current checkout. Note the weird format: I have it display changeset number and revision hash separated by a vertical bar because then I can double-click the hash and copy it. If I were smarter, I would teach my terminal to work with the normal ':' separator.
+You can't see the colors, sorry. (Or if you can, you're looking at this document on bitbucket and the colors are random and crazy.) But the first line is orange, and is the public[2] revision that my current patch stack is based on. The remaining lines are the ancestry of my current checkout. Note the weird format: I have it display "<changeset>|<rev>" so I can double-click the hash and copy it. If I were smarter, I would teach my terminal to work with the normal ':' separator. Without breaking URL highlighting.
 
-"weakmap.incremental" is green in my terminal. It's a bookmark name. Bookmarks are my way of keeping track of multiple things I'm working on. They're sort of feature branches, except I have a bad habit of piling up a bunch of unrelated things in my "patch stack". If they start interfering with each other, I'll rebase them onto the tip of my mozilla-inbound checkout and give them their own bookmark names:
+"weakmap.incremental" is green in my terminal. It's a bookmark name. Bookmarks are my way of keeping track of multiple things I'm working on. They're sort of feature branches, except I have a bad habit of piling up a bunch of unrelated things in my patch stack. If they start interfering with each other too much, I'll rebase them onto the tip of my mozilla-inbound checkout and give them their own bookmark names:
 
     % hg rebase -d inbound weakmap.incremental
     % hg book -r 9b790021a607 gc.triggers
     % hg rebase -d inbound gc.triggers
-    ...
 
 The implementation of `hg ls` in my ~/.hgrc is:
 
@@ -60,7 +66,7 @@ The implementation of `hg ls` in my ~/.hgrc is:
     ls = !if [[ -n "$1" ]]; then r="$1"; else r=.; fi; $HG log -r "parents(::$r and not public()) + ::$r and not public()" --template "{label('changeset.{phase}', '{rev}|{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
     sl = ls
 
-(Note that I mistype `hg ls` as `hg sl` about 40% of the time. You may not be so burdened.) There are better aliases for this. I think ./mach mercurial setup might give you `hg wip` or something now? But mine is concise and simple to use. Just ignore that monstrosity of a template.
+(Note that I mistype `hg ls` as `hg sl` about 40% of the time. You may not be so burdened.) There are better aliases for this. I think ./mach mercurial setup might give you `hg wip` or something now? But I like the terse output format of mine. (Just ignore that monstrosity of a template in the implementation.)
 
 That works for a single stack of patches underneath a root bookmark. To see all of my stacks, I do:
 
@@ -77,12 +83,14 @@ That works for a single stack of patches underneath a root bookmark. To see all 
     [alias]
     lsb = log -r 'bookmark() and not public()' -T '{pad("{bookmarks}", 30)} {desc|firstline}\n'
 
+Note that this displays only *non-public* changesets. (A plain `hg bookmarks` will dump out all of them... sorted alphabetically. Bleagh.) That means that when I land something, I don't need to do anything to remove it from my set of active features. If I land the whole stack, then it'll be public and so will disappear from `hg lsb`. If I land part of the stack, then the bookmarked head will still be visible. (But if I bookmarked portions of the stack, then the right ones will disappear. Phases are cool.)
+
 Working on code
 ---------------
 
 ### Updating, bookmarking
 
-When starting on something new, I'll update to 'inbound' (feel free to use 'central' if you don't want to live dangerously. Given that you'll have to rebase before landing anyway, 'central' is probably a much smarter choice.) Then I'll create a bookmark for the feature/fix I'm working on:
+When starting on something new, I'll update to 'inbound' (feel free to use 'central' if you don't want to live dangerously. Given that you'll have to rebase onto inbound before landing anyway, 'central' is probably a much smarter choice.) Then I'll create a bookmark for the feature/fix I'm working on:
 
     % hg pull unified
     % hg update -r inbound
@@ -100,7 +108,7 @@ Then while I'm being a good boy and continuing to work on the feature named in t
 
     % hg amend
 
-`hg amend` is a command from the mutable-history aka evolve extension[2]. If you're not using it, you could substitute `hg commit --amend`, but it will annoyingly keep asking you to update the commit message. There's a fix, but this document is about my workflow, not yours.
+`hg amend` is a command from the mutable-history aka evolve extension[1]. If you're not using it, you could substitute `hg commit --amend`, but it will annoyingly keep asking you to update the commit message. There's a fix, but this document is about my workflow, not yours.
 
 But often, I will get distracted and begin working on a different feature. I *could* update to inbound or central and start again, but that tends to touch too many source files and slow down my rebuilds, and I have a lot of inertia, so usually I'll just start hacking within the same bookmarked patch stack. When done or ready to work on the original (or a new) feature, I'll make another commit.
 
@@ -394,12 +402,12 @@ Finally, there's a simple `pp` command, where `pp foo` is equivalent to `python 
 
 ----
 
-<b id="f1">[1]</b> "public" is the name of a mercurial phase. It means a changeset that has been pushed to mozilla-inbound or similar. Stuff you're working on will ordinarily be in the "draft" phase until you push it. [↩](#a1)
-
-[2] Install evolve by cloning `hg clone https://bitbucket.org/marmoute/mutable-history` somewhere, then adding it into your ~/.hgrc:
+[1] https://www.mercurial-scm.org/wiki/EvolveExtension - install evolve by cloning `hg clone https://bitbucket.org/marmoute/mutable-history` somewhere, then adding it into your ~/.hgrc:
 
     [extensions]
     evolve = ~/lib/hg/mutable-history/hgext/evolve.py
+
+[2] "public" is the name of a mercurial phase. It means a changeset that has been pushed to mozilla-inbound or similar. Stuff you're working on will ordinarily be in the "draft" phase until you push it. [↩](#a1)
 
 [3] `hg clone https://bitbucket.org/facebook/hg-experimental` somewhere, then activate it with
 

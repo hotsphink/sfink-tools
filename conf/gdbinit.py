@@ -15,17 +15,11 @@ import re
 RUNNING_RR = None
 
 def running_rr():
-    '''Detect whether running under rr. Note that this must not be called during initial
-       execution of this script, because at that time the 'when' command will not yet exist.
-    '''
+    '''Detect whether running under rr.'''
     global RUNNING_RR
     if RUNNING_RR is not None:
         return RUNNING_RR
-    try:
-        gdb.execute("when", False, True)
-        RUNNING_RR = True
-    except gdb.error:
-        RUNNING_RR = False
+    RUNNING_RR = os.environ.get('GDB_UNDER_RR', False)
     return RUNNING_RR
 
 def when():
@@ -130,6 +124,9 @@ class PythonLog(gdb.Command):
         return os.path.join(os.environ['HOME'], "rr-session-%s.log" % (tid,))
 
     def invoke(self, arg, from_tty):
+        if self.LogFile is None:
+            self.openlog(self.default_log_filename())
+
         if arg.startswith('-'):
             if '-sorted'.startswith(arg):
                 self.dump(sort=True)
@@ -141,8 +138,6 @@ class PythonLog(gdb.Command):
                 print("unknown log option")
             return
 
-        if self.LogFile is None:
-            self.openlog(self.default_log_filename())
         if not self.LogFile:
             return
 
@@ -199,17 +194,16 @@ class PythonLog(gdb.Command):
         os.system(os.environ.get('EDITOR', 'emacs') + " " + filename)
         self.openlog(filename, quiet=True)
 
-logger = PythonLog()
-
 class ParameterLogFile(gdb.Parameter):
-    def __init__(self):
+    def __init__(self, logger):
         super(ParameterLogFile, self).__init__('logfile', gdb.COMMAND_SUPPORT, gdb.PARAM_STRING)
         self.logfile = None
+        self.logger = logger
 
     def get_set_string(self):
         if self.value:
             self.logfile = self.value
-            logger.openlog(self.logfile)
+            self.logger.openlog(self.logfile)
             return "logging to %s" % self.logfile
         else:
             return "logging stopped"
@@ -217,7 +211,8 @@ class ParameterLogFile(gdb.Parameter):
     def get_show_string(self, svalue):
         return self.logfile
 
-ParameterLogFile()
+if running_rr():
+    ParameterLogFile(PythonLog())
 
 class PythonPrint(gdb.Command):
     """Print the value of the python expression given"""
