@@ -112,7 +112,7 @@ Then while I'm being a good boy and continuing to work on the feature named in t
 
 But often, I will get distracted and begin working on a different feature. I *could* update to inbound or central and start again, but that tends to touch too many source files and slow down my rebuilds, and I have a lot of inertia, so usually I'll just start hacking within the same bookmarked patch stack. When done or ready to work on the original (or a new) feature, I'll make another commit.
 
-When I want to go back to working on the original feature, I *still* won't bother to clean things up, because I'm a bad and lazy person. Instead, I'll just start making a bunch of micro-commits pertaining to various of the patches in my current stack. I use a naming convention in the patch descriptions of "M-<which feature I'm changing>". So after a little while, my patch stack might look like:
+When I want to go back to working on the original feature, I *still* won't bother to clean things up, because I'm a bad and lazy person. Instead, I'll just start making a bunch of micro-commits pertaining to various of the patches in my current stack (possibly one at a time with `hg commit`, or possibly picking apart my working directory changes with `hg commit -i`; see below). I use a naming convention in the patch descriptions of "M-<which feature I'm changing>". So after a little while, my patch stack might look like:
 
 ```shell
     418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
@@ -127,12 +127,12 @@ When I want to go back to working on the original feature, I *still* won't bothe
     418176|deadbeef4dad   M-triggers
 ```
 
-What a mess, huh? Now comes the fun part. I'm a huge fan of the 'chistedit' extension[3]. But the default 'histedit' will do the same thing with your own editor; I just really like the curses interface. I have an alias to make chistedit use a reasonable default for which revisions to show, which I suspect is no longer needed now that histedit has something reasonable builtin. But mine is:
+What a mess, huh? Now comes the fun part. I'm a huge fan of the 'chistedit' extension[3]. The default 'histedit' will do the same thing using your text editor; I just really like the curses interface. I have an alias to make chistedit use a reasonable default for which revisions to show, which I suspect is no longer needed now that histedit has changed to default to something good. But mine is:
 
     [alias]
     che = chistedit -r 'not public() and ancestors(.)'
 
-Now `hg che` will bring up a curses interface showing your patch stack. Use j/k to move the highlight around the list. Highlight one of the patches, maybe M-triggers, and then use J/K (K in this case) to move it up or down in the list. Reshuffle the patches until you have your modification patches sitting directly underneath the main patch, eg
+Now `hg che` will bring up a curses interface showing your patch stack. Use j/k to move the highlight around the list. Highlight one of the patches, say the first "M-triggers", and then use J/K (K in this case) to move it up or down in the list. Reshuffle the patches until you have your modification patches sitting directly underneath the main patch, eg
 
 ```shell
     pick  418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
@@ -162,9 +162,11 @@ Now use 'r' to "roll" these patches into their parents. You should end up with s
     roll^ 418175|deadbeef4dad
 ```
 
-Notice how the caret shows the direction your are rolling up your patch to, and that the descriptions are gone. If you like giving your micro-commits good descriptions, you might want to use 'f' for "fold" instead, in which case all of your descriptions will be smushed together.
+Notice the caret that shows the direction of the destination patch, and that the commit messages for the to-be-folded patches are gone. If you like giving your micro-commits good descriptions, you might want to use 'f' for "fold" instead, in which case all of your descriptions will be smushed together for your later editing pleasure.
 
 Now press 'c' to commit the changes. Whee! Use `hg ls` to see that everything is nice and pretty.
+
+There is a new `hg absorb` command that will take your working directory changes and automatically roll them into the appropriate non-public patch. I haven't started using it yet.
 
 (chistedit has other nice tricks. Use 'v' to see the patch. j/k now go up and down a line at a time. Space goes down a page, page up/down work. J/K now switch between patches. Oops, I just noticed I didn't update the help to include that. 'v' to return back to the patch list. Now try 'm', which will bring up an editor after you 'c' commit the changes, allowing you to edit the commit message for each patch so marked.)
 
@@ -182,6 +184,13 @@ to bring up a curses interface that will allow you to select just the changes th
 
 runs to pick apart your changes into fragments that apply to the various changesets in your stack, then do the above.
 
+Normally, I'll use `hg amend -i` to select the new stuff that pertains to the top patch, `hg commit -i` to pick apart stuff for one new feature, and a final `hg commit` to commit the rest of the stuff.
+
+    % hg amend -i  # Choose the stuff that belongs to the top patch
+    % hg commit -i -m 'Another feature'
+    % hg commit -i -m 'Yet another feature'
+    % hg commit -m 'One more feature using the remainder of the changes'
+
 And if you accidentally get it wrong and amend a patch with stuff that doesn't belong to it, then do
 
     % hg uncommit -a
@@ -191,9 +200,9 @@ That will empty out the top patch, leaving the changes in your working directory
 
 ### Navigating through your stack
 
-When I want to work on a patch "deeper" in the stack, I use `hg update -r <rev>` or `hg prev` to update to it, then make my changes and `hg amend` to include them into the changeset. If I am not at the top changeset, this will invalidate all of the other patches. The easiest way to fix this up is to use `hg next --evolve` to update to the old child and automatically rebase it on top of my update changeset.
+When I want to work on a patch "deeper" in the stack, I use `hg update -r <rev>` or `hg prev` to update to it, then make my changes and `hg amend` to include them into the changeset. If I am not at the top changeset, this will invalidate all of the other patches. My preferred way to fix this up is to use `hg next --evolve` to rebase the old child on top of my update changeset and update to its new incarnation.
 
-The normal workflow with evolve would be to run `hg evolve -a` to automatically rebase everything that needs rebasing, but these days I almost always use `hg next --evolve` instead just so it does it one at a time and if a rebase runs into conflicts, it's more obvious to me which changeset is having the trouble. In fact, I made an alias
+The usual evolve workflow you'll read elsewhere is to run `hg evolve -a` to automatically rebase everything that needs rebasing, but these days I almost always use `hg next --evolve` instead just so it does it one at a time and if a rebase runs into conflicts, it's more obvious to me which changeset is having the trouble. In fact, I made an alias
 
     [alias]
     advance = !while $HG next --evolve; do :; done
@@ -202,7 +211,7 @@ to advance as far as possible until the head changeset is reached, or a conflict
 
 ### Resolving conflicts
 
-Speaking of conflicts, all this revision control craziness doesn't come for free. I'm not 100% happy with it, but the merge tool I am happiest with is kdiff3:
+Speaking of conflicts, all this revision control craziness doesn't come for free. Conflicts are a fact of live, and it's nice to have a good merge tool. I'm not 100% happy with it, but the merge tool I prefer is kdiff3:
 
     [ui]
     merge = kdiff3
@@ -214,7 +223,7 @@ Speaking of conflicts, all this revision control craziness doesn't come for free
     kdiff3.premerge = True
     kdiff3.binary = False
 
-I don't remember what all that crap is for. It was mostly an attempt to get it to label the different patches being merged correctly, but I did it in the mq days, and these days I ignore the titles anyway. I kind of wish I *did* know which was which. Don't use the kdiff3.executable setting, since you don't have kdiff3-wrapper. The rest is probably fine. Actually, kdiff3-wrapper was pretty useful back in the day; kdiff3 has a bad habit of clearing the execute (a la chmod +x) bit when merging. I don't know if it still has that issue?
+I don't remember what all that crap is for. It was mostly an attempt to get it to label the different patches being merged correctly, but I did it in the mq days, and these days I ignore the titles anyway. I kind of wish I *did* know which was which. Don't use the kdiff3.executable setting, since you don't have kdiff3-wrapper[5]. The rest is probably fine.
 
 ### Uploading patches to bugs
 
@@ -237,11 +246,11 @@ Now, I must apologize, but that won't work for you. You will have to do
 
     % hg bzexport --new -C 'Core :: GC' -r :fitzgen -e --title 'Crashes on Wednesdays'
 
-because you don't have my fancy schmancy bzexport logic to automatically pick the component based on the files touched. Sorry about that; I'd have to do a bunch of cleanup to make that landable. More disappointments ahead.
+because you don't have my fancy schmancy bzexport logic to automatically pick the component based on the files touched. Sorry about that; I'd have to do a bunch of cleanup to make that landable. And these days it's be better to rely on the moz.build bug component info instead of crawling through history.
 
 Other useful flags are `--blocks`, `--depends`, `--cc`, and `--feedback`. Though I'll often fill those in when the editor pops up.
 
-Oh, by the way, if you're nervous about it automatically doing something stupid when you're first learning, run with `-i` aka `--interactive`. It will ask before doing each step. Nothing bad will happen if you ^C out in the middle of that (though it will have already done what you allowed it to do.)
+Oh, by the way, if you're nervous about it automatically doing something stupid when you're first learning, run with `-i` aka `--interactive`. It will ask before doing each step. Nothing bad will happen if you ^C out in the middle of that (though it will have already done what you allowed it to do; it can't uncreate a bugzilla bug or whatever, so don't say yes until you mean it.)
 
 If I need to upload multiple patches, I'll update to each in turn (often using `hg next` and `hg prev`, which come with evolve) and run `hg bzexport` for each.
 
@@ -249,9 +258,9 @@ If I need to upload multiple patches, I'll update to each in turn (often using `
 
 I'm sloppy and frequently don't get things right on the first try, so I'll need to upload again. Now this is a little tricky, because you want to mark the earlier versions as obsolete. In mq times, this was pretty straightforward: your patches had names, and it could just find the bug's patch attachment with the matching name. Without names, it's harder. You might think that it would be easiest to look for a matching commit message, and you'd probably be right, but it turns out that I tend to screw up my early attempts enough that I have to change what my patches do, and that necessitates updating the commit message.
 
-So if you are using evolve, bzexport is smart and looks backwards through the history of each patch to find its earlier versions. (When you amend a changeset, or roll/fold another changeset into it, evolve records markers saying your old patch was "succeeded" by the new version.) For the most part, this Just Works. Unless you split one patch into two. Then *your* bzexport will get a bit confused, and your new patches will obsolete each other in bugzilla. :( *My* bzexport is more smarterer, and will make a valiant attempt to find an appropriate "base" changeset to use for each one. It still isn't perfect, but I have not yet encountered a situation where it gets it wrong. That fix should be relatively easy to land, and I promise to land it soon. Don't believe that kid's rule about promises and crossed fingers, because I wouldn't be so silly as to use that as an excuse.
+So if you are using evolve, bzexport is smart and looks backwards through the history of each patch to find its earlier versions. (When you amend a changeset, or roll/fold another changeset into it, evolve records markers saying your old patch was "succeeded" by the new version.) For the most part, this Just Works. Unless you split one patch into two. Then *your* bzexport will get a bit confused, and your new patches will obsolete each other in bugzilla. :( *My* bzexport is more smarterer, and will make a valiant attempt to find an appropriate "base" changeset to use for each one. It still isn't perfect, but I have not yet encountered a situation where it gets it wrong. (Or at least not very wrong. If you fold two patches together, it'll only obsolete one of the originals, for example.) That fix should be relatively easy to land, and I "promise" to land it soon[6].
 
-Remember to use the -r flag again when you re-upload. You don't need the bug number (or --new option) anymore, because bzexport wlil grab the bug number from the commit message, but it won't automatically re-request review from the same person. You might want to just upload the patch without requesting review, after all.
+Remember to use the -r flag again when you re-upload, assuming you're still ready for it to be reviewed. You don't need the bug number (or --new option) anymore, because bzexport will grab the bug number from the commit message, but it won't automatically re-request review from the same person. You might want to just upload the patch without requesting review, after all. But usually this second invocation would look like:
 
     % hg bzexport -r :fitzgen
 
@@ -259,15 +268,15 @@ Remember to use the -r flag again when you re-upload. You don't need the bug num
 
 ### Incorporating review comments
 
-I've already covered this. Update to the approprate patch, make your changes, `hg amend`, `hg advance` to clean up any conflicts as early as possible.
+I've already covered this. Update to the appropriate patch, make your changes, `hg amend`, `hg advance` to clean up any conflicts right away, then probably `hg update -r <...>` to get back to where you were.
 
 ### Landing
 
-Update to the appropriate patch. Use `hg amend -m` to update the commit message, adding the "r=fitzgen". Or if I need to do a bunch of them, `hg che` (or just `hg chistedit`), go to each relevant patch, use 'm' to change the action to 'mess' (short for "message"), 'c' to commit to this histedit action string, edit the messages in your $EDITOR.
+I update to the appropriate patch. Use `hg amend -m` to update the commit message, adding the "r=fitzgen". Or if I need to do a bunch of them, I will run `hg che` (or just `hg chistedit`), go to each relevant patch, use 'm' to change the action to 'mess' (short for "message"), 'c' to commit to this histedit action string, and edit the messages in my $EDITOR.
 
-Now use chistedit to shuffle your landable patches to the top of the screen (#0 is the changeset directly atop a public changeset). Do not reorder them any more than necessary. Update to the last changeset you want to land.
+Now I use chistedit to shuffle my landable patches to the top of the screen (#0 is the changeset directly atop a public changeset). Do not reorder them any more than necessary. I'll update to the last changeset I want to land, and `hg push mozilla-inbound -r .`. (Ok, really I use an 'mi' alias, and :gps magic makes '-r .' the default for mozilla repos. So I lied, I do `hg push mi`.)
 
-cd to the top of your source checkout. Run
+Next I'll usually do a final try push. I `cd` to the top of my source checkout, then run:
 
     % ./mach try <try args>
 
@@ -275,7 +284,7 @@ If you don't know try syntax, use https://mozilla-releng.net/trychooser/ to cons
 
     % ./mach try -b do -p all -u all[x64]
 
-And this part is a lie; I actually use my `hg trychooser` extension which has a slick curses UI based on a years-old database of try options, which I never use, but instead do something like
+And this part is a lie; I actually use my `hg trychooser` extension which has a slick curses UI based on a years-old database of try options. That I never use anymore. I do it manually, with something like
 
     % hg trychooser -m 'try: -b do -p all -u all[x64]'
 
@@ -288,7 +297,7 @@ I usually look up through my terminal output history to find the revision of the
     % hg log -r 'children(.^) and not .'
     changeset:   418174:b7f1d672f3cd
 
-(see also `hg help revsets`) will give it to you directly, assuming you haven't done anything else and made a mess. Now rebase the old child on top of your new head:
+will give it to you directly (see also `hg help revsets`), assuming you haven't done anything else and made a mess. Now rebase the old child on top of your new head:
 
     % hg rebase -b b7f1d672f3cd -d .
 
@@ -306,7 +315,7 @@ So being able to jump all over your various feature bookmarks and things is cool
 watchman
 --------
 
-Oh yeah, watchman. It makes many operations way, way faster. Or at least it did; recently, it often slows things down before it gives up and times out. Yeah, I ought to file a bug on it.
+Oh yeah, watchman. It makes many operations way, way faster. Or at least it did; recently, it often slows things down before it gives up and times out. Yeah, I ought to file a bug on it. The log doesn't say much.
 
 I can't remember how to set up watchman, sorry. It looks like I built it from source? Hm, maybe I should update, then. You need two pieces: the watchman daemon that monitors the filesystem, and the python mercurial extension that talks to the daemon to accelerate hg operations. The latter part can be enabled with
 
@@ -325,7 +334,7 @@ I have this crazy Perl script that I've hacked in various horrible ways over the
 
     % debug ./obj-js-debug/dist/bin/js somefile.js
 
-to start up Emacs with gdb running inside it. Or
+to start up Emacs with gdb running inside it in gud mode. Or
 
     % debug --record ./obj-js-debug/dist/bin/js somefile.js
 
@@ -339,17 +348,19 @@ to make an rr recording of a whole process tree, then find a process that crashe
 
 to bring up Emacs with rr replay running on the last rr recording I've made, again automatically picking a crashing process. If it gets it wrong, I can always do
 
+    % rr ps
+    # identify the process of interest
     % debug --rrpid 1234
 
 to tell it which one. Or
 
     % ./mach test --debugger=debug some/test/file
 
-to run the given test with hopefully the appropriate binary running under gdb inside Emacs. Inside the woman who swallowed a fly. Or
+to run the given test with hopefully the appropriate binary running under gdb inside Emacs inside the woman who swallowed a fly I don't know why. Or
 
     % debug --js ./obj-js-debug/dist/bin/js somefile.js
 
-to bring up Emacs running jorendb[5].
+to bring up Emacs running jorendb[7].
 
 rr
 --
@@ -416,4 +427,8 @@ Finally, there's a simple `pp` command, where `pp foo` is equivalent to `python 
 
 [4] When I have one patch per bug, I'll usually use `hg bzexport --update` to fill in the bug numbers. Especially since I normally file the bug in the first place with `hg bzexport --new`, so I don't even have a bug number until I do that.
 
-[5] jorendb is a relatively simple JS debugger that jorendorff wrote, I think to test the Debugger API. I suspect he's amused that I attempt to use it for anything practical. I'm sure the number of people for whom it is relevant is vanishingly small, but I love having it when I need it. (It's for the JS shell only. Nobody uses the JS shell for any serious scripting; why would you, when you have web browser and Node?) (I'm Nobody.)
+[5] kdiff3-wrapper was pretty useful back in the day; kdiff3 has a bad habit of clearing the execute (chmod +x) bit when merging, so kdiff3-wrapper is a shell script that runs kdiff3 and then fixes up the bits afterwards. I don't know if it still has that issue?
+
+[6] The quotes around "promise" translate more or less to "do not promise".
+
+[7] jorendb is a relatively simple JS debugger that jorendorff wrote, I think to test the Debugger API. I suspect he's amused that I attempt to use it for anything practical. I'm sure the number of people for whom it is relevant is vanishingly small, but I love having it when I need it. (It's for the JS shell only. Nobody uses the JS shell for any serious scripting; why would you, when you have web browser and Node?) (I'm Nobody.)

@@ -182,7 +182,7 @@ class PythonLog(gdb.Command):
                 print("%s%s" % ("=> " if i == place else "   ", message[3]))
         else:
             for message in messages:
-                print(message)
+                print(message[3])
 
     def edit(self):
         if not self.LogFile:
