@@ -3,7 +3,7 @@ Intro
 
 I thought I'd write up one of those periodic posts describing my workflow. My workflow is not best for everyone. Nor is it the best possible one for me, since I'm a creature of habit and cling to comfortable tools. But it can be helpful to look at what others do, and see what you might be able to steal.
 
-This is going to be more of a summary overview than an in-depth description or tutorial. I am happy to expand on bits you are curious about.
+This is going to be more of a summary overview than an in-depth description or tutorial. I am happy to expand on bits you are curious about. Note that there are good docs already for the "normal" workflow at http://mozilla-version-control-tools.readthedocs.io/en/latest/hgmozilla/index.html
 
 A number of things here use local crap that I've piled up over time. I've published a repository containing some of them. At the moment, I have it uploaded to two difference places. I don't know how long I'll keep them in sync before giving up on one:
 
@@ -31,7 +31,7 @@ so I can pull with
 
     % hg pull unified
 
-I will usually rebase on top of inbound. `./mach mercurial-setup` should set you up with firefoxtree, which will cause the above pull to advance some local tags that will conveniently give you the head of the various repositories. My usual next step is
+Read more on the unified repo at <http://mozilla-version-control-tools.readthedocs.io/en/latest/hgmozilla/unifiedrepo.html>. I will usually rebase on top of inbound. `./mach mercurial-setup` should set you up with firefoxtree, which will cause the above pull to advance some local tags that will conveniently give you the head of the various repositories. My usual next step is
 
     % hg rebase -d inbound
 
