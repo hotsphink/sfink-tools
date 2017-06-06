@@ -173,7 +173,7 @@ class PythonLog(gdb.Command):
         place = -1
         if sort:
             messages.sort()
-            place = 0
+            place = len(messages)
             for i, message in enumerate(messages):
                 if current < (message[0], message[1]):
                     place = i
