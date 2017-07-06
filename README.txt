@@ -10,6 +10,7 @@ json - Interactive navigation of a JSON file
 debug - Start up a debugger within emacs on various types of files
 em - Start up emacs on the files touched by a patch, on a relevant line number
 derange - Ignore this
+traverse.py - Gecko-specific, sorta. Utility for traversing a callgraph.
 
 ----------------------------------------------------------------------
 
@@ -89,3 +90,7 @@ em - Edit files relevant to a patch
 derange - an old script for automatically positioning the windows on my desktop
 
 Not really useful to anyone else. Or me, for that matter.
+
+----------------------------------------------------------------------
+
+traverse.py - various traversals over the known portion of a callgraph.
