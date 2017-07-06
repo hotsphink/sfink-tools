@@ -1,10 +1,13 @@
 #!/usr/bin/python
 
-import sys
+import cmd
+import os
 import re
+import readline
 import shelve
-import readline, cmd
+import sys
 
+history_filename = os.path.expanduser("~/.traverse")
 def_ident_re = re.compile(r'^#(\d+) ((.*?)(?:\$(.*))?)$')
 edge_re = re.compile(r'^[DR] (SUPPRESS_GC )?(\d+) (\d+)')
 stem_re = re.compile(r'([\w_]+)\(')
@@ -13,6 +16,11 @@ data = None
 
 gAvoidFuncs = set(["NS_DebugBreak"])
 gAvoid = set()  # Filled in by load_file
+
+try:
+    readline.read_history_file(history_filename)
+except IOError:
+    pass
 
 def stem(f):
     func = data['names'][f]
@@ -46,6 +54,8 @@ def load_file(callgraph_filename):
     gAvoid = set()
     for f in gAvoidFuncs:
         gAvoid.update(resolve(f))
+
+    print(data['names'][0:10])
 
 # TODO: match against the stem, not the whole string (getting noise from param types)
 def resolve_single(pattern):
@@ -535,10 +545,17 @@ class Commander(cmd.Cmd):
             print("No paths found??!")
             return
 
-        for route in routes:
-            print(describe(route[0]))
+        print("%d total reachable functions found" % (len(routes),))
 
-        print("%d total paths found" % (len(routes),))
+        if routes:
+            print("All reachable functions:")
+            for route in routes:
+                print(describe(route[0]))
+            print("Route from source to every reachable function:")
+            for route in routes:
+                for func in reversed(route):
+                    print(describe(func, count_callers=False))
+                print("")
 
     def do_roots(self, s):
         '''Find all roots that eventually call FUNCTION'''
@@ -633,6 +650,9 @@ class Commander(cmd.Cmd):
         for node in keys:
             print(describe(node, count_callers=False))
 
+    def do_EOF(self, s):
+        self.quit = True
+
     def do_quit(self, s):
         self.quit = True
 
@@ -660,5 +680,9 @@ class Commander(cmd.Cmd):
                 if dst in known:
                     print("#%d -> #%d" % (src, dst))
 
+    def completedefault(self, text, line, begidx, endidx):
+        return [n for n in data['names'][1:] if n.startswith(text)]
+
 c = Commander()
 c.cmdloop()
+readline.write_history_file(history_filename)
