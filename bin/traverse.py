@@ -55,8 +55,6 @@ def load_file(callgraph_filename):
     for f in gAvoidFuncs:
         gAvoid.update(resolve(f))
 
-    print(data['names'][0:10])
-
 # TODO: match against the stem, not the whole string (getting noise from param types)
 def resolve_single(pattern):
     try:
@@ -394,11 +392,11 @@ def rootPaths(dst):
 
     return routes
 
-def reachable(src):
+def reachable(srcs):
     edges = {}
     found = []
 
-    work = [src]
+    work = list(srcs)
     while len(work) > 0:
         caller = work.pop(0)
         callees = data['callees'].get(caller, {}).keys()
@@ -414,7 +412,7 @@ def reachable(src):
     for callee in found:
         route = [callee]
         routes.append(route)
-        while route[-1] != src:
+        while route[-1] not in srcs:
             route.append(edges[route[-1]])
 
     return routes
@@ -536,11 +534,11 @@ class Commander(cmd.Cmd):
             print("No route from #%d to #%d found" % (src, dst))
 
     def do_reachable(self, s):
-        '''Find all functions reachable from FUNCTION'''
-        src = self.try_resolve(s)
-        if not src:
+        '''Find all functions reachable from anything matching FUNCTION'''
+        srcs = resolve(s)
+        if not srcs:
             return
-        routes = reachable(src)
+        routes = reachable(srcs)
         if len(routes) == 0:
             print("No paths found??!")
             return
