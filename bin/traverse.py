@@ -22,6 +22,8 @@ try:
 except IOError:
     pass
 
+class FunctionNotFound(Exception): pass
+
 def stem(f):
     func = data['names'][f]
     m = stem_re.search(func)
@@ -73,6 +75,16 @@ def resolve_single(pattern):
 
     # Now look for a simple substring match.
     funcs = [ i for i in range(1, len(data['names'])) if pattern in data['names'][i] ]
+
+    # Hack, should escape the rest of the string. And deal with eg
+    # foo<T>::bar(param<U>)
+    if len(funcs) == 0 and ('<>' in pattern or '<T>' in pattern):
+        # Now try allowing <> to mean a template.
+        funcs = []
+        matcher = re.compile(pattern.replace('<>', '<.*?>').replace('<T>', '<.*?>'))
+        for i, name in enumerate(data['names'][1:], 1):
+            if re.search(matcher, name):
+                funcs.append(i)
 
     # If we find multiple and it's a simple function name:
     if len(funcs) > 1 and not re.search(r'[^:\w]', pattern):
@@ -392,7 +404,7 @@ def rootPaths(dst):
 
     return routes
 
-def reachable(srcs):
+def reachable(srcs, avoid):
     edges = {}
     found = []
 
@@ -404,7 +416,7 @@ def reachable(srcs):
             found.append(caller)
         else:
             for callee in callees:
-                if callee not in edges:
+                if (callee not in avoid) and (callee not in edges):
                     edges[callee] = caller
                     work.append(callee)
 
@@ -499,6 +511,23 @@ class Commander(cmd.Cmd):
     def do_callee(self, s):
         return self.do_callees(s)
 
+    def parse_function(self, spec, required=True, single=True, none_ok=False):
+        if spec is None:
+            if none_ok:
+                return
+            else:
+                print("function name is required")
+                raise FunctionNotFound()
+
+        functions = resolve_single(spec) if single else resolve(spec)
+        if len(functions) == 0:
+            if not required:
+                return set()
+            print("nothing matching '%s' found" % (spec,))
+            raise FunctionNotFound()
+
+        return functions
+
     def do_route(self, s):
         '''Find a route from SOURCE to DEST [avoiding FUNC]'''
         m = re.match(r'^(?:from )?(.*) to (.*?)(?: avoiding (.*))?$', s)
@@ -508,17 +537,12 @@ class Commander(cmd.Cmd):
                 print("Invalid syntax. Usage: route <src> to <dst>[ avoiding <func>]")
                 return
         src, dst, avoid = m.groups()
-        src = self.try_resolve(src)
-        if not src:
+        try:
+            src = self.parse_function(src, required=True, single=False)
+            dst = self.parse_function(dst, required=True, single=False)
+            avoid = self.parse_function(avoid, required=False, single=False, none_ok=True)
+        except FunctionNotFound:
             return
-        dst = self.try_resolve(dst)
-        if not dst:
-            return
-        if avoid is not None:
-            avoid = resolve(avoid)
-            if len(avoid) == 0:
-                print("Nothing matching '%s' found" % m.group(3))
-                return
 
         path = findRoute(src, dst, avoid)
         if path:
@@ -534,11 +558,19 @@ class Commander(cmd.Cmd):
             print("No route from #%d to #%d found" % (src, dst))
 
     def do_reachable(self, s):
-        '''Find all functions reachable from anything matching FUNCTION'''
-        srcs = resolve(s)
-        if not srcs:
+        '''Find all functions reachable from anything matching FUNCTION [avoiding FUNCTION]'''
+        m = re.match(r'^(?:from )?(.*?)(?: avoiding (.*))?$', s)
+        if not m:
+            print("Invalid syntax. Usage: reachable from <src>[ avoiding <func>]")
             return
-        routes = reachable(srcs)
+        src_spec, avoid_spec = m.groups()
+        try:
+            srcs = self.parse_function(src_spec, required=True, single=False)
+            avoid = self.parse_function(avoid_spec, required=True, none_ok=True, single=False)
+        except FunctionNotFound:
+            return
+
+        routes = reachable(srcs, avoid)
         if len(routes) == 0:
             print("No paths found??!")
             return
