@@ -24,6 +24,18 @@ except IOError:
 
 class FunctionNotFound(Exception): pass
 
+class MultipleFunctionsFound(Exception):
+    def __init__(self, spec, functions):
+        self.spec = spec
+        self.functions = functions
+
+    def report(self, verbose=True, count_callers=False, count_callees=False):
+        print("'%s' matches %d functions:" % (self.spec, len(self.functions)))
+        for f in functions:
+            print("  " + describe(f, raw=verbose,
+                                  count_callers=count_callers,
+                                  count_callees=count_callees))
+
 def stem(f):
     func = data['names'][f]
     m = stem_re.search(func)
@@ -74,7 +86,7 @@ def resolve_single(pattern):
         pass
 
     # Now look for a simple substring match.
-    funcs = [ i for i in range(1, len(data['names'])) if pattern in data['names'][i] ]
+    funcs = [ i for i, name in enumerate(data['names'][1:], 1) if pattern in name ]
 
     # Hack, should escape the rest of the string. And deal with eg
     # foo<T>::bar(param<U>)
@@ -169,6 +181,8 @@ def findRoute(src, dst, avoid):
 def getManyRoutes(src, dst, avoid):
     if src == dst:
         return [[src]]
+
+    print("From %r to %r avoiding %r" % (src, dst, avoid))
 
     # Step 1: Do a BFS from each src_callee, adding caller backedges labeled
     # with the src_callee.
@@ -349,15 +363,19 @@ def getManyRoutes(src, dst, avoid):
             print(describe(f, raw=True))
             shown.add(f)
 
-def findRouteMulti(srcs, dst):
+def findRouteMulti(srcs, dst, avoid):
     edges = {}
     srcset = set(srcs)  # For hopefully faster lookup
+    avoid = set(avoid)
     found = set()
 
     work = [dst]
     while len(work) > 0:
         callee = work.pop(0)
         for caller in data['callers'].get(callee, {}).keys():
+            if caller in avoid:
+                continue
+
             if caller not in edges:
                 edges[caller] = callee
                 work.append(caller)
@@ -457,26 +475,13 @@ class Commander(cmd.Cmd):
         '''Just a test function'''
         print("testing %r" % (what,))
 
-    def try_resolve(self, s, count_callers=True, count_callees=False):
-        funcs = resolve(s)
-        if len(funcs) == 0:
-            print("Nothing matching found")
-            return None
-        elif len(funcs) > 1:
-            print("'%s' matches %d functions:" % (s, len(funcs)))
-            for f in funcs:
-                print("  " + describe(f, raw=self.verbose,
-                                      count_callers=count_callers,
-                                      count_callees=count_callees))
-            return None
-        else:
-            return funcs[0]
-
     def do_resolve(self, s):
         '''Resolve a function identifier or a substring of a function name to the full function name(s)'''
-        f = self.try_resolve(s)
-        if f:
-            print(describe(f))
+        functions = self.parse_functions(s, required=False)
+        if functions:
+            print(describe(functions))
+        else:
+            print("No matching function found")
 
     def do_callcounts(self, s):
         '''Display all functions, preceded by caller count then callee count'''
@@ -487,8 +492,9 @@ class Commander(cmd.Cmd):
 
     def do_callers(self, s):
         '''Display all callers of FUNCTION'''
-        f = self.try_resolve(s)
-        if not f:
+        try:
+            f = self.parse_function(s)
+        except FunctionNotFound:
             return
         callers = data['callers'].get(f, {})
         print("%d callers of #%d = %s" % (len(callers.keys()), f, data['readable'][f]))
@@ -500,9 +506,14 @@ class Commander(cmd.Cmd):
 
     def do_callees(self, s):
         '''Display all callees of FUNCTION (all functions called by FUNCTION)'''
-        f = self.try_resolve(s, count_callees=True, count_callers=False)
-        if not f:
+        try:
+            f = self.parse_function(s)
+        except FunctionNotFound:
             return
+        except MultipleFunctionsFound as e:
+            e.report(self.verbose, count_callees=True, count_callers=False)
+            return
+
         callees = data['callees'].get(f, {})
         print("%d callees of #%d = %s" % (len(callees.keys()), f, data['readable'][f]))
         for callee, suppressed in callees.iteritems():
@@ -511,22 +522,42 @@ class Commander(cmd.Cmd):
     def do_callee(self, s):
         return self.do_callees(s)
 
-    def parse_function(self, spec, required=True, single=True, none_ok=False):
+    # required: whether the spec must match *something* (though see also none_ok)
+    # single: fail if multiple functions match. Implies required.
+    # none_ok: spec may be None (will return None)
+    #
+    # Returns list of functions found, or None if spec was None and none_ok was set.
+    def parse_functions_impl(self, spec, required=True, single=True, none_ok=False):
         if spec is None:
-            if none_ok:
-                return
-            else:
+            if not none_ok:
                 print("function name is required")
                 raise FunctionNotFound()
+            return
 
-        functions = resolve_single(spec) if single else resolve(spec)
+        patterns = [spec] if single else spec.split(" and ")
+        functions = []
+        for pattern in patterns:
+            functions += resolve_single(pattern)
+
         if len(functions) == 0:
-            if not required:
-                return set()
-            print("nothing matching '%s' found" % (spec,))
-            raise FunctionNotFound()
+            if required or single:
+                print("nothing matching '%s' found" % (spec,))
+                raise FunctionNotFound()
+            return []
+
+        if single and len(functions) > 1:
+            raise MultipleFunctionsFound(spec, functions)
 
         return functions
+
+    # Returns a list of matching functions.
+    def parse_functions(self, spec, required=True, none_ok=False):
+        return self.parse_functions_impl(spec, required=required, single=False, none_ok=none_ok)
+
+    # Returns matching function, or None if none_ok was true and spec was None.
+    def parse_function(self, spec):
+        functions = self.parse_functions_impl(spec, single=True, none_ok=False)
+        return functions[0]
 
     def do_route(self, s):
         '''Find a route from SOURCE to DEST [avoiding FUNC]'''
@@ -538,10 +569,13 @@ class Commander(cmd.Cmd):
                 return
         src, dst, avoid = m.groups()
         try:
-            src = self.parse_function(src, required=True, single=False)
-            dst = self.parse_function(dst, required=True, single=False)
-            avoid = self.parse_function(avoid, required=False, single=False, none_ok=True)
+            src = self.parse_functions(src)
+            dst = self.parse_function(dst)
+            avoid = self.parse_functions(avoid, none_ok=True)
         except FunctionNotFound:
+            return
+        except MultipleFunctionsFound as e:
+            e.report(self.verbose)
             return
 
         path = findRoute(src, dst, avoid)
@@ -565,8 +599,8 @@ class Commander(cmd.Cmd):
             return
         src_spec, avoid_spec = m.groups()
         try:
-            srcs = self.parse_function(src_spec, required=True, single=False)
-            avoid = self.parse_function(avoid_spec, required=True, none_ok=True, single=False)
+            srcs = self.parse_functions(src_spec)
+            avoid = self.parse_functions(avoid_spec, none_ok=True)
         except FunctionNotFound:
             return
 
@@ -589,8 +623,9 @@ class Commander(cmd.Cmd):
 
     def do_roots(self, s):
         '''Find all roots that eventually call FUNCTION'''
-        dst = self.try_resolve(s)
-        if not dst:
+        try:
+            dst = self.parse_function(s)
+        except FunctionNotFound:
             return
         routes = rootPaths(dst)
         if len(routes) == 0:
@@ -604,8 +639,9 @@ class Commander(cmd.Cmd):
 
     def do_rootpaths(self, s):
         '''Find paths from all roots to FUNCTION'''
-        dst = self.try_resolve(s)
-        if not dst:
+        try:
+            dst = self.parse_function(s)
+        except FunctionNotFound:
             return
         routes = rootPaths(dst)
         if len(routes) == 0:
@@ -623,23 +659,20 @@ class Commander(cmd.Cmd):
         if not m:
             m = re.match(r'^(.*) (.*)()$', s)
             if not m:
-                print("Invalid syntax. Usage: route <src> to <dst>")
+                print("Invalid syntax. Usage: route <src> to <dst>[ avoiding <func>]")
                 return
         src, dst, avoid = m.groups()
-        dst = self.try_resolve(dst)
-        if not dst:
+        try:
+            srcs = self.parse_functions(src)
+            dst = self.parse_function(dst)
+            avoid = self.parse_functions(avoid, none_ok=True)
+        except FunctionNotFound:
             return
-        srcs = resolve(src)
-        if len(srcs) == 0:
-            print("Nothing matching '%s' found" % src)
+        except MultipleFunctionsFound as e:
+            e.report(self.verbose)
             return
-        if avoid is not None:
-            avoid = resolve(avoid)
-            if len(avoid) == 0:
-                print("Nothing matching '%s' found" % m.groups(3))
-                return
 
-        routes = findRouteMulti(srcs, dst)
+        routes = findRouteMulti(srcs, dst, avoid)
         for path in routes:
             print("Path:")
             for step in path:
@@ -647,24 +680,23 @@ class Commander(cmd.Cmd):
 
     def do_manyroutes(self, s):
         '''Show several routes from SOURCE to DEST (both must be unique)'''
-        m = re.match(r'^(?:from )?(.*) to (.*)(?: avoiding (.*))$', s)
+        m = re.match(r'^(?:from )?(.*) to (.*?)(?: avoiding (.*))?$', s)
         if not m:
-            m = re.match(r'^(.*) (.*)$', s)
+            m = re.match(r'^(.*) (.*?)(?: avoiding (.*))?$', s)
             if not m:
-                print("Invalid syntax. Usage: route <src> to <dst>[ avoiding <sym>]")
+                print("Invalid syntax. Usage: manyroutes from <src> to <dst>[ avoiding <sym>]")
                 return
         src, dst, avoid = m.groups()
-        src = self.try_resolve(src)
-        if not src:
+        try:
+            src = self.parse_function(src)
+            dst = self.parse_function(dst)
+            avoid = self.parse_functions(avoid, none_ok=True)
+        except FunctionNotFound:
             return
-        dst = self.try_resolve(dst)
-        if not dst:
+        except MultipleFunctionsFound as e:
+            e.report(self.verbose)
             return
-        if avoid is not None:
-            avoid = resolve(avoid)
-            if len(avoid) == 0:
-                print("Nothing matching '%s' found" % m.group(3))
-                return
+
         routes = getManyRoutes(src, dst, avoid)
 
         keys = []
