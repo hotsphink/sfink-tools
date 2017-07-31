@@ -173,14 +173,14 @@ class PythonLog(gdb.Command):
             (event, ticks) = timestamp.split("/", 1)
             messages.append((int(event), int(ticks), lineno, line))
 
-        current = nowTuple()
+        now = nowTuple()
         place = -1
         if sort:
             messages.sort()
             place = len(messages)
             for i, message in enumerate(messages):
-                if current < (message[0], message[1]):
-                    place = i
+                if (message[0], message[1]) > now:
+                    place = i - 1
                     break
             for i, message in enumerate(messages):
                 print("%s%s" % ("=> " if i == place else "   ", message[3]))
