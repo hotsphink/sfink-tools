@@ -227,3 +227,12 @@ class PythonPrint(gdb.Command):
         print(eval(arg))
 
 PythonPrint()
+
+######################################################################
+
+if False:
+    for o in gdb.objfiles():
+        print("objfile: " + o.filename)
+        base = os.path.basename(o.filename)
+        if base.startswith("mmap_hardlink_") and base.endswith("_js"):
+            if False: mozilla.autoload.register(o)
