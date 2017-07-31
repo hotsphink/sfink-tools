@@ -155,6 +155,10 @@ class PythonLog(gdb.Command):
 
         self.LogFile.write("%s %s\n" % (now(), out))
 
+        # If any substitutions were made, display the resulting log message.
+        if out != arg:
+            print(out)
+
     def dump(self, sort=False):
         if not self.LogFile:
             print("No log file open")
