@@ -76,7 +76,7 @@ Usage:
         super(PythonWhenTicks, self).__init__('_when_ticks')
 
     def invoke(self):
-        return when_ticks()
+        return str(when_ticks())
 
 PythonWhenTicks()
 
@@ -90,7 +90,7 @@ Usage:
         super(PythonWhen, self).__init__('_when')
 
     def invoke(self):
-        return when()
+        return str(when())
 
 class PythonNow(gdb.Command):
     """Output <when>/<when-ticks>"""
