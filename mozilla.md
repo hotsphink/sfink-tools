@@ -234,7 +234,7 @@ I'm an old fart, so I almost always upload patches to bugzilla and request revie
 In the common case where I have a patch per bug, I usually won't have put the bug number in my commit message yet, so due to this setting in my ~/.hgrc:
 
     [bzexport]
-    update-patch = 1,
+    update-patch = 1
 
 bzexport will automatically prefix my commit message with "Bug 1234567 - ". It won't insert "r=fitzgen" or "r?fitzgen" or anything; I prefer to do that manually as a way to keep track of whether I've finished incorporating any review comments.
 
@@ -246,19 +246,19 @@ Now, I must apologize, but that won't work for you. You will have to do
 
     % hg bzexport --new -C 'Core :: GC' -r :fitzgen -e --title 'Crashes on Wednesdays'
 
-because you don't have my fancy schmancy bzexport logic to automatically pick the component based on the files touched. Sorry about that; I'd have to do a bunch of cleanup to make that landable. And these days it's be better to rely on the moz.build bug component info instead of crawling through history.
+because you don't have my fancy schmancy bzexport logic to automatically pick the component based on the files touched. Sorry about that; I'd have to do a bunch of cleanup to make that landable. And these days it would be better to rely on the moz.build bug component info instead of crawling through history.
 
 Other useful flags are `--blocks`, `--depends`, `--cc`, and `--feedback`. Though I'll often fill those in when the editor pops up.
 
 Oh, by the way, if you're nervous about it automatically doing something stupid when you're first learning, run with `-i` aka `--interactive`. It will ask before doing each step. Nothing bad will happen if you ^C out in the middle of that (though it will have already done what you allowed it to do; it can't uncreate a bugzilla bug or whatever, so don't say yes until you mean it.)
 
-If I need to upload multiple patches, I'll update to each in turn (often using `hg next` and `hg prev`, which come with evolve) and run `hg bzexport` for each.
+If I need to upload multiple patches, I'll update to each in turn (often using `hg next` and `hg prev`, which come with evolve) and run `hg bzexport` for each. You don't have to; or at least, I *think* I landed the patches to bzexport so that it will properly upload arbitrary non-tip patches in your stack.
 
 ### Uploading again
 
 I'm sloppy and frequently don't get things right on the first try, so I'll need to upload again. Now this is a little tricky, because you want to mark the earlier versions as obsolete. In mq times, this was pretty straightforward: your patches had names, and it could just find the bug's patch attachment with the matching name. Without names, it's harder. You might think that it would be easiest to look for a matching commit message, and you'd probably be right, but it turns out that I tend to screw up my early attempts enough that I have to change what my patches do, and that necessitates updating the commit message.
 
-So if you are using evolve, bzexport is smart and looks backwards through the history of each patch to find its earlier versions. (When you amend a changeset, or roll/fold another changeset into it, evolve records markers saying your old patch was "succeeded" by the new version.) For the most part, this Just Works. Unless you split one patch into two. Then *your* bzexport will get a bit confused, and your new patches will obsolete each other in bugzilla. :( *My* bzexport is more smarterer, and will make a valiant attempt to find an appropriate "base" changeset to use for each one. It still isn't perfect, but I have not yet encountered a situation where it gets it wrong. (Or at least not very wrong. If you fold two patches together, it'll only obsolete one of the originals, for example.) That fix should be relatively easy to land, and I "promise" to land it soon[6].
+So if you are using evolve, bzexport is smart and looks backwards through the history of each patch to find its earlier versions. (When you amend a changeset, or roll/fold another changeset into it, evolve records markers saying your old patch was "succeeded" by the new version.) For the most part, this Just Works. Unless you split one patch into two. Then which should be obsoleted? bzexport tries will make a valiant attempt to find an appropriate "base" changeset to use for each one. It isn't perfect, but I have not yet encountered a situation where it gets it wrong. (Or at least not very wrong. If you fold two patches together, it'll obsolete only one of the originals, for example.)
 
 Remember to use the -r flag again when you re-upload, assuming you're still ready for it to be reviewed. You don't need the bug number (or --new option) anymore, because bzexport will grab the bug number from the commit message, but it won't automatically re-request review from the same person. You might want to just upload the patch without requesting review, after all. But usually this second invocation would look like:
 
@@ -284,7 +284,7 @@ If you don't know try syntax, use https://mozilla-releng.net/trychooser/ to cons
 
     % ./mach try -b do -p all -u all[x64]
 
-And this part is a lie; I actually use my `hg trychooser` extension which has a slick curses UI based on a years-old database of try options. That I never use anymore. I do it manually, with something like
+And this part is another lie; I actually use my `hg trychooser` extension which has a slick curses UI based on a years-old database of try options. That I never use anymore. I do it manually, with something like
 
     % hg trychooser -m 'try: -b do -p all -u all[x64]'
 
@@ -310,7 +310,7 @@ It will leave you updated to your new head, or rather the changeset that was for
 Workspace management
 ====================
 
-So being able to jump all over your various feature bookmarks and things is cool, but I'm working with C++ here, and I hate touching files unnecessarily because it means a slow and painful rebuild. Personally, I keep two checkouts, ~/src/mozilla and ~/src/mozilla2. If I were more disciplined about disk space, I'd probably have a few more. Most people have several more. I used to have clever schemes of updating a master repository and then having all the others pull from it, but newer hg (and my DSL, I guess) is fast enough that I now just `hg pull unified` manually whenever I need to. I use the default objdir, located in the top directory of my source checkout, because I like to be able to run hg commands from within the objdir. But I suspect it messes me up because hg and watchman have to deal with a whole bunch of files within the checkout area that they don't care about.
+So being able to jump all over your various feature bookmarks and things is cool, but I'm working with C++ here, and I hate touching files unnecessarily because it means a slow and painful rebuild. Personally, I keep two checkouts, ~/src/mozilla and ~/src/mozilla2. If I were more disciplined about disk space, I'd probably have a few more. Most people have several more. I used to have clever schemes of updating a master repository and then having all the others pull from it, but newer hg (and my network) is fast enough that I now just `hg pull unified` manually whenever I need to. I use the default objdir, located in the top directory of my source checkout, because I like to be able to run hg commands from within the objdir. But I suspect it messes me up because hg and watchman have to deal with a whole bunch of files within the checkout area that they don't care about.
 
 watchman
 --------
@@ -356,11 +356,11 @@ to tell it which one. Or
 
     % ./mach test --debugger=debug some/test/file
 
-to run the given test with hopefully the appropriate binary running under gdb inside Emacs inside the woman who swallowed a fly I don't know why. Or
+to run the given test with hopefully the appropriate binary running under gdb inside Emacs inside the woman who swallowed a fly I don't know why. Or if you're truly crazy,
 
     % debug --js ./obj-js-debug/dist/bin/js somefile.js
 
-to bring up Emacs running jorendb[7].
+brings up Emacs running jorendb[7].
 
 rr
 --
@@ -395,7 +395,7 @@ I have a .gdbinit file with some funky commands to set hardware watchpoints on G
        562/8443 also, obj is now 0x7ff687749c00
     (rr) log -edit  # brings up $EDITOR on your full log file
 
-The idea is to be able to move around in time, logging various things, and then use `log -sorted` to display the log messages *in chronological order according to the execution*. (Note that when you do this, the next point in time coming up will be labeled with "=>" to show you when you are.) You might consider using this in conjunction with `command` as a simple way of automatically tracing the evolution of some value:
+The idea is to be able to move around in time, logging various things, and then use `log -sorted` (abbreviated to `log -s`) to display the log messages *in chronological order according to the execution*. (Note that when you do this, the next point in time coming up will be labeled with "=>" to show you when you are.) You might consider using this in conjunction with `command` as a simple way of automatically tracing the evolution of some value:
 
     (rr) b HashTable::put
     Breakpoint 1 set at HashTable::put(Entry)
@@ -405,7 +405,7 @@ The idea is to be able to move around in time, logging various things, and then 
     > end
     (rr) c
 
-Boom! You now have the value of mEntries every time put() is called. Or consider doing that with a hardware watchpoint. (But watch out for log messages in breakpoints; it will execute the log command every time you encounter the breakpoint, so if you go forwards and backwards across the breakpoint several times, you'll end up with a bunch of duplicate entries in your log. `log -edit` is useful for manually cleaning those up.)
+Boom! You now have the value of mEntries every time put() is called. Or consider doing that with a hardware watchpoint. (But watch out for log messages in breakpoints; it will execute the log command every time you encounter the breakpoint, so if you go forwards and backwards across the breakpoint several times, you'll end up with a bunch of duplicate entries in your log. `log -edit` aka `log -e` is useful for manually cleaning those up.)
 
 Note that the default log filename is based on the process ID, and the logging will append entries across multiple `rr replay` runs. So if you run muliple sessions of `rr replay` on the same process recording, all of your log messages will be collected together. Use `set logfile <filename>` to switch to a different file.
 
@@ -429,6 +429,6 @@ Finally, there's a simple `pp` command, where `pp foo` is equivalent to `python 
 
 [5] kdiff3-wrapper was pretty useful back in the day; kdiff3 has a bad habit of clearing the execute (chmod +x) bit when merging, so kdiff3-wrapper is a shell script that runs kdiff3 and then fixes up the bits afterwards. I don't know if it still has that issue?
 
-[6] The quotes around "promise" translate more or less to "do not promise".
+[6] There is no footnote 6. It formerly referred to a not-yet-landed patch to bzexport, which I have now landed.
 
-[7] jorendb is a relatively simple JS debugger that jorendorff wrote, I think to test the Debugger API. I suspect he's amused that I attempt to use it for anything practical. I'm sure the number of people for whom it is relevant is vanishingly small, but I love having it when I need it. (It's for the JS shell only. Nobody uses the JS shell for any serious scripting; why would you, when you have web browser and Node?) (I'm Nobody.)
+[7] jorendb is a relatively simple JS debugger that jorendorff wrote, I think to test the Debugger API. I suspect he's amused that I attempt to use it for anything practical. I'm sure the number of people for whom it is relevant is vanishingly small, but I love having it when I need it. (It's for the JS shell only. Nobody uses the JS shell for any serious scripting; why would you, when you have a full web browser, and Node if you don't want that?) (I'm Nobody.)
