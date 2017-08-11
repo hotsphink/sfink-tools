@@ -1,0 +1,24 @@
+#!/bin/sh
+
+set -e
+
+TOOL="$1"
+SFINKTOOLSDIR="$(dirname "$0")"
+base="$(basename "$TOOL")"
+
+if ! [ -x "$TOOL" ]; then
+  TOOL="$HOME/bin/$base"
+fi
+
+if ! [ -x "$TOOL" ]; then
+  echo "$TOOL not found" >&2
+  exit 1
+fi
+
+abs="$(realpath "$SFINKTOOLSDIR/$base")"
+rel="$(abs2rel "$abs" "$(dirname "$TOOL")")"
+[ -n "$abs" ] && [ -n "$rel" ]
+mv "$TOOL" "$SFINKTOOLSDIR/$base"
+ln -s "$rel" "$TOOL"
+
+echo "Imported $base into sfink-tools"
