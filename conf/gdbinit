@@ -140,3 +140,7 @@ def loadpy
 end
 
 loadpy
+
+def ifeelpretty
+  source /home/sfink/src/mozilla2/obj-js-debug/dist/bin/js-gdb.py
+end
