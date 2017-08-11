@@ -1,0 +1,74 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+
+use strict;
+my %score;
+
+my $prename;
+my $postname;
+GetOptions("pre|0=s" => \$prename,
+           "post|1=s" => \$postname,
+           "help|h!" => \&usage);
+
+sub usage {
+    print <<"END";
+$0 --pre=<pre> --post=<post> results.txt
+where <pre> and <post> are labels embedded in results.txt, which has the format
+
+    name=SomeLabel
+
+    SomeScore: 83242
+    AnotherScore: 8311
+
+    name=AnotherLabel
+
+    SomeScore: 63213
+    AnotherScore: 7311
+
+If --pre (aka -0) and/or --post (aka -1) are not passed, they'll be guessed
+from the order of the results.txt file.
+END
+
+    exit(1);
+}
+
+my @names;
+my $which;
+while(<>) {
+    if (/name=(.*)/) {
+        $which = $1;
+        push @names, $1;
+    } elsif (/^Iteration (\d+)\s+([\d.]+)/) {
+        $score{$which}{$1} = $2;
+    } elsif (/^(\w+)[^:]*: (\d+)/) {
+        $score{$which}{$1} = $2;
+    }
+}
+
+$prename ||= shift(@names);
+die "$prename not found" if ! exists $score{$prename};
+$score{pre} = $score{$prename};
+
+$postname ||= shift(@names);
+die "$postname not found" if ! exists $score{$postname};
+$score{post} = $score{$postname};
+
+my $maxlen = 0;
+foreach (keys %{ $score{pre} }) {
+    $maxlen = length if length > $maxlen;
+}
+
+sub compare {
+    return int($a) ? $a <=> $b : $a cmp $b;
+}
+
+print "$prename -> $postname\n";
+print "\n";
+
+foreach (sort compare keys %{ $score{pre} }) {
+    my ($pre, $post) = ($score{post}{$_}, $score{pre}{$_});
+    my $delta = -($post - $pre);
+    printf("% ${maxlen}s: %6.0f -> %6.0f = %+6.0f (%+5.1f%%)\n",
+           $_, $post, $pre, $delta, 100 * $delta / $post);
+}

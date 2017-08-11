@@ -1,0 +1,98 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use Getopt::Long;
+
+my $action = 'median';
+GetOptions("median!" => sub { $action = 'median'  },
+           "mean!" => sub { $action = 'mean'  });
+
+my %data;
+my @FIELDNAMES;
+my %nonnumeric;
+my %ALLFIELDS;
+
+my @order;
+my %seen;
+
+my $found_mode;
+
+my @variants = @ARGV ? @ARGV : qw(inbound jit);
+for my $variant (@variants) {
+    MODE: for my $mode ('on', 'off') {
+        for my $n (1..5) {
+            my $logfile = "$variant.$mode.$n.log";
+            next MODE if ! -e $logfile;
+            $found_mode = $mode;
+            open(FILE, "<", $logfile) or die "open $logfile: $!";
+            while(<FILE>) {
+                if (/^MinorGC:/) {
+                    my @F = split;
+                    if (!@FIELDNAMES) {
+                        @FIELDNAMES = map { "nursery.$_" } @F;
+                    }
+                    next if $F[1] eq 'Reason';
+                    for my $i (0 .. $#F) {
+                        my $field = $FIELDNAMES[$i];
+                        push @{ $data{$variant}[$n]{$field} }, $F[$i];
+                        $nonnumeric{$field} = 1 if $F[$i] !~ /^\d+$/;
+                        $ALLFIELDS{$field} = 1;
+                        push @order, $field if ! $seen{$field}++ && !$nonnumeric{$field};
+                    }
+                }
+            }
+            
+            $logfile = "$variant.$mode.$n.txt";
+            open(FILE, "<", $logfile) or die "open $logfile: $!";
+            while(<FILE>) {
+                if (/^(\w+): (\d+)/) {
+                    $data{$variant}[$n]{$1} = [ $2 ];
+                    $ALLFIELDS{$1} = 1;
+                    push @order, $1 if ! $seen{$1}++;
+                }
+            }
+        }
+    }
+}
+
+sub compute_average {
+    my ($ref, $field) = @_;
+    my @sums;
+    for my $n (1..5) {
+        my $sum = 0;
+        $sum += $_ foreach @{ $ref->[$n]{$field} };
+        push @sums, $sum;
+    }
+
+    if ($action eq 'median') {
+        return (sort { $a <=> $b } @sums)[int(@sums / 2)];
+    } elsif ($action eq 'mean') {
+        my $sum = 0;
+        $sum += $_ foreach @sums;
+        return $sum / @sums;
+    } else {
+        return 'fnord';
+    }
+}
+
+print "$action with nursery strings $found_mode of ", join(" -> ", @variants), "\n";
+for my $field (@order) {
+    next if $field eq 'nursery.Size'; # This is a sum of nursery sizes across the run. Not helpful.
+    my $base = compute_average($data{$variants[0]}, $field);
+    my $istime = $field =~ /^nursery\./;
+    next if $istime && $base < 500;
+    (my $pfield = $field) =~ s/nursery./(nursery) /;
+    printf "% 30s: ", $field;
+    for my $i (0 .. $#variants) {
+        print " -> " if $i;
+        my $score = compute_average($data{$variants[$i]}, $field);
+        printf("% 8d", $score);
+        if ($i) {
+            my $delta = $score - $base;
+            printf " % +6d (%+3.1f%%)", $delta, $delta / $base * 100;
+            print(($istime xor $delta > 0) ? " improvement" : " regression");
+        }
+    }
+    print "\n";
+}
