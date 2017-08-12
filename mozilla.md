@@ -108,7 +108,7 @@ Then while I'm being a good boy and continuing to work on the feature named in t
 
     % hg amend
 
-`hg amend` is a command from the mutable-history aka evolve extension[1]. If you're not using it, you could substitute `hg commit --amend`, but it will annoyingly keep asking you to update the commit message. There's a fix, but this document is about my workflow, not yours.
+`hg amend` is a command from the evolve extension[1]. If you're not using it, you could substitute `hg commit --amend`, but it will annoyingly keep asking you to update the commit message. There's a fix, but this document is about my workflow, not yours.
 
 But often, I will get distracted and begin working on a different feature. I *could* update to inbound or central and start again, but that tends to touch too many source files and slow down my rebuilds, and I have a lot of inertia, so usually I'll just start hacking within the same bookmarked patch stack. When done or ready to work on the original (or a new) feature, I'll make another commit.
 
@@ -413,10 +413,10 @@ Finally, there's a simple `pp` command, where `pp foo` is equivalent to `python 
 
 ----
 
-[1] https://www.mercurial-scm.org/wiki/EvolveExtension - install evolve by cloning `hg clone https://bitbucket.org/marmoute/mutable-history` somewhere, then adding it into your ~/.hgrc:
+[1] https://www.mercurial-scm.org/wiki/EvolveExtension - install evolve by cloning `hg clone https://www.mercurial-scm.org/repo/evolve/` somewhere, then adding it into your ~/.hgrc:
 
     [extensions]
-    evolve = ~/lib/hg/mutable-history/hgext/evolve.py
+    evolve = ~/lib/hg/evolve/hgext3rd/evolve
 
 [2] "public" is the name of a mercurial phase. It means a changeset that has been pushed to mozilla-inbound or similar. Stuff you're working on will ordinarily be in the "draft" phase until you push it. [↩](#a1)
 
