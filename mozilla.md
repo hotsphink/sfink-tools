@@ -418,6 +418,8 @@ Finally, there's a simple `pp` command, where `pp foo` is equivalent to `python 
     [extensions]
     evolve = ~/lib/hg/evolve/hgext3rd/evolve
 
+Though erahm says `pip install --user hg-evolve` Just Works.
+
 [2] "public" is the name of a mercurial phase. It means a changeset that has been pushed to mozilla-inbound or similar. Stuff you're working on will ordinarily be in the "draft" phase until you push it. [↩](#a1)
 
 [3] `hg clone https://bitbucket.org/facebook/hg-experimental` somewhere, then activate it with
