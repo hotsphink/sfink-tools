@@ -413,12 +413,10 @@ Finally, there's a simple `pp` command, where `pp foo` is equivalent to `python 
 
 ----
 
-[1] https://www.mercurial-scm.org/wiki/EvolveExtension - install evolve by cloning `hg clone https://www.mercurial-scm.org/repo/evolve/` somewhere, then adding it into your ~/.hgrc:
+[1] https://www.mercurial-scm.org/wiki/EvolveExtension - install evolve with `pip install --user hg-evolve`, or manually by cloning `hg clone https://www.mercurial-scm.org/repo/evolve/` somewhere, then adding it into your ~/.hgrc:
 
     [extensions]
     evolve = ~/lib/hg/evolve/hgext3rd/evolve
-
-Though erahm says `pip install --user hg-evolve` Just Works.
 
 [2] "public" is the name of a mercurial phase. It means a changeset that has been pushed to mozilla-inbound or similar. Stuff you're working on will ordinarily be in the "draft" phase until you push it. [↩](#a1)
 
