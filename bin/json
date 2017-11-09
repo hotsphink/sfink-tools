@@ -10,7 +10,7 @@ use warnings;
 my $json = JSON->new->utf8->relaxed;
 my $pjson = JSON->new->utf8->relaxed->canonical->pretty;
 
-# transform markers/name/* /threads/2/stringArray/{value}
+$SIG{__WARN__} = sub { print(@_); $DB::single = $DB::single = 1; };
 
 sub help {
     my ($opts) = @_;
@@ -29,13 +29,22 @@ Usage: $0 <filename.json> [initial-path] [-e COMMAND]
                              for a description of SPEC)
     set KEY VALUE          - modify an existing value (VALUE may optionally
                              be quoted)
-    transform PATH LOOkUP  - for every value VSRC found at PATH, convert LOOKUP
-                             to a new path by substituting "{value}" with VSRC,
-                             and replace VSRC with the value found at that path
+    transform PATH EXPR    - for every value VSRC found at PATH, convert EXPR
+                             to a new value by processing substitutions. Replacements:
+        {basename}
+        {dir}
+        {path}
+        \$(pathexpr)
+        \$eval(expr)
+                             Example: transform markers/name/* stringArray/{basename}
+    sum PATH               - print the sum of the hopefully numeric items found at PATH
     mv PATH PATH           - move a subtree
     mmv PATTERN PATH DEST  - move all immediate children in PATH matching
                              PATTERN to DEST
-    grep [-l] PATTERN PATH - search for PATTERN in given PATH
+    grep -e 'EXPR' PATTERN PATH -
+                             print out the value of EXPR...
+    grep [-l] [-c] PATTERN PATH -
+                             search for PATTERN in given PATH
     write [--pretty|--noindent] [FILENAME]
                            - write out the whole structure as JSON. Use '-' as
                              FILENAME to write to stdout.
@@ -85,10 +94,11 @@ my $struct;
 my $dirty = 0;
 my $current;
 my @current;
-my $batch = 0;
+my $batch;
 
 GetOptions("h|help!" => sub { help({ exit => 1 }) },
-           "e|command=s" => \@inputbuffer)
+           "e|command=s" => \@inputbuffer,
+           "i|interactive!" => sub { $batch = 0 })
     or help({ error => 'invalid arguments' });
 
 if ((! -t STDIN) && (@ARGV == 0)) {
@@ -96,7 +106,7 @@ if ((! -t STDIN) && (@ARGV == 0)) {
 }
 help({error => 'not enough arguments'}) if @ARGV == 0;
 
-$batch = 1 if @inputbuffer;
+$batch = 1 if !defined($batch) && @inputbuffer;
 
 my $current_file = shift(@ARGV);
 
@@ -210,15 +220,19 @@ LS: while(1) {
             delete_keys($current, $1);
         } elsif ($input =~ /^set (\S+)[\s=]+(.*)$/) {
             set_value($current->[-1], $1, $2);
-        } elsif ($input =~ /^transform (\S+)\s+(.*)$/) {
-            transform($current, $1, $2);
+        } elsif ($input =~ /^transform (-d \S+ )?(\S+)( -d \S+)?\s+(.*)$/) {
+            transform($current, $2, $4, $1 || $3);
         } elsif ($input =~ /^push (.*)$/) {
             push_value($current->[-1], $1);
         } elsif ($input =~ /^unshift (.*)$/) {
             unshift_value($current->[-1], $1);
         } elsif ($input =~ /^mv (\S+) (\S+)$/) {
             mv($current, $1, $2);
-        } elsif ($input =~ /^grep (?:(-l|--cd)\s+)?(.*) (\S+)$/) {
+        } elsif ($input =~ /^sum (\S+)$/) {
+            sum($current, $1);
+        } elsif ($input =~ /^grep -e '(.*?)' ("[^"]*"|'[^']*'|\S+) (\S+)$/) {
+            search($2, $3, undef, $1);
+        } elsif ($input =~ /^grep (?:(-l|--cd|-c)\s+)?("[^"]*"|'[^']*'|\S+) (\S+)$/) {
             search($2, $3, $1);
         } elsif ($input =~ /^mmv (.*) (\S+) (\S+)$/) {
             movegroup($1, $2, $3);
@@ -276,7 +290,7 @@ sub load {
 
 sub export {
     my ($struct, $file) = @_;
-    
+
     open(my $fh, ">", $file) or die "create $file: $!";
     my $json = $pjson->utf8->canonical;
     print $fh $json->encode($struct)
@@ -310,7 +324,7 @@ sub import {
             }
         }
     }
-        
+
     $dirty = 1;
 }
 
@@ -355,8 +369,14 @@ sub write_file {
     $dirty = 0;
 }
 
+sub abspath {
+    my ($path) = @_;
+    my $pwd = join('/', '', @current[1..$#current]);
+    return joinpath($pwd, $path);
+}
+
 sub search {
-    my ($pattern, $path, $args) = @_;
+    my ($pattern, $path, $args, $expr) = @_;
     $args ||= '';
 
     my $re;
@@ -367,22 +387,33 @@ sub search {
         $re = substr($pattern, 1, -1);
     }
 
+    my %hist;
     my @matchfiles;
     map_path($current, $path, sub {
-        my ($stack, $path) = @_;
+        my ($stack, $lpath) = @_;
         return if ref($stack->[-1]);
         return if $stack->[-1] !~ /$re/;
-        if ($args ne '--cd') {
-            print $path;
+        if ($args eq '-c') {
+            my $datum = $1 // $stack->[-1];
+            $hist{$datum}++;
+        } elsif (defined($expr)) {
+            print evaluate($stack, $stack, abspath($lpath), $expr), "\n";
+        } elsif ($args ne '--cd') {
+            print $lpath;
             if (!$args) {
                 print ": $stack->[-1]";
             }
             print "\n";
         }
-        push @matchfiles, $path;
+        push @matchfiles, $lpath;
     }) or print "Path $path not found\n";
 
-    if ($args eq '--cd') {
+    if ($args eq '-c') {
+        for my $match (sort { $hist{$a} <=> $hist{$b} } keys %hist) {
+            my $count = $hist{$match};
+            printf("% 6s %s\n", $count, $match);
+        }
+    } if ($args eq '--cd') {
         return if @matchfiles == 0; # Already warned
         if (@matchfiles > 1) {
             print "Multiple matches; ambiguous destination\n";
@@ -394,7 +425,7 @@ sub search {
 
 sub movegroup {
     my ($pattern, $path, $dst) = @_;
-    
+
     my $re;
     my $delim = substr($pattern, 0, 1);
     if ($delim ne substr($pattern, -1)) {
@@ -520,7 +551,7 @@ sub set_value {
 
     if ($key =~ m!([^/]+)/(.*)!) {
         my ($dir, $subkey) = ($1, $2);
-        
+
         if (UNIVERSAL::isa($struct, 'HASH')) {
             if (exists $struct->{$dir}) {
                 return set_value($struct->{$dir}, $subkey, $value);
@@ -658,7 +689,7 @@ sub map_path {
 
     $path =~ s!/$!!;
 
-    my $count = 0;
+    my @results;
 
     # Split off the first component
     my ($first, $rest) = $path =~ m!^([^/]+)/(.*)!;
@@ -668,19 +699,18 @@ sub map_path {
         # Single component "$path"
         foreach (path_stacks($stack, $obj, $path, $sofar, $suppress_errors)) {
             my ($stack, $sofar) = @$_;
-            $callback->($stack, $sofar);
-            ++$count;
+            push @results, $callback->($stack, $sofar) // 1;
         }
     } else {
         # "$first/$rest"
         foreach (path_stacks($stack, $obj, $first, $sofar, $suppress_errors, 1)) {
             my ($stack, $sofar) = @$_;
             $suppress_errors ||= $first =~ /^[\*\{]/;
-            $count += map_path($stack, $rest, $callback, $sofar, $suppress_errors);
+            push @results, map_path($stack, $rest, $callback, $sofar, $suppress_errors);
         }
     }
 
-    return $count;
+    return @results;
 }
 
 sub popstack {
@@ -688,26 +718,82 @@ sub popstack {
     return [ @$stack[0..$#$stack-1] ];
 }
 
-sub transform {
-    my ($current, $path, $lookup) = @_;
-    map_path($current, $path, sub {
-        my ($stack, $path) = @_;
-        if (ref $stack->[-1]) {
-            print "Can only operate on simple values\n";
-        } else {
-            (my $new_lookup = $lookup) =~ s/\{value\}/$stack->[-1]/g;
-            my @found;
-            map_path($current, $new_lookup, sub {
-                my ($lstack, $lpath) = @_;
-                push @found, $lstack->[-1];
-            });
-            if (@found != 1) {
-                print "LOOKUP $new_lookup resolved to no or multiple locations\n";
-            } else {
-                change_element($stack->[-2], $stack->[-1], clone($found[0]));
-            }
+sub evaluate {
+    my ($current, $stack, $path, $expr) = @_;
+
+    my $output = $expr;
+    $output =~ s/\{basename\}/$stack->[-1]/g;
+    $output =~ s/\{path\}/$path/g;
+    my $dir = dirname($path);
+    $output =~ s/\{dir\}/$dir/g;
+
+    my $lookup = sub {
+        my ($lookup_path) = @_;
+
+        my @found = map_path($current, $lookup_path, sub {
+            my ($lstack, $lpath) = @_;
+            return $lstack->[-1];
+        });
+
+        if (@found == 0) {
+            die "path $lookup_path not found\n";
+        } elsif (@found > 1) {
+            die "path $lookup_path resolved to multiple locations\n";
         }
-    });
+        return $found[0];
+    };
+
+    my $sum = sub {
+        my ($lookup_path) = @_;
+
+        my $sum = 0;
+        map_path($current, $lookup_path, sub {
+            my ($lstack, $lpath) = @_;
+            $sum +=  $lstack->[-1];
+        });
+
+        return $sum;
+    };
+
+    # Lookup $(path)
+    $output =~ s/\$\((.*?)\)/$lookup->($1)/eg;
+
+    # Evaluate $eval(...) as a Perl expression.
+    $output =~ s/\$eval\((.*)\)/$1/ee;
+
+    # $sum(path) gives the sum of everything matching path.
+    $output =~ s/\$sum\((.*?)\)/$sum->($1)/eg;
+
+    return $output;
+}
+
+sub transform {
+    my ($current, $path, $expr, $dest_arg) = @_;
+    my $dest;
+    if ($dest_arg) {
+        ($dest) = $dest_arg =~ /-d (.*?)\s*$/;
+    }
+    eval {
+        map_path($current, $path, sub {
+            my ($stack, $path) = @_;
+            if (ref $stack->[-1]) {
+                print "Can only operate on simple values\n";
+            } else {
+                my $output = evaluate($current, $stack, $path, $expr);
+
+                if (!$dest) {
+                    change_element($stack->[-2], $stack->[-1], $output);
+                } else {
+                    map_path($stack, joinpath("..", dirname($dest)), sub {
+                        my ($lstack, $lpath) = @_;
+                        set_value($lstack->[-1], basename($dest), $output);
+                    });
+                }
+            }
+        });
+    };
+
+    print $@ if $@;
 }
 
 sub ls {
@@ -794,6 +880,16 @@ sub mv {
             delete_keys($current, $victim);
         }
     }
+}
+
+sub sum {
+    my ($current, $path) = @_;
+    my $sum = 0;
+    map_path($current, $path, sub {
+        my ($stack, $lpath) = @_;
+        $sum += $stack->[-1];
+    });
+    print "$sum\n";
 }
 
 sub show_size {
