@@ -106,12 +106,24 @@ if (@final_args == 0) {
         if $verbose;
     my @files;
     chomp(@files = qx(hg diff | diffstat -l -p1));
-    if (@files == 0) {
+    if (@files) {
+        push @final_args, map { "$ROOTDIR/$_" } @files;
+    } else {
         print "Using changes from $revision\n"
             if $verbose;
-        chomp(@files = qx(hg export --hidden $revision | diffstat -l -p1));
+        open(my $diff, "hg export --hidden $revision |");
+        my $curfile;
+        while(<$diff>) {
+            chomp;
+            if (m!^\+\+\+ b/(.*)!) {
+                $curfile = $1;
+            } elsif ($curfile && /^@@ -\d+,\d+ \+(\d+)/) {
+                my $startline = $1 + 8;
+                push @final_args, "+$startline", "$ROOTDIR/$curfile";
+                undef $curfile;
+            }
+        }
     }
-    push @final_args, map { "$ROOTDIR/$_" } @files;
 }
 
 my $cmd = $use_client ? "emacsclient" : "emacs";
