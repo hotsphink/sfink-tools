@@ -31,7 +31,7 @@ class MultipleFunctionsFound(Exception):
 
     def report(self, verbose=True, count_callers=False, count_callees=False):
         print("'%s' matches %d functions:" % (self.spec, len(self.functions)))
-        for f in functions:
+        for f in self.functions:
             print("  " + describe(f, raw=verbose,
                                   count_callers=count_callers,
                                   count_callees=count_callees))
@@ -76,12 +76,15 @@ def load_file(callgraph_filename):
         gAvoid.update(resolve(f))
 
 # TODO: match against the stem, not the whole string (getting noise from param types)
-def resolve_single(pattern):
+def resolve_pattern(pattern, num_ok=False):
     try:
         return [ int(pattern.replace('#', '')) ]
     except:
         pass
     pattern = pattern.strip('\'"')
+
+    if num_ok and  pattern.startswith('/'):
+        return [-int(pattern[1:])]
 
     # First check for an exact match. Note that this will also catch C linkage
     # function names.
@@ -91,8 +94,12 @@ def resolve_single(pattern):
     except:
         pass
 
-    # Now look for a simple substring match.
-    funcs = [ i for i, name in enumerate(data['names'][1:], 1) if pattern in name ]
+    # Regex match
+    try:
+        matcher = re.compile(pattern)
+        funcs = [ i for i, name in enumerate(data['names'][1:], 1) if matcher.search(name) ]
+    except:
+        funcs = []
 
     # Hack, should escape the rest of the string. And deal with eg
     # foo<T>::bar(param<U>)
@@ -119,13 +126,45 @@ def resolve_single(pattern):
 def resolve(pattern):
     funcs = []
     for pattern in pattern.split(" and "):
-        funcs += resolve_single(pattern)
+        funcs += resolve_pattern(pattern)
     return funcs
 
 data = {}
 load_file(sys.argv[1])
 
 print("len(callers) = %d" % (len(data['callers'].keys())))
+
+def findAllReachers(src, dst, avoid):
+    avoid = gAvoid.union(avoid or [])
+
+    if isinstance(dst, list):
+        dst = set(dst)
+    else:
+        dst = set([dst])
+
+    if isinstance(src, list):
+        candidates = src[:]
+    else:
+        candidates = [src]
+
+    reachers = []
+    for candidate in candidates:
+        edges = {}
+        work = [candidate]
+        while work:
+            caller = work.pop(0)
+            for callee in data['callees'].get(caller, {}).keys():
+                if callee in dst:
+                    path = [callee]
+                    while path[-1] != candidate:
+                        path.append(edge[callee])
+                    reachers.append(path)
+                    work = []
+                    break
+                if callee not in edges and callee not in avoid:
+                    edges[callee] = caller
+                    work.append(callee)
+    return reachers
 
 def findRoute(src, dst, avoid):
     avoid = gAvoid.union(avoid or [])
@@ -136,14 +175,14 @@ def findRoute(src, dst, avoid):
     edges = {}
     while len(work) > 0:
         caller = work.pop(0)
-        for callee in data['callees'].get(caller, {}).keys():
+        for callee, limits in data['callees'].get(caller, {}).items():
             if callee == dst:
                 edges[callee] = caller
                 route = [callee]
-                while route[0] != src:
+                while route[0] not in src:
                     route.insert(0, edges[route[0]])
                 return route
-            elif (callee not in avoid) and (callee not in edges):
+            elif (callee not in avoid) and (-limits not in avoid) and (callee not in edges):
                 edges[callee] = caller
                 work.append(callee)
 
@@ -468,6 +507,7 @@ class Commander(cmd.Cmd):
     quit = False
     stdout = None
     verbose = False
+    last_caller = ''
 
     def do_verbose(self):
         '''Toggle verbosity (including mangled function names)'''
@@ -485,7 +525,8 @@ class Commander(cmd.Cmd):
         '''Resolve a function identifier or a substring of a function name to the full function name(s)'''
         functions = self.parse_functions(s, required=False)
         if functions:
-            print(describe(functions))
+            for f in functions:
+                print(describe(f))
         else:
             print("No matching function found")
 
@@ -499,6 +540,8 @@ class Commander(cmd.Cmd):
     def do_callers(self, s):
         '''Display all callers of FUNCTION'''
         try:
+            if s == '':
+                s = self.last_caller
             f = self.parse_function(s)
         except FunctionNotFound:
             return
@@ -506,6 +549,7 @@ class Commander(cmd.Cmd):
         print("%d callers of #%d = %s" % (len(callers.keys()), f, data['readable'][f]))
         for caller, suppressed in callers.iteritems():
             print("  #%d = %s%s" % (caller, "(SUPPRESSED) " if suppressed else "", data['readable'][caller]))
+            self.last_caller = '#%d' % caller
 
     def do_caller(self, s):
         return self.do_callers(s)
@@ -533,7 +577,7 @@ class Commander(cmd.Cmd):
     # none_ok: spec may be None (will return None)
     #
     # Returns list of functions found, or None if spec was None and none_ok was set.
-    def parse_functions_impl(self, spec, required=True, single=True, none_ok=False):
+    def parse_functions_impl(self, spec, required=True, single=True, none_ok=False, num_ok=False):
         if spec is None:
             if not none_ok:
                 print("function name is required")
@@ -543,7 +587,7 @@ class Commander(cmd.Cmd):
         patterns = [spec] if single else spec.split(" and ")
         functions = []
         for pattern in patterns:
-            functions += resolve_single(pattern)
+            functions += resolve_pattern(pattern, num_ok=num_ok)
 
         if len(functions) == 0:
             if required or single:
@@ -557,13 +601,43 @@ class Commander(cmd.Cmd):
         return functions
 
     # Returns a list of matching functions.
-    def parse_functions(self, spec, required=True, none_ok=False):
-        return self.parse_functions_impl(spec, required=required, single=False, none_ok=none_ok)
+    def parse_functions(self, spec, required=True, none_ok=False, num_ok=False):
+        return self.parse_functions_impl(spec, required=required, single=False, none_ok=none_ok, num_ok=num_ok)
 
     # Returns matching function, or None if none_ok was true and spec was None.
     def parse_function(self, spec):
         functions = self.parse_functions_impl(spec, single=True, none_ok=False)
         return functions[0]
+
+    def do_canreach(self, s):
+        '''List out anything matching SOURCE that can reach DEST [avoiding FUNC]'''
+        m = re.match(r'^(?:from )?(.*) to (.*?)(?: avoiding (.*))?$', s)
+        if not m:
+            print("Invalid syntax: Usage: canreach from <src> to <dst>[ avoiding <func>]")
+            return
+
+        src, dst, avoid = m.groups()
+        try:
+            src = self.parse_functions(src)
+            dst = self.parse_functions(dst)
+            avoid = self.parse_functions(avoid, none_ok=True)
+        except FunctionNotFound:
+            return
+
+        reachers = findAllReachers(src, dst, avoid)
+        for path in reachers:
+            str = "Path from #%d to #%d:" % (path[0], path[-1])
+            if avoid:
+                str += " avoiding %r" % (avoid,)
+            print(str)
+            for step in path:
+                print("  %s" % (step, data['readable'][step]))
+
+        if not reachers:
+            if avoid:
+                print("No route from #%r to #%d found without going through %s" % (src, dst, avoid))
+            else:
+                print("No route from #%r to #%d found" % (src, dst))
 
     def do_route(self, s):
         '''Find a route from SOURCE to DEST [avoiding FUNC]'''
@@ -577,7 +651,7 @@ class Commander(cmd.Cmd):
         try:
             src = self.parse_functions(src)
             dst = self.parse_function(dst)
-            avoid = self.parse_functions(avoid, none_ok=True)
+            avoid = self.parse_functions(avoid, none_ok=True, num_ok=True)
         except FunctionNotFound:
             return
         except MultipleFunctionsFound as e:
@@ -586,7 +660,7 @@ class Commander(cmd.Cmd):
 
         path = findRoute(src, dst, avoid)
         if path:
-            str = "Path from #%d to #%d:" % (src, dst)
+            str = "Path from #%d to #%d:" % (path[0], path[-1])
             if avoid:
                 str += " avoiding %r" % (avoid,)
             print(str)
@@ -600,9 +674,9 @@ class Commander(cmd.Cmd):
                 print("  %s#%d = %s" % (limit_str, step, data['readable'][step]))
                 laststep = step
         elif avoid:
-            print("No route from #%d to #%d found without going through %s" % (src, dst, avoid))
+            print("No route from #%r to #%d found without going through %s" % (src, dst, avoid))
         else:
-            print("No route from #%d to #%d found" % (src, dst))
+            print("No route from #%r to #%d found" % (src, dst))
 
     def do_reachable(self, s):
         '''Find all functions reachable from anything matching FUNCTION [avoiding FUNCTION]'''
