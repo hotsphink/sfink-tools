@@ -8,10 +8,10 @@ my $action = 'median';
 GetOptions("median!" => sub { $action = 'median'  },
            "mean!" => sub { $action = 'mean'  });
 
-my %data;
-my @FIELDNAMES;
+my %data; # { variant => [run: { field name => [value] } ] }
+my @FIELDNAMES; # [ field name, raw or "nursery.whatever" ]
 my %nonnumeric;
-my %ALLFIELDS;
+my %ALLFIELDS; # Set of all field names
 
 my @order;
 my %seen;
@@ -19,6 +19,13 @@ my %seen;
 my $found_mode;
 
 my @variants = @ARGV ? @ARGV : qw(inbound jit);
+
+if (-d "results") {
+    my ($dir) = qx(ls -t results);
+    chomp($dir);
+    chdir("results/$dir") or die "cd results/$dir: $!";
+}
+
 for my $variant (@variants) {
     MODE: for my $mode ('on', 'off') {
         for my $n (1..5) {
@@ -57,11 +64,11 @@ for my $variant (@variants) {
 }
 
 sub compute_average {
-    my ($ref, $field) = @_;
+    my ($rundata, $field) = @_;
     my @sums;
     for my $n (1..5) {
         my $sum = 0;
-        $sum += $_ foreach @{ $ref->[$n]{$field} };
+        $sum += $_ foreach @{ $rundata->[$n]{$field} };
         push @sums, $sum;
     }
 
@@ -80,10 +87,12 @@ print "$action with nursery strings $found_mode of ", join(" -> ", @variants), "
 for my $field (@order) {
     next if $field eq 'nursery.Size'; # This is a sum of nursery sizes across the run. Not helpful.
     my $base = compute_average($data{$variants[0]}, $field);
+    my $base_total_time = compute_average($data{$variants[0]}, 'nursery.total');
     my $istime = $field =~ /^nursery\./;
     next if $istime && $base < 500;
+    next if $istime && $base < 0.01 * $base_total_time;
     (my $pfield = $field) =~ s/nursery./(nursery) /;
-    printf "% 30s: ", $field;
+    printf "% 30s: ", $pfield;
     for my $i (0 .. $#variants) {
         print " -> " if $i;
         my $score = compute_average($data{$variants[$i]}, $field);
