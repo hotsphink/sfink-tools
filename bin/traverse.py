@@ -9,7 +9,7 @@ import sys
 
 history_filename = os.path.expanduser("~/.traverse")
 def_ident_re = re.compile(r'^#(\d+) ((.*?)(?:\$(.*))?)$')
-edge_re = re.compile(r'^[DR] (SUPPRESS_GC )?(\d+) (\d+)')
+edge_re = re.compile(r'^[DR] (SUPPRESS_GC |/\d+ )?(\d+) (\d+)')
 stem_re = re.compile(r'([\w_]+)\(')
 
 data = None
@@ -62,8 +62,14 @@ def load_file(callgraph_filename):
                     suppress, caller, callee = m.groups()
                     caller = int(caller)
                     callee = int(callee)
-                    callers.setdefault(callee, {})[caller] = suppress
-                    callees.setdefault(caller, {})[callee] = suppress
+                    if not suppress:
+                        limits = 0
+                    elif "SUPPRESS_GC" in suppress:
+                        limits = 1
+                    else:
+                        limits = int(suppress[1:])
+                    callers.setdefault(callee, {})[caller] = limits
+                    callees.setdefault(caller, {})[callee] = limits
 
     gAvoid = set()
     for f in gAvoidFuncs:
@@ -584,8 +590,15 @@ class Commander(cmd.Cmd):
             if avoid:
                 str += " avoiding %r" % (avoid,)
             print(str)
+            laststep = None
             for step in path:
-                print("  #%d = %s" % (step, data['readable'][step]))
+                limit_str = ""
+                if laststep is not None:
+                    limits = data['callees'][laststep][step]
+                    if limits:
+                        limit_str = "(IN LIMITED %d) " % limits
+                print("  %s#%d = %s" % (limit_str, step, data['readable'][step]))
+                laststep = step
         elif avoid:
             print("No route from #%d to #%d found without going through %s" % (src, dst, avoid))
         else:
