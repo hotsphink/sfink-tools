@@ -19,8 +19,8 @@ sub help {
         print STDERR $opts->{error}, "\n";
     }
 
-    print <<"END";
-Usage: $0 <filename.json> [initial-path] [-e COMMAND]
+    print <<'END';
+Usage: json <filename.json> [initial-path] [-e COMMAND]
 
     ls [PATH]              - show contents of structure
     cd PATH                - change current view to PATH
@@ -34,17 +34,24 @@ Usage: $0 <filename.json> [initial-path] [-e COMMAND]
         {basename}
         {dir}
         {path}
-        \$(pathexpr)
-        \$eval(expr)
-                             Example: transform markers/name/* stringArray/{basename}
+        $(pathexpr)
+        $eval(expr)
+        $sum(expr)
+                             Example: transform markers/name/* $(stringArray/{basename})
+    grep -e 'EXPR' PATTERN PATH
+                             - for every value found at PATH matching PATTERN, print out
+                             the value of EXPR evaluated in the context of the matching path.
+    grep [-l] [-c] PATTERN PATH
+                             - search for PATTERN in given PATH
+    groupby PATH EXPR GROUPEXPR
+    group PATH EXPR by GROUPEXPR
+                           - for every item matching PATH, report the result of EXPR grouped
+                             by GROUPEXPR. Example:
+                             groupby markers/data/*/nursery '$sum(phase_times/Total)' 'reason'
     sum PATH               - print the sum of the hopefully numeric items found at PATH
     mv PATH PATH           - move a subtree
     mmv PATTERN PATH DEST  - move all immediate children in PATH matching
                              PATTERN to DEST
-    grep -e 'EXPR' PATTERN PATH -
-                             print out the value of EXPR...
-    grep [-l] [-c] PATTERN PATH -
-                             search for PATTERN in given PATH
     write [--pretty|--noindent] [FILENAME]
                            - write out the whole structure as JSON. Use '-' as
                              FILENAME to write to stdout.
@@ -189,7 +196,7 @@ sub nextcommand {
 }
 
 LS: while(1) {
-    ls($current) unless $batch;
+    cmd_ls($current) unless $batch;
 
     while (1) {
         my $prompt = shortjoin(50, @current[1..$#current]);
@@ -207,13 +214,13 @@ LS: while(1) {
         } elsif ($input =~ /^cd (.*?)$/) {
             next LS if chpath($1);
         } elsif ($input =~ /^cat$/) {
-            cat($current);
+            cmd_cat($current);
         } elsif ($input =~ /^cat (--nokeys )?(.*?)$/) {
-            cat($current, $1, $2);
+            cmd_cat($current, $1, $2);
         } elsif ($input =~ /^ls$/) {
             next LS;
         } elsif ($input =~ /^ls (.*?)$/) {
-            ls($current, $1);
+            cmd_ls($current, $1);
         } elsif ($input =~ /^limit (\d+)$/) {
             $MAX = $1;
         } elsif ($input =~ /^delete (.*?)$/) {
@@ -221,21 +228,25 @@ LS: while(1) {
         } elsif ($input =~ /^set (\S+)[\s=]+(.*)$/) {
             set_value($current->[-1], $1, $2);
         } elsif ($input =~ /^transform (-d \S+ )?(\S+)( -d \S+)?\s+(.*)$/) {
-            transform($current, $2, $4, $1 || $3);
+            cmd_transform($current, $2, $4, $1 || $3);
         } elsif ($input =~ /^push (.*)$/) {
             push_value($current->[-1], $1);
         } elsif ($input =~ /^unshift (.*)$/) {
             unshift_value($current->[-1], $1);
         } elsif ($input =~ /^mv (\S+) (\S+)$/) {
-            mv($current, $1, $2);
+            cmd_mv($current, $1, $2);
         } elsif ($input =~ /^sum (\S+)$/) {
-            sum($current, $1);
+            cmd_sum($current, $1);
         } elsif ($input =~ /^grep -e '(.*?)' ("[^"]*"|'[^']*'|\S+) (\S+)$/) {
-            search($2, $3, undef, $1);
+            cmd_search($current, $2, $3, undef, $1);
         } elsif ($input =~ /^grep (?:(-l|--cd|-c)\s+)?("[^"]*"|'[^']*'|\S+) (\S+)$/) {
-            search($2, $3, $1);
+            cmd_search($current, $2, $3, $1);
+        } elsif ($input =~ /^groupby ('.*?'|\S+) ('.*?'|\S+) ('.*?'|\S+)$/) {
+            cmd_groupby($current, $1, $2, $3);
+        } elsif ($input =~ /^group ('.*?'|\S+) ('.*?'|\S+) by ('.*?'|\S+)$/) {
+            cmd_groupby($current, $1, $2, $3);
         } elsif ($input =~ /^mmv (.*) (\S+) (\S+)$/) {
-            movegroup($1, $2, $3);
+            cmd_movegroup($current, $1, $2, $3);
         } elsif ($input =~ /^write (?:(--\w+)\s*)?(.*?)$/) {
             write_file($2, $1);
         } elsif ($input =~ /^write(?: (--\w+))?$/) {
@@ -247,13 +258,13 @@ LS: while(1) {
         } elsif ($input =~ /^(load|reload)$/) {
             load();
         } elsif ($input =~ /^import (\S+)(?: (.*))?$/) {
-            import($current->[-1], $1, $2);
+            cmd_import($current, $current->[-1], $1, $2);
         } elsif ($input =~ /^export (.*?)$/) {
-            export($current->[-1], $1);
+            cmd_export($current, $current->[-1], $1);
         } elsif ($input =~ /^size (.*?)$/) {
-            show_size($current, $1);
+            cmd_show_size($current, $1);
         } elsif ($input =~ /^size$/) {
-            show_size($current);
+            cmd_show_size($current);
         } elsif ($input =~ /^quit$/) {
             quit();
         } else {
@@ -288,8 +299,8 @@ sub load {
     $dirty = 0;
 }
 
-sub export {
-    my ($struct, $file) = @_;
+sub cmd_export {
+    my ($current, $struct, $file) = @_;
 
     open(my $fh, ">", $file) or die "create $file: $!";
     my $json = $pjson->utf8->canonical;
@@ -297,8 +308,8 @@ sub export {
         or die "writing to $file: $!";
 }
 
-sub import {
-    my ($struct, $file, $dest) = @_;
+sub cmd_import {
+    my ($current, $struct, $file, $dest) = @_;
     my $data = do { local $/; open(my $fh, "<", $file) or die "open $file: $!"; <$fh> };
     my $value = $json->decode($data);
     if (defined $dest) {
@@ -375,8 +386,8 @@ sub abspath {
     return joinpath($pwd, $path);
 }
 
-sub search {
-    my ($pattern, $path, $args, $expr) = @_;
+sub cmd_search {
+    my ($current, $pattern, $path, $args, $expr) = @_;
     $args ||= '';
 
     my $re;
@@ -423,8 +434,218 @@ sub search {
     }
 }
 
-sub movegroup {
-    my ($pattern, $path, $dst) = @_;
+sub extract_aggregates {
+    my ($expr) = @_;
+
+    # regexp-based parsing, oh boy. Find all things like "$sum(...)" and
+    # extract the ... part.
+    my $re = qr{
+      (                   # paren group 1 (full function)
+          [=\$]\w+
+          (                 # paren group 2 (parens)
+            \(
+              (             # paren group 3 (contents of parens)
+              (?:
+               (?> [^()]+ ) # Non-parens without backtracking
+              |
+               (?2)         # Recurse to start of paren group 2
+              )*
+              )
+            \)
+          )
+        )
+     }x;
+
+    # No nesting allowed!
+
+    my @aggregates;
+    while ($expr =~ /$re/g) {
+        my ($whole, $args) = ($1, $3);
+        my $end = pos($expr);
+        my $start = $end - length($whole);
+        my $aend = $end - 1;
+        my $astart = $aend - length($args);
+        my ($function) = $whole =~ /[=\$](\w+)/;
+        push @aggregates, {
+            op => $function,
+            whole => $whole,
+            whole_range => [ $start, $end ],
+            expr => '$(' . $args . ')', # All aggregates currently lookup their arg
+            args_range => [ $astart, $aend ],
+        };
+    }
+
+    return @aggregates;
+}
+
+sub op_count {
+    return 0+@_;
+}
+
+sub op_min {
+    my $min = shift // return;
+    do { $min = $_ if $_ < $min } foreach @_;
+    return $min;
+}
+
+sub op_max {
+    my $max = shift // return;
+    do { $max = $_ if $_ > $max } foreach @_;
+    return $max;
+}
+
+sub op_sum {
+    my $sum = 0;
+    $sum += $_ foreach @_;
+    return $sum;
+}
+
+# FIXME: this is computing a median of medians, not the overall median.
+sub op_median {
+    my @values = sort { $a <=> $b } @_;
+    return $values[int(@values / 2)];
+}
+
+# FIXME: this is computing a mean of means, not the overall median.
+sub op_mean {
+    return 0 if @_ == 0;
+    return op_sum(@_) / @_;
+}
+
+sub op_stats {
+    my @stats = qw(count min max sum median mean);
+
+    if (!@_ || $_[0] !~ /^\{/) {
+        my %ret = map { $_ => $::{"op_$_"}->(@_) } @stats;
+        return $pjson->encode(\%ret);
+    }
+
+    # @_ : [ str encoding { statname => value } ]
+
+    my %data;
+    foreach (map { $json->decode($_) } @_) {
+        for my $stat (@stats) {
+            push @{ $data{$stat} }, $_->{$stat};
+        }
+    }
+
+    my %ret = map { $_ => $::{"op_$_"}->(@{ $data{$_} }) } @stats;
+    $ret{fields} = \@stats;
+    return $pjson->encode(\%ret);
+}
+
+sub op_group {
+    # We are trying to determine the group. We will want to discard entries
+    # with no group.
+    return 'none' if @_ == 0;
+    die "multiple groups found: @_" if @_ > 1;
+    return shift;
+}
+
+sub compute_aggregate {
+    my ($op, $values) = @_;
+
+    return $::{"op_$op"}->(@$values);
+
+    if ($op eq 'group') {
+        # We are trying to determine the group. We will want to discard entries
+        # with no group.
+        return 'none' if @$values == 0;
+        die "multiple groups found: @$values" if @$values > 1;
+        return $values->[0];
+    } elsif ($op eq 'sum') {
+        return sum(@$values);
+    } elsif ($op eq 'min') {
+        return min(@$values);
+    } elsif ($op eq 'max') {
+        return max(@$values);
+    } elsif ($op eq 'median') {
+        return median(@$values);
+    } else {
+        die "Unknown aggregate function \$$op";
+    }
+}
+
+sub evaluate_with_aggvalues {
+    my ($expr, $aggregates, $aggvalues) = @_;
+    for my $i (reverse 0..$#$aggregates) {
+        my $agg = $aggregates->[$i];
+        my $r = $agg->{whole_range};
+        substr($expr, $r->[0], $r->[1] - $r->[0]) = compute_aggregate($agg->{op}, $aggvalues->[$i]);
+    }
+
+    return [
+        map {
+            s/ as (\S+)//;
+            /^\{/ ? $json->decode($_) : eval
+        } split(/;/, $expr)
+    ];
+}
+
+sub unquote {
+    local $_ = shift;
+    s/'(.*?)'/$1/;
+    return $_;
+}
+
+# Example: group markers/data/*/nursery '$sum(phase_times/Total)' by '$(reason)'
+sub cmd_groupby {
+    my ($current, $path, $expr, $groupexpr) = @_;
+    $path = unquote($path);
+    $expr = unquote($expr);
+    $groupexpr = unquote($groupexpr);
+    (my $grouplabel = $groupexpr) =~ s/.* as (\S+)/$1/;
+    $groupexpr =~ s/ as \S+//;
+
+    my @aggregates = extract_aggregates($expr);
+    my %group_values;
+    map_path($current, $path, sub {
+        my ($stack, $lpath) = @_;
+        my $group = evaluate($stack, $stack, $lpath, $groupexpr, 'group');
+        return if $group eq 'none';
+
+        my @aggvalues;
+        my $i = 0;
+        for my $agg (@aggregates) {
+            my $value = evaluate($stack, $stack, $lpath, $agg->{expr}, $agg->{op});
+            push @{ $group_values{$group}[$i] }, $value;
+        } continue {
+            $i++;
+        }
+    });
+
+    my @out;
+
+    my $firstcols;
+    for my $group (sort keys %group_values) {
+        my $cols = evaluate_with_aggvalues($expr, \@aggregates, $group_values{$group});
+        $firstcols //= $cols;
+        # Ok, maybe I should rewrite this in another language. Or better yet,
+        # inject the data into sqlite.
+        push @out, [$group, map { ref ? @$_{@{ $_->{fields} }} : ($_) } @$cols];
+    }
+
+    my @subexprs = map { s/.* as (\S+)/$1/g; $_ } split(/;/, $expr);
+    for my $i (reverse(1 .. $#$firstcols)) {
+        my $datum = $firstcols->[$i];
+        next if ! ref $datum;
+        my $fields = $datum->{fields};
+        splice(@subexprs, $i, 1, @$fields);
+    }
+    unshift @out, [$grouplabel, @subexprs];
+
+    my @maxlens;
+    for my $i (0..$#{ $out[0] }) {
+        push @maxlens, op_max(map { length($_->[$i]) } @out);
+    }
+    my $format = "%$maxlens[0]s: " . join(" ", map { "%${_}s" } @maxlens[1..$#maxlens]) . "\n";
+    foreach (@out) {
+        printf($format, @$_);
+    }
+}
+
+sub cmd_movegroup {
+    my ($current, $pattern, $path, $dst) = @_;
 
     my $re;
     my $delim = substr($pattern, 0, 1);
@@ -506,7 +727,7 @@ sub parse_value {
     return $value_str;
 }
 
-sub push_value {
+sub cmd_push_value {
     my ($struct, $value) = @_;
 
     if (!UNIVERSAL::isa($struct, 'ARRAY')) {
@@ -517,7 +738,7 @@ sub push_value {
     push @$struct, parse_value($value);
 }
 
-sub unshift_value {
+sub cmd_unshift_value {
     my ($struct, $value) = @_;
 
     if (!UNIVERSAL::isa($struct, 'ARRAY')) {
@@ -543,6 +764,11 @@ sub change_element {
     } else {
         print "At a leaf node\n";
     }
+}
+
+sub cmd_set_value {
+    my ($struct, $key, $value) = @_;
+    set_value($struct, $key, $value);
 }
 
 sub set_value {
@@ -581,7 +807,7 @@ sub set_value {
     }
 }
 
-sub delete_keys {
+sub cmd_delete_keys {
     my ($current, $spec) = @_;
 
     my $dir = dirname($spec);
@@ -655,7 +881,7 @@ sub path_stacks {
         }
     } elsif ($component =~ /^\{(.*)\}$/) {
         my $guts = $1;
-        for my $alt (split(/,/, $guts)) {
+        for my $alt (split(/;/, $guts)) {
             push @stacks, path_stacks($stack, $obj, $alt, $sofar, $suppress_errors, $container_only);
         }
     } else {
@@ -680,6 +906,8 @@ sub map_path {
     my ($stack, $path, $callback, $sofar, $suppress_errors) = @_;
 
     $path //= '.';
+
+    $callback //= sub { my ($stack, $lpath) = @_; return $lpath; };
 
     # Absolute path
     if ($path =~ s!^/!!) {
@@ -719,7 +947,7 @@ sub popstack {
 }
 
 sub evaluate {
-    my ($current, $stack, $path, $expr) = @_;
+    my ($current, $stack, $path, $expr, $multi) = @_;
 
     my $output = $expr;
     $output =~ s/\{basename\}/$stack->[-1]/g;
@@ -728,14 +956,17 @@ sub evaluate {
     $output =~ s/\{dir\}/$dir/g;
 
     my $lookup = sub {
-        my ($lookup_path) = @_;
+        my ($current, $lookup_path) = @_;
 
         my @found = map_path($current, $lookup_path, sub {
             my ($lstack, $lpath) = @_;
             return $lstack->[-1];
         });
 
+        return compute_aggregate($multi, \@found) if $multi;
+
         if (@found == 0) {
+            $DB::single = 1;
             die "path $lookup_path not found\n";
         } elsif (@found > 1) {
             die "path $lookup_path resolved to multiple locations\n";
@@ -744,7 +975,7 @@ sub evaluate {
     };
 
     my $sum = sub {
-        my ($lookup_path) = @_;
+        my ($current, $lookup_path) = @_;
 
         my $sum = 0;
         map_path($current, $lookup_path, sub {
@@ -756,18 +987,18 @@ sub evaluate {
     };
 
     # Lookup $(path)
-    $output =~ s/\$\((.*?)\)/$lookup->($1)/eg;
+    $output =~ s/[=\$]\((.*?)\)/$lookup->($current, $1)/eg;
 
     # Evaluate $eval(...) as a Perl expression.
-    $output =~ s/\$eval\((.*)\)/$1/ee;
+    $output =~ s/[=\$]eval\((.*)\)/$1/ee;
 
     # $sum(path) gives the sum of everything matching path.
-    $output =~ s/\$sum\((.*?)\)/$sum->($1)/eg;
+    $output =~ s/[=\$]sum\((.*?)\)/$sum->($current, $1)/eg;
 
     return $output;
 }
 
-sub transform {
+sub cmd_transform {
     my ($current, $path, $expr, $dest_arg) = @_;
     my $dest;
     if ($dest_arg) {
@@ -796,7 +1027,7 @@ sub transform {
     print $@ if $@;
 }
 
-sub ls {
+sub cmd_ls {
     my ($current, $lspath) = @_;
 
     map_path($current, $lspath, sub {
@@ -844,7 +1075,7 @@ sub add_entries {
     }
 }
 
-sub mv {
+sub cmd_mv {
     my ($current, $src, $dst) = @_;
     my $dest;
     eval {
@@ -882,7 +1113,7 @@ sub mv {
     }
 }
 
-sub sum {
+sub cmd_sum {
     my ($current, $path) = @_;
     my $sum = 0;
     map_path($current, $path, sub {
@@ -892,7 +1123,7 @@ sub sum {
     print "$sum\n";
 }
 
-sub show_size {
+sub cmd_show_size {
     my ($current, $path) = @_;
     my $show_keys = defined($path);
 
@@ -907,7 +1138,7 @@ sub show_size {
     }) or print "Path $path not found\n";
 }
 
-sub cat {
+sub cmd_cat {
     my ($current, $nokeys, $path) = @_;
 
     map_path($current, $path, sub {
