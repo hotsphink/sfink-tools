@@ -4,11 +4,19 @@ use strict;
 use warnings;
 use Getopt::Long;
 
+my @modes;
 my $action = 'median';
+my $whichrun;
 GetOptions("median!" => sub { $action = 'median'  },
-           "mean!" => sub { $action = 'mean'  });
+           "mean!" => sub { $action = 'mean'  },
+           "--mode=s" => \@modes,
+           "--run=s" => \$whichrun,
+    );
 
-my %data; # { variant => [run: { field name => [value] } ] }
+# Default: look for runs where nursery was either on or off.
+@modes = qw(on off) if @modes == 0;
+
+my %data; # { "mode-variant" => [run: { field name => [value] } ] }
 my @FIELDNAMES; # [ field name, raw or "nursery.whatever" ]
 my %nonnumeric;
 my %ALLFIELDS; # Set of all field names
@@ -16,22 +24,29 @@ my %ALLFIELDS; # Set of all field names
 my @order;
 my %seen;
 
-my $found_mode;
+my %found_mode;
 
 my @variants = @ARGV ? @ARGV : qw(inbound jit);
 
 if (-d "results") {
-    my ($dir) = qx(ls -t results);
-    chomp($dir);
-    chdir("results/$dir") or die "cd results/$dir: $!";
+    my $dir;
+    if (defined $whichrun) {
+        ($dir) = grep { -d $_ } ($whichrun, "results/$whichrun", "results/run$whichrun");
+    } else {
+        my ($latest) = qx(ls -t results);
+        chomp($latest);
+        $dir = "results/$latest";
+        print "Reporting on $dir\n";
+    }
+    chdir($dir) or die "cd $dir: $!";
 }
 
 for my $variant (@variants) {
-    MODE: for my $mode ('on', 'off') {
+    MODE: for my $mode (@modes) {
         for my $n (1..5) {
             my $logfile = "$variant.$mode.$n.log";
             next MODE if ! -e $logfile;
-            $found_mode = $mode;
+            $found_mode{$mode} = 1;
             open(FILE, "<", $logfile) or die "open $logfile: $!";
             while(<FILE>) {
                 if (/^MinorGC:/) {
@@ -42,7 +57,7 @@ for my $variant (@variants) {
                     next if $F[1] eq 'Reason';
                     for my $i (0 .. $#F) {
                         my $field = $FIELDNAMES[$i];
-                        push @{ $data{$variant}[$n]{$field} }, $F[$i];
+                        push @{ $data{"$mode-$variant"}[$n]{$field} }, $F[$i];
                         $nonnumeric{$field} = 1 if $F[$i] !~ /^\d+$/;
                         $ALLFIELDS{$field} = 1;
                         push @order, $field if ! $seen{$field}++ && !$nonnumeric{$field};
@@ -54,7 +69,7 @@ for my $variant (@variants) {
             open(FILE, "<", $logfile) or die "open $logfile: $!";
             while(<FILE>) {
                 if (/^(\w+): (\d+)/) {
-                    $data{$variant}[$n]{$1} = [ $2 ];
+                    $data{"$mode-$variant"}[$n]{$1} = [ $2 ];
                     $ALLFIELDS{$1} = 1;
                     push @order, $1 if ! $seen{$1}++;
                 }
@@ -83,25 +98,31 @@ sub compute_average {
     }
 }
 
-print "$action with nursery strings $found_mode of ", join(" -> ", @variants), "\n";
-for my $field (@order) {
-    next if $field eq 'nursery.Size'; # This is a sum of nursery sizes across the run. Not helpful.
-    my $base = compute_average($data{$variants[0]}, $field);
-    my $base_total_time = compute_average($data{$variants[0]}, 'nursery.total');
-    my $istime = $field =~ /^nursery\./;
-    next if $istime && $base < 500;
-    next if $istime && $base < 0.01 * $base_total_time;
-    (my $pfield = $field) =~ s/nursery./(nursery) /;
-    printf "% 30s: ", $pfield;
-    for my $i (0 .. $#variants) {
-        print " -> " if $i;
-        my $score = compute_average($data{$variants[$i]}, $field);
-        printf("% 8d", $score);
-        if ($i) {
-            my $delta = $score - $base;
-            printf " % +6d (%+3.1f%%)", $delta, $delta / $base * 100;
-            print(($istime xor $delta > 0) ? " improvement" : " regression");
+if (keys %found_mode == 0) {
+    die "No results found for any mode!\n";
+}
+
+for my $mode (sort keys %found_mode) {
+    print "$action with nursery strings $mode of ", join(" -> ", @variants), "\n";
+    for my $field (@order) {
+        next if $field eq 'nursery.Size'; # This is a sum of nursery sizes across the run. Not helpful.
+        my $base = compute_average($data{"$mode-$variants[0]"}, $field);
+        my $base_total_time = compute_average($data{"$mode-$variants[0]"}, 'nursery.total');
+        my $istime = $field =~ /^nursery\./;
+        next if $istime && $base < 500;
+        next if $istime && $base < 0.01 * $base_total_time;
+        (my $pfield = $field) =~ s/nursery./(nursery) /;
+        printf "% 20s: ", $pfield;
+        for my $i (0 .. $#variants) {
+            print " -> " if $i;
+            my $score = compute_average($data{"$mode-$variants[$i]"}, $field);
+            printf("% 8d", $score);
+            if ($i) {
+                my $delta = $score - $base;
+                printf " % +6d (%+ 5.1f%%) (%+ 6.2f%%)", $delta, $delta / $base * 100, $delta / $base_total_time * 100;
+                print(($istime xor $delta > 0) ? " improvement" : " regression");
+            }
         }
+        print "\n";
     }
-    print "\n";
 }
