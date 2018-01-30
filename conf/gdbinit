@@ -120,6 +120,9 @@ def loadpy
   python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.py")).read())
   python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.symbols.py")).read())
 end
+
+def reload
+  python reload($arg0)
 end
 
 loadpy
