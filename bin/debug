@@ -83,14 +83,14 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
   } elsif ($_ eq '--record') {
     die if $debugger;
     $debugger = 'record';
+  } elsif ($_ eq '--rrpid') {
+    $rrpid = shift(@ARGV);
   } elsif ($_ =~ /--rrpid=(.*)/) {
     $rrpid = $1;
   } elsif ($_ eq '--rrargs') {
     $rr_args = shift(@ARGV);
   } elsif ($_ =~ /--rrargs=(.*)/) {
     $rr_args = $1;
-  } elsif ($_ eq '--rrpid') {
-    $rrpid = shift(@ARGV);
   } elsif ($_ eq '--js' || $_ eq '-j') {
     die if $debugger;
     $debugger = 'jorendb';
@@ -177,7 +177,7 @@ sub choose_pid_for_rr {
     # Find a process from the last run that crashed. Use the first one that
     # exited with a signal, falling back to the first nonzero exit code,
     # falling back to the last process.
-    open(my $fh, "rr ps |");
+    open(my $fh, "rr ps $rr_args |");
     my @info;
     while(<$fh>) {
         chomp;
