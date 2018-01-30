@@ -39,11 +39,14 @@ ARG: for my $arg (@ARGV) {
         next;
     }
 
-    # Check for filename:lineno.
-    if ($arg =~ /(.*):(\d+):?$/) {
+    # Check for filename:lineno or filename:lineno:colno, with optional
+    # trailing colon.
+    if ($arg =~ /(.*?):(\d+)(:\d+)?:?$/) {
         # Might be filename:77 or filename:77: (the latter comes from a simple
         # copy/paste of an error message). Convert to opening the appropriate
         # line.
+        print "Command line contained filename:lineno, adding +$2\n"
+            if $verbose;
         push @final_args, "+$2";
         $arg = $1;
     }
@@ -72,6 +75,8 @@ ARG: for my $arg (@ARGV) {
 
     # Check for a reject file.
     if ($arg =~ /(.*)\.rej$/) {
+        print "Found reject file\n"
+            if $verbose;
         my $orig = $1;
         open(my $fh, "<", $arg) or die "open $arg: $!";
         my $hunkstart;
@@ -113,14 +118,25 @@ if (@final_args == 0) {
             if $verbose;
         open(my $diff, "hg export --hidden $revision |");
         my $curfile;
+        my $startline;
         while(<$diff>) {
             chomp;
             if (m!^\+\+\+ b/(.*)!) {
                 $curfile = $1;
             } elsif ($curfile && /^@@ -\d+,\d+ \+(\d+)/) {
-                my $startline = $1 + 8;
-                push @final_args, "+$startline", "$ROOTDIR/$curfile";
-                undef $curfile;
+                $startline = $1;
+                print "Found diff chunk starting at +$1, scanning...\n"
+                    if $verbose;
+            } elsif ($curfile && defined $startline) {
+                if (/^[\-+]/) {
+                    print "found first change at line $startline\n"
+                        if $verbose;
+                    push @final_args, "+$startline", "$ROOTDIR/$curfile";
+                    undef $startline;
+                    undef $curfile;
+                } else {
+                    $startline++;
+                }
             }
         }
     }
