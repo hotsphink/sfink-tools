@@ -132,13 +132,20 @@ class PythonLog(gdb.Command):
 
         if arg.startswith('-'):
             if '-sorted'.startswith(arg):
+                # log -s : same as log with no options, display log in execution order.
                 self.dump(sort=True)
             elif '-dump'.startswith(arg):
+                # log -d : display log in entry order
                 self.dump()
             elif '-edit'.startswith(arg):
+                # log -e : edit the log in $EDITOR
                 self.edit()
             else:
                 print("unknown log option")
+            return
+
+        if not arg:
+            self.dump(sort=True)
             return
 
         if not self.LogFile:
