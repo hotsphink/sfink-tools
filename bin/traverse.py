@@ -545,6 +545,10 @@ class Commander(cmd.Cmd):
             f = self.parse_function(s)
         except FunctionNotFound:
             return
+        except MultipleFunctionsFound as e:
+            e.report(self.verbose, count_callees=False, count_callers=True)
+            return
+
         callers = data['callers'].get(f, {})
         print("%d callers of #%d = %s" % (len(callers.keys()), f, data['readable'][f]))
         for caller, suppressed in callers.iteritems():
