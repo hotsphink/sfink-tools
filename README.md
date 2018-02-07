@@ -33,9 +33,9 @@ unmodified, you could do something like
 
     cd $HOME
     ln -s mycheckouts/sfink-tools/conf/gdbinit .gdbinit
-    ln -s mycheckouts/sfink-tools/conf/gdbinit .gdbinit.py
-    ln -s mycheckouts/sfink-tools/conf/gdbinit .gdbinit.pahole.py
-    ln -s mycheckouts/sfink-tools/conf/gdbinit .gdbinit.symbols.py
+    ln -s mycheckouts/sfink-tools/conf/gdbinit.py .gdbinit.py
+    ln -s mycheckouts/sfink-tools/conf/gdbinit.pahole.py .gdbinit.pahole.py
+    ln -s mycheckouts/sfink-tools/conf/gdbinit.symbols.py .gdbinit.symbols.py
 
 But more likely, you want to modify them. And even for me, it would be smarter
 to have .gdbinit load it straight from my sfink-tools checkout. Maybe I'll do
