@@ -116,8 +116,14 @@ def watchmark
   watch -l *$word
 end
 
+def watchofs
+  # Usage: watchofs <ptr> <offset>
+  watch -l *(void**)((char*)$arg0 + (size_t)$arg1)
+end
+
 def loadpy
   python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.py")).read())
+  python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.pahole.py")).read())
   python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.symbols.py")).read())
 end
 
