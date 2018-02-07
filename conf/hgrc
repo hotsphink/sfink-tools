@@ -1,0 +1,316 @@
+[ui]
+username = Steve Fink <sfink@mozilla.com>
+merge = kdiff3
+#traceback = True
+#verbose = True
+#debug = True
+interface = curses
+mergemarkers = detailed
+
+[defaults]
+#commit = -v
+diff = -U 8 -p
+qdiff = -U 8 -p
+qnew = -U
+qexport = -v
+qbackout = -U
+next = --evolve
+
+[phases]
+publishing = False
+
+[format]
+generaldelta = True
+
+[mq]
+secret = False
+keepchanges = True
+
+[mqext]
+mqcommit = auto
+
+[patch]
+maxfuzz = 10
+
+[extensions]
+# Basic functionality improvements
+progress = 
+color = 
+pager = 
+
+# Standard additional commands
+mq = 
+record = 
+rebase = 
+relink = 
+graphlog = 
+convert = 
+parentrevspec = 
+transplant = 
+purge = 
+share = 
+histedit = 
+shelve = 
+hggit = ~/lib/hg/hg-git/hggit
+#show =
+
+# Nonstandard additional commands
+qbackout = ~/lib/version-control-tools/hgext/qbackout/
+mqext = ~/lib/version-control-tools/hgext/mqext
+#crecord = ~/lib/hg/crecord/crecord
+#crecord = ~/lib/hg/crecord-upstream/crecord
+evolve = ~/lib/hg/evolve/hgext3rd/evolve
+
+# breaks hg help --keyword foo
+#hgsubversion = ~/lib/hg/hgsubversion/hgsubversion
+
+# Facebook stuff
+# smartlog = ~/lib/hg/hg-experimental/hgext3rd/smartlog.py
+# githelp = ~/lib/hg/hg-experimental/hgext3rd/githelp.py
+chistedit = ~/lib/hg/hg-experimental/hgext3rd/chistedit.py
+absorb = ~/lib/hg/hg-experimental/hgext3rd/absorb/
+
+# Mozilla/bugzilla/tryserver integration
+#qimportbz = ~/.mozbuild/version-control-tools/hgext/qimportbz
+qimportbz = ~/lib/version-control-tools/hgext/qimportbz
+bzexport = ~/lib/version-control-tools/hgext/bzexport/
+trychooser = ~/lib/hg/trychooser/
+mozext = ~/lib/version-control-tools/hgext/mozext/
+# reviewboard = ~/lib/version-control-tools/hgext/reviewboard/client.py
+firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
+push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
+fsmonitor = 
+blackbox =
+journal =
+
+[alias]
+# For Callek, really. I use em.
+workon = !bash -c 'cd $($HG root) && $EDITOR $($HG status -n -m -a ${1+--change $1})' -- "$@"
+
+# From junw, mostly what evolve does:
+# evolve=rebase -r 'orphan()-obsolete()' -d 'max((successors(max(roots(ALLSRC) & ::SRC)^)-obsolete())::)'
+
+test_ci = !env TMPDIR=$(pwd) $HG commit "$@"
+
+upname = log -r 'not public() and ancestors(.) and desc($1)'
+
+ts = treestatus
+series = qseries -v
+s = qseries -v
+view = qshow
+goto = qgoto
+touched = qtouched
+shortlog = log --template='{node|short}: {desc|firstline}\n'
+qlog = log --stat -r qtip:qbase
+qcat = !cd $(hg root)/.hg/$(hg qqueue --active) && hg cat -r 'file("$1")$2' $1
+qrev = !if [ -n "$1" ]; then hg qref -m "$(hg qheader | perl -lpe 's/$/, r=$1/ if 1..1')"; else echo "reviewer required" >&2; fi; hg qh
+phases = log --template='{node|short} {phase} {desc|firstline}\n'
+file = files "relglob:$1"
+
+# qedit: bring up a text editor on the patch series file, marking applied
+# patches as unrearrangable
+
+qedit = !S=$(hg root --mq)/series; cp $S{,.bak} && perl -pale 'BEGIN { chomp(@a = qx(hg qapplied -q)); die if $?; @a{@a}=(); }; s/^/# (applied) / if exists $a{$F[0]}' $S > $S.new && ${EDITOR-vim} $S.new && sed -e 's/^# .applied. //' $S.new > $S
+
+# Will only show changesets that chain to the working copy.
+#ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "parents(::$r and not public()) + ::$r and not public()" --template "{label('changeset.{phase}', '{rev}|{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
+#ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "parents(::$r and not public()) + ::$r and not public()" --template "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
+ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "parents(::$r and not public()) + ::$r and not public()" --template "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
+sl = ls
+
+simple_lls = !$HG ls $1 | tac | perl -lne 'print ".~$. $_"' | tac
+lls = !$HG ls $1 | tac | perl -lne '$n = $. - 1; print sprintf "%-4s %s", $. < 5 ? "." . "^" x $n : ".~$n", " $_"' | tac
+
+list = log --template "{label('changeset.{phase}', '{rev}:{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline}\n"
+
+lsb = log -r 'bookmark() and not public()' -T '{pad("{bookmarks}", 30)} {desc|firstline}\n'
+
+msg = log -r . --template '{desc}\n'
+
+spew = !$HG export -r 'not public()' | perl -lne '$$r ||= "none"; $$r = $$1 if /^# Node ID (.{12})/; print "$$r $$_"'
+
+he = histedit -r 'not public() and ancestors(.)'
+che = chistedit -r 'not public() and ancestors(.)'
+
+advance = !while $HG next --evolve; do :; done
+
+# wip = log --graph --rev=wip --template=wip
+
+geckoversion = !$HG cat -r $1 'path:config/milestone.txt' | tail -1
+
+# Usage: hg enbug <desc> # desc should be oneword
+#
+# If it doesn't already exist, add a bug number to the commit message. Also
+# only if there is no active bookmark already, make a bookmark named after the
+# bug, named bug.<bugno>.<desc>
+enbug = !msg=$($HG log -r . --template '{desc}\n'); echo "$msg" | grep -q "^Bug" || $HG commit --amend -m "Bug $1 - $msg"; book=$($HG log -r . --template '{activebookmark}\n'); [ -n "$book" ] && $HG book -m "$book" "bug.$1.$book"
+
+yay = !msg="$($HG log -r . --template '{desc}\n'), r=$1"; $HG commit --amend -m "$msg"; echo "$msg"
+
+recommit = !$HG uncommit --all && $HG amend -i
+
+reb = rebase -d rebase_default
+
+interdiff = !set -x; $HG export --hidden $1 > /tmp/left.diff; $HG export --hidden $2 > /tmp/right.diff; interdiff /tmp/left.diff /tmp/right.diff
+
+[revsetalias]
+npkw($1) = not public() and keyword($1)
+
+whichbook($1) = last(descendants($1))
+wip = (parents(not public()) or not public() or . or (head() and branch(default))) and (not obsolete() or unstable()^) and not closed() and not (fxheads() - date(-90))
+
+# Where did this come from?
+rbhead = heads(descendants((parents(ancestor(ancestors(.) and not public())))) and public())
+live = reverse(::. and not public()) + parents(::. and not public())
+
+local = reverse(ancestor(.+inbound)::.)
+
+# I made this one up
+workparent = last(ancestors(.) and public())
+rebase_default = heads(descendants(workparent) and public())
+
+workheads = heads(descendants(parents(not public() and ancestors(.)) and public()))
+
+
+[diff]
+git = 1
+showfunc = 1
+nodates = 1
+unified = 8
+
+[paths]
+try = ssh://sfink@mozilla.com@hg.mozilla.org/try/
+mi = ssh://sfink@mozilla.com@hg.mozilla.org/integration/mozilla-inbound
+mc = ssh://sfink@mozilla.com@hg.mozilla.org/mozilla-central
+aurora = ssh://sfink@mozilla.com@hg.mozilla.org/releases/mozilla-aurora/
+beta = ssh://sfink@mozilla.com@hg.mozilla.org/releases/mozilla-beta/
+release = ssh://sfink@mozilla.com@hg.mozilla.org/releases/mozilla-release/
+birch = ssh://sfink@mozilla.com@hg.mozilla.org/projects/birch/
+cypress = ssh://sfink@mozilla.com@hg.mozilla.org/projects/cypress/
+cedar = ssh://sfink@mozilla.com@hg.mozilla.org/projects/cedar/
+maple = ssh://sfink@mozilla.com@hg.mozilla.org/projects/maple/
+review = https://reviewboard-hg.mozilla.org/autoreview
+unified = https://hg.mozilla.org/mozilla-unified
+hgmo = ssh://hgmo/users/sfink_mozilla.com/mozilla
+hgmoro = https://hg.mozilla.org/users/sfink_mozilla.com/mozilla
+
+[web]
+#cacerts = /etc/mercurial/hgrc.d/cacert.pem
+cacerts = /etc/pki/tls/certs/ca-bundle.crt
+#cacerts = .ssh/mozilla-root.crt
+
+[merge-tools]
+#kdiff3.args = --auto --L1 common --L2 pulled --L3 mq $base $local $other -o $output -cs SyncMode=1
+kdiff3.executable = ~/bin/kdiff3-wrapper
+kdiff3.args = --auto $base $local $other -o $output -cs SyncMode=1
+kdiff3.gui = True
+kdiff3.premerge = True
+kdiff3.binary = False
+
+[bugzilla]
+url = https://bugzilla.mozilla.org
+username = sphink@gmail.com
+apikey = mrDzJnV5Vc2qKeMC3FVBsBVx7ZXqSgpCPiFqGg4D
+
+[bzexport]
+update-patch = True
+rename-patch = True
+unified = 10
+
+# Testing
+#skip-bugzilla-writes = True
+
+# Testing
+#api_server = https://api-dev.bugzilla.mozilla.org/test/latest/
+#bugzilla = https://landfill.bugzilla.org/bzapi_sandbox/
+#product = FoodReplicator
+#component = Salt
+#username = sfink@mozilla.com
+
+# Production
+#api_server = https://api-dev.bugzilla.mozilla.org/latest/
+#bugzilla = https://bugzilla.mozilla.org/
+
+# Staging
+#api_server = https://api-dev.bugzilla.mozilla.org/tip/
+#bugzilla = https://bugzilla-stage-tip.mozilla.org/
+#username = sfink@mozilla.com
+
+[qimportbz]
+patch_format = bug-%(bugnum)s-%(desc)s
+
+[mozext]
+ircnick = sfink
+mozext.skip_relbranch_bookmarks = True
+
+[mozilla]
+ircnick = sfink
+
+[progress]
+delay = 1
+
+[pager]
+# display colors when using pager
+pager = LESS='RF' less
+attend = annotate, cat, diff, export, glog, log, qdiff, show, export, incoming, outgoing, help, qseries, s, view, wip
+attend-help = true
+attend-incoming = true
+attend-outgoing = true
+attend-status = true
+attend-wip = true
+
+[hostsecurity]
+hg.mozilla.org:fingerprints = sha256:8E:AD:F7:6A:EB:44:06:15:ED:F3:E4:69:A6:64:60:37:2D:FF:98:88:37:BF:D7:B8:40:84:01:48:9C:26:CE:D9, sha256:81:3D:75:69:E3:76:F8:5B:31:1E:92:C9:CF:56:23:F6:4B:C2:82:77:E3:63:FB:7F:28:65:D0:9A:88:FB:BE:B7
+bitbucket.org:fingerprints = sha256:4e:65:3e:76:0f:81:59:85:5b:50:06:0c:c2:4d:3c:56:53:8b:83:3e:9b:fa:55:26:98:9a:ca:e2:25:03:92:47
+# bugzilla.mozilla.org:fingerprints = sha256:10:95:a8:c1:e1:c3:18:fa:e4:95:40:99:11:07:6d:e3:79:ab:e5:b0:29:50:ff:40:e8:e8:63:c4:fd:f3:9f:cb
+
+[templates]
+wip = '{label("wip.branch", if(branches,"{branches} "))}{label(ifeq(graphnode,"x","wip.obsolete","wip.{phase}"),"{rev}:{node|short}")}{label("wip.user", " {author|user}")}{label("wip.tags", if(tags," {tags}"))}{label("wip.tags", if(fxheads," {fxheads}"))}{if(bookmarks," ")}{label("wip.bookmarks", if(bookmarks,bookmarks))}{label(ifcontains(rev, revset("parents()"), "wip.here"), " {desc|firstline}")}'
+ 
+[bundleclone]
+prefers = uc2region=us-west-1
+
+[color]
+mode = terminfo
+#mode = ansi
+
+#Custom colours
+color.orange = 202
+color.lightyellow = 191
+color.darkorange = 220
+color.brightyellow = 226
+
+#Colours for each label
+log.branch = cyan
+log.summary = lightyellow
+log.description = lightyellow
+log.bookmark = green
+log.tag = darkorange
+log.graph = blue
+
+changeset.public = orange bold
+changeset.secret = blue bold
+changeset.draft = brightyellow bold
+
+desc.here = bold blue_background
+
+diff.trailingwhitespace = bold red_background
+qseries.applied = yellow bold underline
+qseries.unapplied = bold
+
+wip.bookmarks = yellow underline
+wip.branch = yellow
+wip.draft = green
+wip.here = red
+wip.obsolete = none
+wip.public = blue
+wip.tags = yellow
+wip.user = magenta
+
+[rebase]
+# Not sure if this is the correct format
+experimantal.inmemory = true
+
+[experimental]
+graphshorten = true
+worddiff = true
