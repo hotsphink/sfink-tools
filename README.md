@@ -10,6 +10,7 @@ Tools included:
  - debug : Start up a debugger within emacs on various types of files
  - em : Start up emacs on the files touched by a patch, on a relevant line number
  - traverse.py : Gecko-specific, sorta. Utility for traversing a callgraph.
+ - wig : Patch harder
 
 ----------------------------------------------------------------------
 
@@ -123,3 +124,11 @@ Commands:
     output
 
 Use `help <cmd>` to figure out what they do; I'm not going to spend time doing that right now.
+
+----------------------------------------------------------------------
+
+wig - Apply a patch loosely. Works if the surrounding code has changed.
+
+My usual use is to do some VCS command that spits out .rej files, then do `wig
+file1.rej` followed by `wig file2.rej` etc. That lets me see any failures one
+at a time. But the tool also supports scanning for all reject files.
