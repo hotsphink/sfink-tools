@@ -54,14 +54,14 @@ Usual usage is to prepend whatever command you want to debug with 'debug'.
 
 Examples:
 
-`debug firefox -no-remote -P BugPictures`
- - runs firefox within gdb within emacs, with the given arguments
-`debug -i firefox -no-remote -P NakedBugPictures`
- - same, but stops at the gdb prompt before running firefox
-`debug somescript.pl x y z`
- - runs somescript.pl within perldb within emacs, with the given arguments
-`debug --record js testfile.js`
- - records `js testfile.js` with rr, then replays the recording in gdb in emacs
+ - `debug firefox -no-remote -P BugPictures`
+   runs firefox within gdb within emacs, with the given arguments
+ - `debug -i firefox -no-remote -P NakedBugPictures`
+   same, but stops at the gdb prompt before running firefox
+ - `debug somescript.pl x y z`
+   runs somescript.pl within perldb within emacs, with the given arguments
+ - `debug --record js testfile.js`
+   records `js testfile.js` with rr, then replays the recording in gdb in emacs
 
 The script goes to insane lengths to figure out what you really meant to run.
 For example, if you alias ff in your shell to 'firefox -no-remote', you can
