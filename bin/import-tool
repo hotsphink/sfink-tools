@@ -3,7 +3,7 @@
 set -e
 
 SRC_TOOL="$1"
-IMPORT_BIN_DIR="$(dirname "$0")"
+IMPORT_BIN_DIR="$(dirname "$(realpath "$0")")"
 
 IMPORT_DIR="$(dirname "$IMPORT_BIN_DIR")"
 base="$(basename "$SRC_TOOL")"
