@@ -2,23 +2,38 @@
 
 set -e
 
-TOOL="$1"
-SFINKTOOLSDIR="$(dirname "$0")"
-base="$(basename "$TOOL")"
+SRC_TOOL="$1"
+IMPORT_BIN_DIR="$(dirname "$0")"
 
-if ! [ -x "$TOOL" ]; then
-  TOOL="$HOME/bin/$base"
+IMPORT_DIR="$(dirname "$IMPORT_BIN_DIR")"
+base="$(basename "$SRC_TOOL")"
+type=bin
+
+if ! [ -x "$SRC_TOOL" ]; then
+    SRC_TOOL="$HOME/bin/$base"
+    type=bin
 fi
 
-if ! [ -x "$TOOL" ]; then
-  echo "$TOOL not found" >&2
-  exit 1
+if ! [ -x "$SRC_TOOL" ]; then
+    SRC_TOOL="$HOME/$base"
+    type=conf
 fi
 
-abs="$(realpath "$SFINKTOOLSDIR/$base")"
-rel="$(abs2rel "$abs" "$(dirname "$TOOL")")"
+if ! [ -f "$SRC_TOOL" ]; then
+    echo "$SRC_TOOL not found" >&2
+    exit 1
+fi
+
+if [ $type = conf ]; then
+    DEST="$IMPORT_DIR/$type/${base#.}"
+else
+    DEST="$IMPORT_DIR/$type/$base"
+fi
+
+abs="$(realpath "$DEST")"
+rel="$(abs2rel "$abs" "$(dirname "$SRC_TOOL")")"
 [ -n "$abs" ] && [ -n "$rel" ]
-mv "$TOOL" "$SFINKTOOLSDIR/$base"
-ln -s "$rel" "$TOOL"
+mv "$SRC_TOOL" "$DEST"
+ln -s "$rel" "$SRC_TOOL"
 
-echo "Imported $base into sfink-tools"
+echo "Imported $base into $DEST"
