@@ -14,6 +14,35 @@ Tools included:
 
 ----------------------------------------------------------------------
 
+Configuration files:
+
+I also have a set of configuration files that I version-control here. They
+might be a little harder to install and use, because strangely enough I change
+the filename between the actual files and the ones here, and some of them refer
+to each other. Sorry.
+
+ - .gdbinit : gdb init file in gdb command syntax
+ - .gdbinit.py : gdb python init file, loaded by .gdbinit
+ - .gdbinit.pahole.py : pahole command, loaded by .gdbinit
+ - .gdbinit.symbols.py : Ted Mielczarek's source server integration for gdb
+ - .hgrc : Mercurial configuration
+
+Note that the filenames in this repo are missing the leading periods. I symlink
+the actual names into my sfink-tools checkout. So if you wanted to use these
+unmodified, you could do something like
+
+    cd $HOME
+    ln -s mycheckouts/sfink-tools/conf/gdbinit .gdbinit
+    ln -s mycheckouts/sfink-tools/conf/gdbinit .gdbinit.py
+    ln -s mycheckouts/sfink-tools/conf/gdbinit .gdbinit.pahole.py
+    ln -s mycheckouts/sfink-tools/conf/gdbinit .gdbinit.symbols.py
+
+But more likely, you want to modify them. And even for me, it would be smarter
+to have .gdbinit load it straight from my sfink-tools checkout. Maybe I'll do
+that someday.
+
+----------------------------------------------------------------------
+
 json - Interactive navigation of a JSON file
 
 Created to explore a problem with a large sessionstore.js file. It mimics a
