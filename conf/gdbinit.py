@@ -126,6 +126,15 @@ class PythonLog(gdb.Command):
         tid = gdb.selected_thread().ptid[0]
         return os.path.join(os.environ['HOME'], "rr-session-%s.log" % (tid,))
 
+    def evaluate(self, expr):
+        v = gdb.parse_and_eval(expr)
+        s = str(v)
+        t = v.type
+        ts = str(t)
+        if ts not in ("int", "unsigned int", "uint32_t", "int32_t", "uint64_t", "int64_t"):
+            return "(%s) %s" % (ts, s)
+        return s
+
     def invoke(self, arg, from_tty):
         if self.LogFile is None:
             self.openlog(self.default_log_filename())
@@ -154,14 +163,14 @@ class PythonLog(gdb.Command):
         # Replace {expr} with the result of evaluating the (gdb) expression expr.
         # Allow one level of curly bracket nesting within expr.
         out = re.sub(r'\{((?:\{[^\}]*\}|\\\}|[^\}])*)\}',
-                     lambda m: str(gdb.parse_and_eval(m.group(1))),
+                     lambda m: self.evaluate(m.group(1)),
                      arg)
 
         # Replace $thread with "T3", where 3 is the gdb's notion of thread number.
         out = out.replace("$thread", "T" + str(gdb.selected_thread().num))
 
         # Let gdb handle other $ vars.
-        out = re.sub(r'(\$\w+)', lambda m: str(gdb.parse_and_eval(m.group(1))), out)
+        out = re.sub(r'(\$\w+)', lambda m: self.evaluate(m.group(1)), out)
 
         self.LogFile.write("%s %s\n" % (now(), out))
 

@@ -75,7 +75,7 @@ absorb = ~/lib/hg/hg-experimental/hgext3rd/absorb/
 qimportbz = ~/lib/version-control-tools/hgext/qimportbz
 bzexport = ~/lib/version-control-tools/hgext/bzexport/
 trychooser = ~/lib/hg/trychooser/
-mozext = ~/lib/version-control-tools/hgext/mozext/
+# mozext = ~/lib/version-control-tools/hgext/mozext/
 # reviewboard = ~/lib/version-control-tools/hgext/reviewboard/client.py
 firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
@@ -210,7 +210,6 @@ kdiff3.binary = False
 [bugzilla]
 url = https://bugzilla.mozilla.org
 username = sphink@gmail.com
-apikey = mrDzJnV5Vc2qKeMC3FVBsBVx7ZXqSgpCPiFqGg4D
 
 [bzexport]
 update-patch = True
