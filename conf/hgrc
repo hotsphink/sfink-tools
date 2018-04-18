@@ -60,6 +60,7 @@ mqext = ~/lib/version-control-tools/hgext/mqext
 #crecord = ~/lib/hg/crecord/crecord
 #crecord = ~/lib/hg/crecord-upstream/crecord
 evolve = ~/lib/hg/evolve/hgext3rd/evolve
+topic = ~/lib/hg/evolve/hgext3rd/topic
 
 # breaks hg help --keyword foo
 #hgsubversion = ~/lib/hg/hgsubversion/hgsubversion
@@ -75,7 +76,7 @@ absorb = ~/lib/hg/hg-experimental/hgext3rd/absorb/
 qimportbz = ~/lib/version-control-tools/hgext/qimportbz
 bzexport = ~/lib/version-control-tools/hgext/bzexport/
 trychooser = ~/lib/hg/trychooser/
-# mozext = ~/lib/version-control-tools/hgext/mozext/
+mozext = ~/lib/version-control-tools/hgext/mozext/
 # reviewboard = ~/lib/version-control-tools/hgext/reviewboard/client.py
 firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
@@ -89,10 +90,6 @@ workon = !bash -c 'cd $($HG root) && $EDITOR $($HG status -n -m -a ${1+--change 
 
 # From junw, mostly what evolve does:
 # evolve=rebase -r 'orphan()-obsolete()' -d 'max((successors(max(roots(ALLSRC) & ::SRC)^)-obsolete())::)'
-
-test_ci = !env TMPDIR=$(pwd) $HG commit "$@"
-
-upname = log -r 'not public() and ancestors(.) and desc($1)'
 
 ts = treestatus
 series = qseries -v
@@ -112,11 +109,11 @@ file = files "relglob:$1"
 
 qedit = !S=$(hg root --mq)/series; cp $S{,.bak} && perl -pale 'BEGIN { chomp(@a = qx(hg qapplied -q)); die if $?; @a{@a}=(); }; s/^/# (applied) / if exists $a{$F[0]}' $S > $S.new && ${EDITOR-vim} $S.new && sed -e 's/^# .applied. //' $S.new > $S
 
-# Will only show changesets that chain to the working copy.
-#ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "parents(::$r and not public()) + ::$r and not public()" --template "{label('changeset.{phase}', '{rev}|{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
-#ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "parents(::$r and not public()) + ::$r and not public()" --template "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
-ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "parents(::$r and not public()) + ::$r and not public()" --template "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
+#ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(::$r and not public())" --template "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
+ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(::$r and not public())" --template list
 sl = ls
+
+lsbranch = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents((::$r + descendants($r)) and not public())" --template list
 
 simple_lls = !$HG ls $1 | tac | perl -lne 'print ".~$. $_"' | tac
 lls = !$HG ls $1 | tac | perl -lne '$n = $. - 1; print sprintf "%-4s %s", $. < 5 ? "." . "^" x $n : ".~$n", " $_"' | tac
@@ -154,6 +151,8 @@ reb = rebase -d rebase_default
 interdiff = !set -x; $HG export --hidden $1 > /tmp/left.diff; $HG export --hidden $2 > /tmp/right.diff; interdiff /tmp/left.diff /tmp/right.diff
 
 [revsetalias]
+with_parents(s) = parents(s) or s
+
 npkw($1) = not public() and keyword($1)
 
 whichbook($1) = last(descendants($1))
@@ -210,6 +209,7 @@ kdiff3.binary = False
 [bugzilla]
 url = https://bugzilla.mozilla.org
 username = sphink@gmail.com
+# apikey in ~/.config/hg/hgrc
 
 [bzexport]
 update-patch = True
@@ -241,6 +241,7 @@ patch_format = bug-%(bugnum)s-%(desc)s
 [mozext]
 ircnick = sfink
 mozext.skip_relbranch_bookmarks = True
+disable_local_database = False
 
 [mozilla]
 ircnick = sfink
@@ -264,8 +265,10 @@ bitbucket.org:fingerprints = sha256:4e:65:3e:76:0f:81:59:85:5b:50:06:0c:c2:4d:3c
 # bugzilla.mozilla.org:fingerprints = sha256:10:95:a8:c1:e1:c3:18:fa:e4:95:40:99:11:07:6d:e3:79:ab:e5:b0:29:50:ff:40:e8:e8:63:c4:fd:f3:9f:cb
 
 [templates]
-wip = '{label("wip.branch", if(branches,"{branches} "))}{label(ifeq(graphnode,"x","wip.obsolete","wip.{phase}"),"{rev}:{node|short}")}{label("wip.user", " {author|user}")}{label("wip.tags", if(tags," {tags}"))}{label("wip.tags", if(fxheads," {fxheads}"))}{if(bookmarks," ")}{label("wip.bookmarks", if(bookmarks,bookmarks))}{label(ifcontains(rev, revset("parents()"), "wip.here"), " {desc|firstline}")}'
- 
+wip = '{label("wip.branch", if(branches,"{branches} "))}{label(ifeq(graphnode,"x","wip.obsolete","wip.{phase}"),"{rev}:{node|short}")}{label("wip.user", " {author|user}")}{label("wip.tags", if(tags," {tags}"))}{label("wip.tags", if(fxheads," {fxheads}"))}{if(bookmarks," ")}{label("wip.bookmarks", if(bookmarks,bookmarks))}{label(ifcontains(rev, revset("parents()"), "wip.here"), " {desc|firstline}")}\n'
+
+list = "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
+
 [bundleclone]
 prefers = uc2region=us-west-1
 
@@ -313,3 +316,6 @@ experimantal.inmemory = true
 [experimental]
 graphshorten = true
 worddiff = true
+
+[hggit]
+usephases = True
