@@ -68,7 +68,7 @@ for my $variant (@variants) {
             $logfile = "$variant.$mode.$n.txt";
             open(FILE, "<", $logfile) or die "open $logfile: $!";
             while(<FILE>) {
-                if (/^(\w+): (\d+)/) {
+                if (/^(\w+)(?: \([^)]*\))?: (\d+)/) {
                     $data{"$mode-$variant"}[$n]{$1} = [ $2 ];
                     $ALLFIELDS{$1} = 1;
                     push @order, $1 if ! $seen{$1}++;
