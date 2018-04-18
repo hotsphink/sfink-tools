@@ -41,8 +41,16 @@ Usage: json <filename.json> [initial-path] [-e COMMAND]
     grep -e 'EXPR' PATTERN PATH
                              - for every value found at PATH matching PATTERN, print out
                              the value of EXPR evaluated in the context of the matching path.
-    grep [-l] [-c] PATTERN PATH
-                             - search for PATTERN in given PATH
+    grep [OPTIONS] PATTERN PATH
+                             - search for PATTERN in given PATH. By default, prints out
+                               leaf values found.
+        -l                     - display container of each leaf found instead of leaf
+        -c                     - count occurrences of items found and display histogram
+        --cd                   - chdir to the single item found
+        --dir                  - search all keys instead of leaves
+        --all                  - search keys and leaves
+        --size                 - display size of item along with item
+        --delete               - delete matching items
     groupby PATH EXPR GROUPEXPR
     group PATH EXPR by GROUPEXPR
                            - for every item matching PATH, report the result of EXPR grouped
@@ -102,9 +110,11 @@ my $dirty = 0;
 my $current;
 my @current;
 my $batch;
+my $verbose;
 
 GetOptions("h|help!" => sub { help({ exit => 1 }) },
            "e|command=s" => \@inputbuffer,
+           "v|verbose!" => \$verbose,
            "i|interactive!" => sub { $batch = 0 })
     or help({ error => 'invalid arguments' });
 
@@ -119,11 +129,71 @@ my $current_file = shift(@ARGV);
 
 load();
 
-if (@ARGV) {
-    my $init_path = shift(@ARGV);
-    if (!chpath($init_path)) {
-        die "No path '$init_path' found, exiting.\n";
+# TODO: Add in quoting etc. here and in strpath.
+sub parse_path {
+    my ($path_str, $default) = @_;
+    die if ref $path_str;
+
+    if (! defined $path_str) {
+        return [$default] if defined $default;
+        return [];
     }
+
+    return ['/'] if $path_str eq '/';
+
+    my $path = [ split(/\//, $path_str) ];
+    $path->[0] = '/' if $path->[0] eq '';
+    return $path;
+}
+
+sub strpath {
+    my ($path, $suffix) = @_;
+    my $str;
+    if (@$path && $path->[0] eq '/') {
+        $str = join("/", '', @{ shiftpath($path) });
+    } else {
+        $str = join("/", @$path);
+    }
+    return $str . ($suffix // '');
+}
+
+sub dirpath {
+    my ($path) = @_;
+    my @dirpath = @$path;
+    pop @dirpath;
+    return \@dirpath;
+}
+
+sub joinpath {
+    my ($path, $component) = @_;
+
+    return $component if ! defined $path;
+    return $path if ! defined $component;
+
+    my @path = ref $path ? @$path : ($path);
+    my @component = ref $component ? @$component : ($component);
+
+    return [ @path, @component ];
+}
+
+sub shiftpath {
+    my ($path) = @_;
+    my @path = @$path;
+    shift(@path);
+    return \@path;
+}
+
+sub splitpath {
+    my ($path) = @_;
+    my @path = @$path;
+    my $base = pop(@path);
+    return \@path, $base;
+}
+
+if (@ARGV) {
+    my $init_path = parse_path(shift(@ARGV));
+    chpath($init_path)
+        or die "No path '" . strpath($init_path) . "' found, exiting.\n";
 }
 
 if (!$batch && ! -t STDIN) {
@@ -142,7 +212,7 @@ sub completion {
     if (!$generating) {
         if ($text =~ m!(.*)/[^/]*$!) {
             my ($complete, $prefix) = ($1, $2);
-            my $stack = enterPath($current, $1, 1);
+            my $stack = enterPath($current, parse_path($complete), 1);
             if ($stack) {
                 @completions = map { "$complete/$_" } get_completions($stack->[-1]);
             } else {
@@ -212,11 +282,11 @@ LS: while(1) {
         if ($input eq 'help') {
             help();
         } elsif ($input =~ /^cd (.*?)$/) {
-            next LS if chpath($1);
+            next LS if chpath(parse_path($1));
         } elsif ($input =~ /^cat$/) {
             cmd_cat($current);
-        } elsif ($input =~ /^cat (--nokeys )?(.*?)$/) {
-            cmd_cat($current, $1, $2);
+        } elsif ($input =~ /^cat (--nokeys )?([^>]*?)\s*(?:\>\s*(\S+))?$/) {
+            cmd_cat($current, $1, $2, $3);
         } elsif ($input =~ /^ls$/) {
             next LS;
         } elsif ($input =~ /^ls (.*?)$/) {
@@ -224,7 +294,7 @@ LS: while(1) {
         } elsif ($input =~ /^limit (\d+)$/) {
             $MAX = $1;
         } elsif ($input =~ /^delete (.*?)$/) {
-            delete_keys($current, $1);
+            cmd_delete_keys($current, $1);
         } elsif ($input =~ /^set (\S+)[\s=]+(.*)$/) {
             set_value($current->[-1], $1, $2);
         } elsif ($input =~ /^transform (-d \S+ )?(\S+)( -d \S+)?\s+(.*)$/) {
@@ -239,7 +309,7 @@ LS: while(1) {
             cmd_sum($current, $1);
         } elsif ($input =~ /^grep -e '(.*?)' ("[^"]*"|'[^']*'|\S+) (\S+)$/) {
             cmd_search($current, $2, $3, undef, $1);
-        } elsif ($input =~ /^grep (?:(-l|--cd|-c)\s+)?("[^"]*"|'[^']*'|\S+) (\S+)$/) {
+        } elsif ($input =~ /^grep ((?:-[\w-]+ )*)("[^"]*"|'[^']*'|\S+) (\S+)$/) {
             cmd_search($current, $2, $3, $1);
         } elsif ($input =~ /^groupby ('.*?'|\S+) ('.*?'|\S+) ('.*?'|\S+)$/) {
             cmd_groupby($current, $1, $2, $3);
@@ -349,16 +419,11 @@ sub write_file {
     $filename ||= $current_file;
     $arg ||= '';
 
-    my $fh;
-    if ($filename eq '-') {
-        $fh = \*STDOUT;
-    } else {
-        open($fh, ">", "$filename.tmp")
-            or die "create $filename.tmp: $!";
-    }
+    my $fh = ($filename eq '-') ? \*STDOUT : IO::File->new("> $filename.tmp")
+        or die "create $filename.tmp: $!";
 
     my $json = $json->utf8; #->canonical;
-    $json = $json->pretty if $arg;
+    $json = $pjson if $arg;
     my $out = $json->encode($struct);
     $out =~ s/^\s+//mg if $arg eq '--noindent';
     print $fh $out
@@ -380,19 +445,46 @@ sub write_file {
     $dirty = 0;
 }
 
+sub current_path {
+    return [ @current[1 .. $#current] ];
+}
+
 sub abspath {
     my ($path) = @_;
-    my $pwd = join('/', '', @current[1..$#current]);
-    return joinpath($pwd, $path);
+    return [ @{ current_path() }, @$path ];
 }
 
 sub cmd_search {
     my ($current, $pattern, $path, $args, $expr) = @_;
     $args ||= '';
 
+    $path = parse_path($path);
+
+    # Match a single container and chdir to it.
+    my $do_chdir = $args =~ s/--cd//;
+
+    # Search the names of directories instead of leaves.
+    my $do_dirs = $args =~ s/--dirs?//;
+
+    # Search both directories and leaves.
+    my $do_all = $args =~ s/--all//;
+
+    # Add up byte sizes of contents of all matching items. (?)
+    my $do_size = $args =~ s/--size//;
+
+    # Unimplemented. Delete matching items.
+    my $do_delete = $args =~ s/--delete//;
+
+    # Count... something. (?)
+    my $do_count = $args =~ s/-c//;
+
+    # Display paths of containers holding matches, rather than the matching
+    # items themselves.
+    my $do_list = $args =~ s/-l//;
+
     my $re;
     my $delim = substr($pattern, 0, 1);
-    if (length($delim) < 2 || $delim ne substr($pattern, -1)) {
+    if (length($pattern) == 1 || $delim ne substr($pattern, -1)) {
         $re = $pattern;
     } else {
         $re = substr($pattern, 1, -1);
@@ -400,37 +492,101 @@ sub cmd_search {
 
     my %hist;
     my @matchfiles;
-    map_path($current, $path, sub {
-        my ($stack, $lpath) = @_;
-        return if ref($stack->[-1]);
-        return if $stack->[-1] !~ /$re/;
-        if ($args eq '-c') {
-            my $datum = $1 // $stack->[-1];
-            $hist{$datum}++;
-        } elsif (defined($expr)) {
-            print evaluate($stack, $stack, abspath($lpath), $expr), "\n";
-        } elsif ($args ne '--cd') {
-            print $lpath;
-            if (!$args) {
-                print ": $stack->[-1]";
-            }
-            print "\n";
-        }
-        push @matchfiles, $lpath;
-    }) or print "Path $path not found\n";
+    my @deadmeat;
 
-    if ($args eq '-c') {
+    my $type;
+    if ($do_chdir) {
+        $type = 'containers';
+    } elsif ($do_all) {
+        $type = 'all';
+    } elsif ($do_dirs) {
+        $type = 'keys';
+    } elsif ($do_count) {
+        $type = 'all';
+    } else {
+        $type = 'leaves';
+    }
+
+    map_path($current, $path, $type, sub {
+        my ($stack, $lpath) = @_;
+
+        my $segment = $lpath->[-1];
+        return if $segment !~ /$re/;
+        my $item = $1 // $segment; # If match expression contains parens, grab the matching portion.
+
+        if (defined $expr) {
+            # FIXME: leaf paths
+            $item = evaluate($stack, $stack, abspath($lpath), $expr);
+        }
+
+        if ($do_count) {
+            $hist{$item}++;
+        } else {
+            if ($do_size) {
+                printf("% 8d bytes - ", calc_size($stack->[-1]));
+            }
+
+            if ($do_delete) {
+                push @deadmeat, [ $stack, $segment, $lpath ];
+            } elsif ($do_dirs || $do_all) {
+                if (defined($stack->[-1])) {
+                    print strpath($lpath);
+                    if ($segment ne $item) {
+                        print ": $item";
+                    }
+                    print "\n";
+                } else {
+                    print strpath(dirpath($lpath));
+                    print ": $item\n";
+                }
+            } elsif ($do_list) {
+                print strpath(dirpath($lpath)), "\n";
+            } else {
+                print "$item\n";
+            }
+        }
+        push @matchfiles, strpath($lpath);
+    }) or print "Path " . strpath($path) . " not found\n";
+
+    if ($do_count) {
         for my $match (sort { $hist{$a} <=> $hist{$b} } keys %hist) {
             my $count = $hist{$match};
             printf("% 6s %s\n", $count, $match);
         }
-    } if ($args eq '--cd') {
+    }
+
+    if ($do_chdir) {
         return if @matchfiles == 0; # Already warned
         if (@matchfiles > 1) {
             print "Multiple matches; ambiguous destination\n";
             return;
         }
-        chpath(dirname($matchfiles[0]));
+        chpath(dirpath($matchfiles[0]));
+    }
+
+    for my $deadmeat (sort { length($b->[2]) <=> length($a->[2]) || $b->[2] cmp $a->[2] } @deadmeat)
+    {
+        my ($stack, $key, $path) = @$deadmeat;
+
+        # Want to get to the container of the key.
+        #  - for a leaf path, we have [..., container, key, undef]
+        #  - for a key path, we have [..., container, key]
+        #  - for a container path, we have [..., container=key]??? We shouldn't have a container path.
+
+        my $obj;
+        if (defined($stack->[-1])) {
+            $obj = $stack->[-2];
+        } else {
+            $obj = $stack->[-3];
+            $key = $path->[-2];
+        }
+
+        if (UNIVERSAL::isa($obj, 'HASH')) {
+            delete $obj->{$key};
+        } elsif (UNIVERSAL::isa($obj), 'ARRAY') {
+            splice(@$obj, $key, 1);
+        }
+        print "deleted " . strpath($path) . "\n" if $verbose;
     }
 }
 
@@ -591,7 +747,7 @@ sub unquote {
 # Example: group markers/data/*/nursery '$sum(phase_times/Total)' by '$(reason)'
 sub cmd_groupby {
     my ($current, $path, $expr, $groupexpr) = @_;
-    $path = unquote($path);
+    $path = parse_path(unquote($path));
     $expr = unquote($expr);
     $groupexpr = unquote($groupexpr);
     (my $grouplabel = $groupexpr) =~ s/.* as (\S+)/$1/;
@@ -599,7 +755,8 @@ sub cmd_groupby {
 
     my @aggregates = extract_aggregates($expr);
     my %group_values;
-    map_path($current, $path, sub {
+    # TODO: test example above
+    map_path($current, $path, 'leaves', sub {
         my ($stack, $lpath) = @_;
         my $group = evaluate($stack, $stack, $lpath, $groupexpr, 'group');
         return if $group eq 'none';
@@ -646,6 +803,8 @@ sub cmd_groupby {
 
 sub cmd_movegroup {
     my ($current, $pattern, $path, $dst) = @_;
+    $path = parse_path($path);
+    $dst = parse_path($dst);
 
     my $re;
     my $delim = substr($pattern, 0, 1);
@@ -657,19 +816,18 @@ sub cmd_movegroup {
 
     my %tomove;
     my @tomove;
-    map_path($current, $path, sub {
+    map_path($current, $path, 'leaves', sub {
         my ($stack, $path) = @_;
-        return if ref($stack->[-1]);
         return if $stack->[-1] !~ /$re/;
-        my ($entry) = $path =~ m!([^/]+?)(?:/|$)!;
-        push @tomove, $entry if ++$tomove{$entry} == 1;
+        my $entry = dirpath($path);
+        push @tomove, $entry if ++$tomove{strpath($entry)} == 1;
     }) or print "Path $path not found\n";
 
-    print "tomove: $_\n" foreach @tomove;
+    print "tomove: " . strpath($_) . "\n" foreach @tomove;
 
     my $dest;
     eval {
-        map_path($current, $dst, sub {
+        map_path($current, $dst, 'containers', sub {
             my ($stack, $path) = @_;
             if (!defined $dest) {
                 if (! ref $stack->[-1]) {
@@ -693,7 +851,7 @@ sub cmd_movegroup {
             my $srcdata = enter($current, $src);
             add_entries($dest, $src, $srcdata);
             push @deadmeat, $src;
-#            if (!map_path($current, $src, sub {
+#            if (!map_path($current, $src, '???', sub {
 #                my ($stack, $path) = @_;
 #                add_entries($dest, $path, $stack->[-1]);
 #                push @deadmeat, $path;
@@ -775,8 +933,10 @@ sub set_value {
     my ($struct, $key, $value) = @_;
     $value = parse_value($value);
 
-    if ($key =~ m!([^/]+)/(.*)!) {
-        my ($dir, $subkey) = ($1, $2);
+    my $keypath = parse_path($key);
+    if (@$keypath > 1) {
+        my $dir = shift(@$keypath);
+        my $subkey = strpath($keypath);
 
         if (UNIVERSAL::isa($struct, 'HASH')) {
             if (exists $struct->{$dir}) {
@@ -807,16 +967,15 @@ sub set_value {
     }
 }
 
-sub cmd_delete_keys {
+sub delete_keys {
     my ($current, $spec) = @_;
 
-    my $dir = dirname($spec);
-    $spec = basename($spec);
-    map_path($current, $dir, sub {
+    my ($dir, $base) = splitpath($spec);
+    map_path($current, $dir, 'all', sub {
         my ($stack, $path) = @_;
         my $struct = $stack->[-1];
 
-        if ($spec =~ /^(\d*)\s*\.\.\s*(\d*)$/) {
+        if ($base =~ /^(\d*)\s*\.\.\s*(\d*)$/) {
             my ($from, $to) = ($1, $2);
             $from = 0 if length($from) == 0;
             $to = $#$struct if length($to) == 0;
@@ -829,70 +988,106 @@ sub cmd_delete_keys {
             return 1;
         } else {
             if (UNIVERSAL::isa($struct, 'ARRAY')) {
-                if ($spec > $#$struct) {
+                if ($base > $#$struct) {
                     print "Index is too high (max $#$struct)\n";
                     return;
                 }
-                splice(@$struct, $spec, 1);
+                splice(@$struct, $base, 1);
                 $dirty = 1;
                 return 1;
-            } elsif (exists $struct->{$spec}) {
-                delete $struct->{$spec};
+            } elsif (exists $struct->{$base}) {
+                delete $struct->{$base};
                 $dirty = 1;
                 return 1;
             } else {
-                print "No such key '$spec'\n";
+                print "No such key '$base'\n";
             }
         }
     }) or print "Delete spec $spec not found\n";
 }
 
-sub joinpath {
-    my ($path, $component) = @_;
-    if (!defined $path) {
-        return $component;
-    } elsif ($path =~ /\/$/) {
-        return $path . $component;
-    } else {
-        return "$path/$component";
-    }
+sub cmd_delete_keys {
+    my ($current, $spec) = @_;
+    delete_keys($current, parse_path($spec));
 }
 
+sub filter_tree {
+    my ($stack, $discard_func) = @_;
+
+    my $obj = $stack->[-1];
+    if (UNIVERSAL::isa($obj, 'HASH')) {
+        my %newobj;
+        my $discarded;
+        while (my ($key, $value) = each %$obj) {
+            if ($discard_func->($key)) {
+                $discarded = 1;
+            } else {
+                $newobj{$key} = $value;
+            }
+        }
+
+        if ($discarded) {
+            %$obj = %newobj;
+        }
+    } elsif (UNIVERSAL::isa($obj, 'ARRAY')) {
+        my @newobj;
+        for my $i (reverse(0 .. $#$obj)) {
+            my $elt = $obj->[$i];
+            if (!$discard_func->($i)) {
+                push @newobj, filter_tree(pushstack($stack, $elt), $discard_func);
+            }
+        }
+        if (@newobj != @$obj) {
+            @$obj = @newobj;
+        }
+    }
+
+    return $obj;
+}
+
+# You are in the "directory" $stack->[-1] and want to look up $component,
+# returning a new directory and a path telling you how you got there. Or if the
+# $component matches multiple entries, return multiple <directory,path> pairs.
+#
+# EXCEPT: if $type indicates you want leaves, then this will *also* go a step
+# further and give you a stack with a dummy 'undef' entry and a "path"
+# terminated with the actual leaf data.
+#
 sub path_stacks {
-    my ($stack, $obj, $component, $sofar, $suppress_errors, $container_only) = @_;
-    # $container_only is probably still not quite right, since I think an
-    # alternate group might be sometimes container-only, sometimes not
+    my ($stack, $component, $sofar, $suppress_errors, $type) = @_;
+
+    die if ref $component;
+    my $obj = $stack->[-1];
 
     my @stacks;
     if ($component eq '*') {
         for my $key (all_keys($obj)) {
-            my $s = append($stack, $key, 'no-errors') // next;
-            push @stacks, [ $s, joinpath($sofar, $key) ];
+            my $s = append($stack, $key, $type, 'no-errors') // next;
+            $DB::single = 1 if ! $s;
+            push @stacks, [ $s, [ @$sofar, $key ] ];
         }
-    } elsif ($component eq '**' && !$container_only) {
-        for my $path (all_leaf_paths($obj)) {
-            my $s = appendPath($stack, $path, 'no-errors') // next;
-            push @stacks, [ $s, joinpath($sofar, $path) ];
-        }
-    } elsif ($component eq '**' && $container_only) {
-        for my $path (all_container_paths($obj)) {
-            my $s = appendPath($stack, $path, 'no-errors') // next;
+    } elsif ($component eq '**') {
+        for my $path (all_paths($obj, $type)) {
+            my $s = appendPath($stack, $path, $type, 'no-errors') // next;
+            $DB::single = 1 if ! $s;
             push @stacks, [ $s, joinpath($sofar, $path) ];
         }
     } elsif ($component =~ /^\{(.*)\}$/) {
         my $guts = $1;
         for my $alt (split(/;/, $guts)) {
-            push @stacks, path_stacks($stack, $obj, $alt, $sofar, $suppress_errors, $container_only);
+            push @stacks, path_stacks($stack, $alt, $sofar, $suppress_errors, $type);
         }
     } else {
         $sofar = joinpath($sofar, $component);
         if ($component eq '.' || $component eq '') {
+            $DB::single = 1 if ! $stack;
             push @stacks, [ $stack, $sofar ];
         } elsif ($component eq '..') {
             push @stacks, [ popstack($stack), $sofar ];
         } else {
-            my $s = append($stack, $component, $suppress_errors)
+            my $s = append($stack, $component, $type, $suppress_errors)
                 or return;
+            $DB::single = 1 if ! $s;
             push @stacks, [ $s, $sofar ];
         }
     }
@@ -903,38 +1098,38 @@ sub path_stacks {
 # Callback is invoked with (object, path). 'object' is the structure at the
 # given path. It may be a leaf or a struct.
 sub map_path {
-    my ($stack, $path, $callback, $sofar, $suppress_errors) = @_;
+    my ($stack, $path, $type, $callback, $suppress_errors, $sofar) = @_;
 
-    $path //= '.';
+    $path //= ['.'];
+    $sofar //= [];
 
     $callback //= sub { my ($stack, $lpath) = @_; return $lpath; };
 
     # Absolute path
-    if ($path =~ s!^/!!) {
+    if ($path->[0] eq '/') {
+        $path = shiftpath($path);
+        $path = ['.'] if ! @$path;
         $stack = [ $stack->[0] ];
-        $sofar = '/';
+        $sofar = ['/'];
     }
-
-    $path =~ s!/$!!;
 
     my @results;
 
-    # Split off the first component
-    my ($first, $rest) = $path =~ m!^([^/]+)/(.*)!;
-
     my $obj = $stack->[-1];
-    if (!defined $rest) {
+    if (@$path == 1) {
         # Single component "$path"
-        foreach (path_stacks($stack, $obj, $path, $sofar, $suppress_errors)) {
+        foreach (path_stacks($stack, $path->[0], $sofar, $suppress_errors, $type)) {
             my ($stack, $sofar) = @$_;
             push @results, $callback->($stack, $sofar) // 1;
         }
     } else {
         # "$first/$rest"
-        foreach (path_stacks($stack, $obj, $first, $sofar, $suppress_errors, 1)) {
+        my $first = $path->[0];
+        my $rest = shiftpath($path);
+        foreach (path_stacks($stack, $first, $sofar, $suppress_errors, 'containers')) {
             my ($stack, $sofar) = @$_;
             $suppress_errors ||= $first =~ /^[\*\{]/;
-            push @results, map_path($stack, $rest, $callback, $sofar, $suppress_errors);
+            push @results, map_path($stack, $rest, $type, $callback, $suppress_errors, $sofar);
         }
     }
 
@@ -949,6 +1144,9 @@ sub popstack {
 sub evaluate {
     my ($current, $stack, $path, $expr, $multi) = @_;
 
+    # TEMP! FIXME! TODO!
+    $path = join("/", @$path) if ref $path;
+
     my $output = $expr;
     $output =~ s/\{basename\}/$stack->[-1]/g;
     $output =~ s/\{path\}/$path/g;
@@ -958,7 +1156,7 @@ sub evaluate {
     my $lookup = sub {
         my ($current, $lookup_path) = @_;
 
-        my @found = map_path($current, $lookup_path, sub {
+        my @found = map_path($current, $lookup_path, 'all', sub {
             my ($lstack, $lpath) = @_;
             return $lstack->[-1];
         });
@@ -978,7 +1176,7 @@ sub evaluate {
         my ($current, $lookup_path) = @_;
 
         my $sum = 0;
-        map_path($current, $lookup_path, sub {
+        map_path($current, $lookup_path, 'leaves', sub {
             my ($lstack, $lpath) = @_;
             $sum +=  $lstack->[-1];
         });
@@ -1000,26 +1198,24 @@ sub evaluate {
 
 sub cmd_transform {
     my ($current, $path, $expr, $dest_arg) = @_;
+    $path = parse_path($path);
+
     my $dest;
-    if ($dest_arg) {
-        ($dest) = $dest_arg =~ /-d (.*?)\s*$/;
+    if ($dest_arg && $dest_arg =~ /-d (.*?)\s*$/) {
+        $dest = parse_path($1);
     }
     eval {
-        map_path($current, $path, sub {
+        map_path($current, $path, 'leaves', sub {
             my ($stack, $path) = @_;
-            if (ref $stack->[-1]) {
-                print "Can only operate on simple values\n";
-            } else {
-                my $output = evaluate($current, $stack, $path, $expr);
+            my $output = evaluate($current, $stack, $path, $expr);
 
-                if (!$dest) {
-                    change_element($stack->[-2], $stack->[-1], $output);
-                } else {
-                    map_path($stack, joinpath("..", dirname($dest)), sub {
-                        my ($lstack, $lpath) = @_;
-                        set_value($lstack->[-1], basename($dest), $output);
-                    });
-                }
+            if (!$dest) {
+                change_element($stack->[-2], $stack->[-1], $output);
+            } else {
+                map_path($stack, joinpath("..", $dest), 'keys', sub {
+                    my ($lstack, $lpath) = @_;
+                    set_value($lstack->[-1], basename($dest), $output);
+                });
             }
         });
     };
@@ -1029,16 +1225,15 @@ sub cmd_transform {
 
 sub cmd_ls {
     my ($current, $lspath) = @_;
+    $lspath = parse_path($lspath, '.');
 
-    map_path($current, $lspath, sub {
+    map_path($current, $lspath, 'keys', sub {
         my ($stack, $path) = @_;
+        $DB::single = 1 if !ref $stack;
         if (num_elements($stack->[-1]) > 0) {
-            unless (!defined $lspath && $path eq '.') {
-                print $path;
-                print "/" unless $path =~ /\/$/;
-                print "\n"
-            }
-            my $prefix = ($path eq '.' && !defined $lspath) ? "" : "  ";
+            my $HERE = @$lspath == 0 && @$path == 1 && $path->[0] eq '.';
+            print strpath($path) . "/\n" if not $HERE;
+            my $prefix = $HERE ? "" : "  ";
             my $stacktop = $stack->[-1];
             if (UNIVERSAL::isa($stacktop, 'ARRAY') && @$stacktop >= 8) {
                 print "${prefix}indexes 0 .. $#$stacktop\n";
@@ -1048,14 +1243,14 @@ sub cmd_ls {
                 }
             }
         } else {
-            print $path, "\n";
+            print strpath($path), "\n";
         }
-    }) or print "Path $lspath not found\n";
+    }) or print "Path " . strpath($lspath) . " not found\n";
 }
 
 sub add_entries {
     my ($node, $path, $value) = @_;
-    my $stem = basename($path);
+    my $stem = $path->[-1];
     die "Cannot append to leaf" if ! ref $node;
     if (UNIVERSAL::isa($node, 'ARRAY')) {
         if ($stem =~ /^\d+$/) {
@@ -1077,9 +1272,12 @@ sub add_entries {
 
 sub cmd_mv {
     my ($current, $src, $dst) = @_;
+    $src = parse_path($src);
+    $dst = parse_path($dst);
+
     my $dest;
     eval {
-        map_path($current, $dst, sub {
+        map_path($current, $dst, 'all', sub {
             my ($stack, $path) = @_;
             if (!defined $dest) {
                 if (! ref $stack->[-1]) {
@@ -1097,14 +1295,14 @@ sub cmd_mv {
 
     if ($dest) {
         my @deadmeat;
-        if (!map_path($current, $src, sub {
+        map_path($current, $src, 'keys', sub {
             my ($stack, $path) = @_;
             add_entries($dest, $path, $stack->[-1]);
             push @deadmeat, $path;
-        })) {
+        }) or do {
             print "Source path $src not found\n";
             return;
-        }
+        };
 
         # Delete backwards so array contents don't get reshuffled
         for my $victim (reverse @deadmeat) {
@@ -1115,46 +1313,71 @@ sub cmd_mv {
 
 sub cmd_sum {
     my ($current, $path) = @_;
+    $path = parse_path($path);
+
     my $sum = 0;
-    map_path($current, $path, sub {
+    map_path($current, $path, 'leaves', sub {
         my ($stack, $lpath) = @_;
         $sum += $stack->[-1];
     });
     print "$sum\n";
 }
 
-sub cmd_show_size {
-    my ($current, $path) = @_;
-    my $show_keys = defined($path);
+sub calc_size {
+    my ($obj) = @_;
+    return length($json->allow_nonref->encode($obj));
+}
 
-    map_path($current, $path || '.', sub {
-        my ($stack, $path) = @_;
-        my $len = length($json->allow_nonref->encode($stack->[-1]));
+sub map_size {
+    my ($current, $path, $func) = @_;
+
+    my $found;
+    map_path($current, $path, 'all', sub {
+        my ($stack, $lpath) = @_;
+        $func->($stack, $lpath, calc_size($stack->[-1]));
+        $found = 1;
+    }) or return undef;
+
+    return $found;
+}
+
+sub cmd_show_size {
+    my ($current, $path_str) = @_;
+    my $show_keys = defined($path_str);
+    $path_str //= '.';
+    my $path = parse_path($path_str);
+
+    map_size($current, $path, sub {
+        my ($stack, $lpath, $len) = @_;
         if ($show_keys) {
-            print "$path = $len bytes\n";
+            print strpath($lpath) . " = $len bytes\n";
         } else {
             print "$len bytes\n";
         }
-    }) or print "Path $path not found\n";
+    }) or print "Path $path_str not found\n";
 }
 
 sub cmd_cat {
-    my ($current, $nokeys, $path) = @_;
+    my ($current, $nokeys, $path_str, $outfile) = @_;
+    my $path = parse_path($path_str, '.');
 
-    map_path($current, $path, sub {
-        my ($stack, $path) = @_;
+    my $out = $outfile ? IO::File->new("> $outfile") : \*STDOUT
+        or die "create $outfile: $!";
+
+    map_path($current, $path, 'all', sub {
+        my ($stack, $lpath) = @_;
         if (num_elements($stack->[-1]) > 0) {
-            print "$path/ with ", num_elements($stack->[-1]), " keys:\n";
-            print $pjson->encode($stack->[-1]), "\n";
+            print $out strpath($lpath, '/'), " with ", num_elements($stack->[-1]), " keys:\n";
+            print $out $pjson->encode($stack->[-1]);
         } elsif (! ref $stack->[-1]) {
-            print "$path = " unless $nokeys;
-            print "$stack->[-1]\n";
+            print $out strpath($lpath) . " = " unless $nokeys;
+            print $out "$stack->[-1]\n";
         } elsif (UNIVERSAL::isa($stack->[-1], 'ARRAY')) {
-            print "empty array\n";
+            print $out "empty array\n";
         } else {
-            print "empty hash\n";
+            print $out "empty hash\n";
         }
-    }) or print "Path $path not found\n";
+    }) or print "Path $path_str not found\n";
 }
 
 sub printExcess {
@@ -1162,9 +1385,11 @@ sub printExcess {
     print "...plus " . ($total - $printed) . " more, $total total... (limit N to display more than $MAX)\n";
 }
 
+# Given a struct of some sort and a key, return the value at that key.
 sub enter {
-    my ($struct, $key, $suppress_error) = @_;
+    my ($struct, $key, $suppress_error, $found) = @_;
     if (UNIVERSAL::isa($struct, 'HASH')) {
+        $$found = exists $struct->{$key} if $found;
         return $struct->{$key};
     } elsif (UNIVERSAL::isa($struct, 'ARRAY')) {
         if ($key !~ /^-?\d+$/) {
@@ -1177,6 +1402,8 @@ sub enter {
         # This is horrible. Handle negative indexes.
         $_[1] = ($key + @$struct) % @$struct;
 
+        $$found = ($key >= -$#$struct) && ($key < @$struct) if $found;
+
         return $struct->[$key];
     } else {
         return if $suppress_error;
@@ -1185,16 +1412,26 @@ sub enter {
     }
 }
 
+sub includes_leaves {
+    my ($type) = @_;
+    return $type eq 'leaves' || $type eq 'all';
+}
+
 sub append {
-    my ($stack, $key, $suppress_error) = @_;
-    my $obj = enter($stack->[-1], $key, $suppress_error) // return;
-    return [ @$stack, $obj ];
+    my ($stack, $key, $type, $suppress_error) = @_;
+    my $found;
+    my $obj = enter($stack->[-1], $key, $suppress_error, \$found);
+    return [ @$stack, $obj ] if $found;
+
+    if ($stack->[-1] eq $key && includes_leaves($type)) {
+        return [ @$stack, undef ];
+    }
 }
 
 sub appendPath {
-    my ($stack, $path, $suppress_error) = @_;
-    for my $component (split(/\//, $path)) {
-        $stack = append($stack, $component, 1) // return;
+    my ($stack, $rpath, $type, $suppress_error) = @_;
+    for my $component (@$rpath) {
+        $stack = append($stack, $component, $type, 1) // return;
     }
     return $stack;
 }
@@ -1202,8 +1439,8 @@ sub appendPath {
 sub enterPath {
     my ($stack, $path, $suppress_errors) = @_;
     my @stack = @$stack;
-    foreach (split(/\//, $path)) {
-        push @stack, enter($stack[-1], $_, $suppress_errors)
+    for my $segment (@$path) {
+        push @stack, enter($stack[-1], $segment, $suppress_errors)
             or return;
     }
     return \@stack;
@@ -1252,7 +1489,7 @@ sub chkey {
 sub all_keys {
     my ($value) = @_;
     if (UNIVERSAL::isa($value, 'HASH')) {
-        return keys %$value;
+        return sort keys %$value;
     } elsif (UNIVERSAL::isa($value, 'ARRAY')) {
         return 0 .. $#$value;
     } else {
@@ -1270,7 +1507,7 @@ sub all_leaf_paths {
         my $entry = enter($obj, $key, 'no-errors');
         if (ref($entry)) {
             for my $path (all_leaf_paths($entry)) {
-                push @paths, "$key/$path";
+                push @paths, joinpath($key, $path);
             }
         } else {
             push @paths, $key;
@@ -1280,17 +1517,38 @@ sub all_leaf_paths {
     return @paths;
 }
 
-sub all_container_paths {
-    my ($obj) = @_;
-    return if ! ref($obj);
+# Return all paths starting at the given root, as arrays of path segments.
+# $root is a ref to a container or a leaf.
+#
+# type can be 'containers', 'keys', or 'leaves'.
+#   containers - full paths to all containers (dicts and arrays)
+#   keys - full paths to all keys within containers
+#   leaves - full paths to only leaves
+#   all - full paths to everything
+#
+# FIXME: do I really want to go all the way to the leaf values? They're not really paths.
+sub all_paths {
+    my ($root, $type) = @_;
+    $type //= 'leaves';
+
+    if (! ref($root)) {
+        return if $type eq 'containers' || $type eq 'keys';
+        return ([$root]);
+    }
 
     my @paths;
-    for my $key (all_keys($obj)) {
-        my $entry = enter($obj, $key, 'no-errors');
-        next if ! ref($entry);
-        push @paths, $key;
-        for my $path (all_container_paths($entry)) {
-            push @paths, "$key/$path";
+    for my $key (all_keys($root)) {
+        my $value = enter($root, $key, 'no-errors');
+        if (! ref $value) {
+            push @paths, [$key] if $type eq 'keys' || $type eq 'all';
+            if (defined $value) {
+                push @paths, [$key, $value] if $type eq 'leaves' || $type eq 'all';
+            }
+        } else {
+            push @paths, [$key] if $type ne 'leaves';
+            if (defined $value) {
+                push @paths, map { joinpath($key, $_) } all_paths($value, $type);
+            }
         }
     }
 
@@ -1299,25 +1557,20 @@ sub all_container_paths {
 
 sub chpath {
     my ($path) = @_;
+
     my $old_current = $current;
     my @old_current = @current;
 
-    if ($path =~ s!^/!!) {
+    if ($path->[0] eq '/') {
         $current = [ $struct ];
         splice(@current, 1);
     }
 
-    my @pieces;
-    if ($path =~ s/^'(.*)'$//) {
-        @pieces = ($1);
-    } else {
-        @pieces = split(/\//, $path);
-    }
-    foreach (@pieces) {
-        if (!chkey($_)) {
+    for my $key (@$path) {
+        if (!chkey($key)) {
             $current = $old_current;
             @current = @old_current;
-            print "Path component '$_' not found\n";
+            print "Path component '$key' not found\n";
             return 0;
         }
     }
