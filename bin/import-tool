@@ -31,7 +31,7 @@ else
 fi
 
 abs="$(realpath "$DEST")"
-rel="$(abs2rel "$abs" "$(dirname "$SRC_TOOL")")"
+rel="$(realpath "$abs" --relative-to="$(dirname "$SRC_TOOL")")"
 [ -n "$abs" ] && [ -n "$rel" ]
 mv "$SRC_TOOL" "$DEST"
 ln -s "$rel" "$SRC_TOOL"
