@@ -34,23 +34,23 @@ maxfuzz = 10
 
 [extensions]
 # Basic functionality improvements
-progress = 
-color = 
-pager = 
+progress =
+color =
+pager =
 
 # Standard additional commands
-mq = 
-record = 
-rebase = 
-relink = 
-graphlog = 
-convert = 
-parentrevspec = 
-transplant = 
-purge = 
-share = 
-histedit = 
-shelve = 
+mq =
+record =
+rebase =
+relink =
+graphlog =
+convert =
+parentrevspec =
+transplant =
+purge =
+share =
+histedit =
+shelve =
 hggit = ~/lib/hg/hg-git/hggit
 #show =
 
@@ -80,7 +80,7 @@ mozext = ~/lib/version-control-tools/hgext/mozext/
 # reviewboard = ~/lib/version-control-tools/hgext/reviewboard/client.py
 firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
-fsmonitor = 
+fsmonitor =
 blackbox =
 journal =
 
@@ -113,6 +113,12 @@ qedit = !S=$(hg root --mq)/series; cp $S{,.bak} && perl -pale 'BEGIN { chomp(@a 
 ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(::$r and not public())" --template list
 sl = ls
 
+lg = log --template list --graph
+
+booktotopic = topics $1 -r 'allbook($1)'
+b2t = booktotopic $1
+echo = !r=${1:-foo}; $HG log -r . --template "$r\n"
+
 lsbranch = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents((::$r + descendants($r)) and not public())" --template list
 
 simple_lls = !$HG ls $1 | tac | perl -lne 'print ".~$. $_"' | tac
@@ -121,6 +127,8 @@ lls = !$HG ls $1 | tac | perl -lne '$n = $. - 1; print sprintf "%-4s %s", $. < 5
 list = log --template "{label('changeset.{phase}', '{rev}:{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline}\n"
 
 lsb = log -r 'bookmark() and not public()' -T '{pad("{bookmarks}", 30)} {desc|firstline}\n'
+
+lst = topics --age
 
 msg = log -r . --template '{desc}\n'
 
@@ -170,6 +178,7 @@ rebase_default = heads(descendants(workparent) and public())
 
 workheads = heads(descendants(parents(not public() and ancestors(.)) and public()))
 
+allbook($1) = not public() and (ancestors(bookmark($1)) + descendants(bookmark($1)))
 
 [diff]
 git = 1
@@ -267,7 +276,7 @@ bitbucket.org:fingerprints = sha256:4e:65:3e:76:0f:81:59:85:5b:50:06:0c:c2:4d:3c
 [templates]
 wip = '{label("wip.branch", if(branches,"{branches} "))}{label(ifeq(graphnode,"x","wip.obsolete","wip.{phase}"),"{rev}:{node|short}")}{label("wip.user", " {author|user}")}{label("wip.tags", if(tags," {tags}"))}{label("wip.tags", if(fxheads," {fxheads}"))}{if(bookmarks," ")}{label("wip.bookmarks", if(bookmarks,bookmarks))}{label(ifcontains(rev, revset("parents()"), "wip.here"), " {desc|firstline}")}\n'
 
-list = "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
+list = "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', topic)} {label('tags.normal', bookmarks)}\n"
 
 [bundleclone]
 prefers = uc2region=us-west-1
