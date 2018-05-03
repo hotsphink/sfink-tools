@@ -122,16 +122,16 @@ def watchofs
 end
 
 def loadpy
-  python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.py")).read())
-  python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.pahole.py")).read())
-  python exec(open(os.path.join(os.environ['HOME'], ".gdbinit.symbols.py")).read())
-end
-
-def reload
-  python reload($arg0)
+  source ~/.gdbinit.py
+  source ~/.gdbinit.pahole.py
+  source ~/.gdbinit.symbols.py
 end
 
 loadpy
+
+# def reload
+#   python reload($arg0)
+# end
 
 def pretty
   source /home/sfink/src/mozilla2/obj-js-debug/dist/bin/js-gdb.py
