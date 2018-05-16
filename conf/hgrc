@@ -7,6 +7,9 @@ merge = kdiff3
 interface = curses
 mergemarkers = detailed
 
+# Change the default of various commands. See https://www.mercurial-scm.org/wiki/FriendlyHGPlan
+tweakdefaults = true
+
 [defaults]
 #commit = -v
 diff = -U 8 -p
@@ -35,8 +38,6 @@ maxfuzz = 10
 [extensions]
 # Basic functionality improvements
 progress =
-color =
-pager =
 
 # Standard additional commands
 mq =
@@ -256,7 +257,7 @@ patch_format = bug-%(bugnum)s-%(desc)s
 
 [mozext]
 ircnick = sfink
-mozext.skip_relbranch_bookmarks = True
+skip_relbranch_bookmarks = True
 disable_local_database = False
 
 [mozilla]
@@ -268,12 +269,6 @@ delay = 1
 [pager]
 # display colors when using pager
 pager = LESS='RF' less
-attend = annotate, cat, diff, export, glog, log, qdiff, show, export, incoming, outgoing, help, qseries, s, view, wip
-attend-help = true
-attend-incoming = true
-attend-outgoing = true
-attend-status = true
-attend-wip = true
 
 [hostsecurity]
 hg.mozilla.org:fingerprints = sha256:8E:AD:F7:6A:EB:44:06:15:ED:F3:E4:69:A6:64:60:37:2D:FF:98:88:37:BF:D7:B8:40:84:01:48:9C:26:CE:D9, sha256:81:3D:75:69:E3:76:F8:5B:31:1E:92:C9:CF:56:23:F6:4B:C2:82:77:E3:63:FB:7F:28:65:D0:9A:88:FB:BE:B7
