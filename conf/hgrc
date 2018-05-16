@@ -85,63 +85,74 @@ blackbox =
 journal =
 
 [alias]
-# For Callek, really. I use em.
-workon = !bash -c 'cd $($HG root) && $EDITOR $($HG status -n -m -a ${1+--change $1})' -- "$@"
-
-# From junw, mostly what evolve does:
-# evolve=rebase -r 'orphan()-obsolete()' -d 'max((successors(max(roots(ALLSRC) & ::SRC)^)-obsolete())::)'
+##################### aliases I actually use #####################
 
 ts = treestatus
-series = qseries -v
-s = qseries -v
 view = qshow
-goto = qgoto
-touched = qtouched
-shortlog = log --template='{node|short}: {desc|firstline}\n'
-qlog = log --stat -r qtip:qbase
-qcat = !cd $(hg root)/.hg/$(hg qqueue --active) && hg cat -r 'file("$1")$2' $1
-qrev = !if [ -n "$1" ]; then hg qref -m "$(hg qheader | perl -lpe 's/$/, r=$1/ if 1..1')"; else echo "reviewer required" >&2; fi; hg qh
-phases = log --template='{node|short} {phase} {desc|firstline}\n'
-file = files "relglob:$1"
+s = qseries -v
 
 # qedit: bring up a text editor on the patch series file, marking applied
 # patches as unrearrangable
 
 qedit = !S=$(hg root --mq)/series; cp $S{,.bak} && perl -pale 'BEGIN { chomp(@a = qx(hg qapplied -q)); die if $?; @a{@a}=(); }; s/^/# (applied) / if exists $a{$F[0]}' $S > $S.new && ${EDITOR-vim} $S.new && sed -e 's/^# .applied. //' $S.new > $S
 
-#ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(::$r and not public())" --template "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
 ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(::$r and not public())" --template list
 sl = ls
 
 lg = log --template list --graph
 
-booktotopic = topics $1 -r 'allbook($1)'
-b2t = booktotopic $1
-echo = !r=${1:-foo}; $HG log -r . --template "$r\n"
+b2t = topics $1 -r 'allbook($1)'
 
 lsbranch = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents((::$r + descendants($r)) and not public())" --template list
 
 simple_lls = !$HG ls $1 | tac | perl -lne 'print ".~$. $_"' | tac
 lls = !$HG ls $1 | tac | perl -lne '$n = $. - 1; print sprintf "%-4s %s", $. < 5 ? "." . "^" x $n : ".~$n", " $_"' | tac
 
-list = log --template "{label('changeset.{phase}', '{rev}:{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline}\n"
-
 lsb = log -r 'bookmark() and not public()' -T '{pad("{bookmarks}", 30)} {desc|firstline}\n'
 
 lst = topics --age
+
+che = chistedit -r 'not public() and ancestors(.)'
+
+advance = !while $HG next --evolve; do :; done
+
+geckoversion = !$HG cat -r $1 'path:config/milestone.txt' | tail -1
+
+######### aliases I would use if I remembered they existed #######
+
+file = files "relglob:$1"
+phases = log --template='{node|short} {phase} {desc|firstline}\n'
+recommit = !$HG uncommit --all && $HG amend -i
+
+interdiff = !set -x; $HG export --hidden $1 > /tmp/left.diff; $HG export --hidden $2 > /tmp/right.diff; interdiff /tmp/left.diff /tmp/right.diff
+
+############### aliases I keep around to learn from ##############
+
+# For Callek, really. I use em.
+workon = !bash -c 'cd $($HG root) && $EDITOR $($HG status -n -m -a ${1+--change $1})' -- "$@"
+
+# From junw, mostly what evolve does:
+# evolve=rebase -r 'orphan()-obsolete()' -d 'max((successors(max(roots(ALLSRC) & ::SRC)^)-obsolete())::)'
+
+########### aliases I no longer use and ought to delete ##########
+
+series = qseries -v
+goto = qgoto
+touched = qtouched
+shortlog = log --template='{node|short}: {desc|firstline}\n'
+qlog = log --stat -r qtip:qbase
+qcat = !cd $(hg root)/.hg/$(hg qqueue --active) && hg cat -r 'file("$1")$2' $1
+qrev = !if [ -n "$1" ]; then hg qref -m "$(hg qheader | perl -lpe 's/$/, r=$1/ if 1..1')"; else echo "reviewer required" >&2; fi; hg qh
+
+list = log --template "{label('changeset.{phase}', '{rev}:{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline}\n"
 
 msg = log -r . --template '{desc}\n'
 
 spew = !$HG export -r 'not public()' | perl -lne '$$r ||= "none"; $$r = $$1 if /^# Node ID (.{12})/; print "$$r $$_"'
 
 he = histedit -r 'not public() and ancestors(.)'
-che = chistedit -r 'not public() and ancestors(.)'
-
-advance = !while $HG next --evolve; do :; done
 
 # wip = log --graph --rev=wip --template=wip
-
-geckoversion = !$HG cat -r $1 'path:config/milestone.txt' | tail -1
 
 # Usage: hg enbug <desc> # desc should be oneword
 #
@@ -152,11 +163,7 @@ enbug = !msg=$($HG log -r . --template '{desc}\n'); echo "$msg" | grep -q "^Bug"
 
 yay = !msg="$($HG log -r . --template '{desc}\n'), r=$1"; $HG commit --amend -m "$msg"; echo "$msg"
 
-recommit = !$HG uncommit --all && $HG amend -i
-
 reb = rebase -d rebase_default
-
-interdiff = !set -x; $HG export --hidden $1 > /tmp/left.diff; $HG export --hidden $2 > /tmp/right.diff; interdiff /tmp/left.diff /tmp/right.diff
 
 [revsetalias]
 with_parents(s) = parents(s) or s
