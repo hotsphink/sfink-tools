@@ -79,7 +79,12 @@ bzexport = ~/lib/version-control-tools/hgext/bzexport/
 trychooser = ~/lib/hg/trychooser/
 mozext = ~/lib/version-control-tools/hgext/mozext/
 # reviewboard = ~/lib/version-control-tools/hgext/reviewboard/client.py
-firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
+
+# Note: if I use the .mozbuild version, it seems to get confused between
+#mozhg/util.py versions from ~/lib and ~/.mozbuild.
+# firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
+firefoxtree = ~/lib/version-control-tools/hgext/firefoxtree
+
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
 fsmonitor =
 blackbox =
