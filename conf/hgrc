@@ -192,6 +192,7 @@ rebase_default = heads(descendants(workparent) and public())
 workheads = heads(descendants(parents(not public() and ancestors(.)) and public()))
 
 allbook($1) = not public() and (ancestors(bookmark($1)) + descendants(bookmark($1)))
+alltopic($1) = not public() and (ancestors(topic($1)) + descendants(topic($1)))
 
 [diff]
 git = 1
