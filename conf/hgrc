@@ -53,7 +53,7 @@ share =
 histedit =
 shelve =
 hggit = ~/lib/hg/hg-git/hggit
-#show =
+show =
 
 # Nonstandard additional commands
 qbackout = ~/lib/version-control-tools/hgext/qbackout/
