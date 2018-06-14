@@ -1564,6 +1564,7 @@ sub chpath {
     if ($path->[0] eq '/') {
         $current = [ $struct ];
         splice(@current, 1);
+        $path = [ @$path[1..$#$path] ];
     }
 
     for my $key (@$path) {
