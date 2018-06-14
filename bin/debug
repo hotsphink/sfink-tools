@@ -131,6 +131,7 @@ Usage: debug [env=VAL...] [options] <program> args...
    --gdb            Gdb mode
    --record         Record under rr, then replay
    --rrpid=PID      The pid to debug (default is to guess; crashes are preferred)
+   --rrargs='args'  Additional arguments to pass to 'rr replay'.
    --js[=PATH]      Jorendb mode, with optional PATH to jorendb.js
    --check PATTERN  Run the command and scan its output for PATTERN. If it is
                     found, kill emacs and continue. This is useful when you
@@ -166,12 +167,6 @@ END
 }
 
 my ($COMMAND, @args) = @ARGV;
-if (! defined $COMMAND) {
-    $debugger = 'rr';
-    $rrpid ||= choose_pid_for_rr();
-    $COMMAND = '';
-    $opt{interactive} = 1;
-}
 
 sub choose_pid_for_rr {
     # Find a process from the last run that crashed. Use the first one that
@@ -245,7 +240,7 @@ if ($COMMAND && $COMMAND !~ m!/!) {
 }
 
 # Double slashes confuse emacs because it starts over at the root
-$COMMAND =~ s!/+!/!g;
+$COMMAND =~ s!/+!/!g if $COMMAND;
 
 chomp($ENV{CWD} = `pwd`);
 
@@ -354,19 +349,21 @@ sub protect {
 #  - COMMAND=reactor
 #  - args=spot.xml
 #
-if (! $debugger) {
-    if ($COMMAND =~ /\bperl$/) {
-        $debugger = 'perl';
+if ($COMMAND) {
+    if (! $debugger) {
+        if ($COMMAND =~ /\bperl$/) {
+            $debugger = 'perl';
+            fix_spaces(\@args);
+            my $fi = scriptname_index(@args);
+            $COMMAND = join(" ", $COMMAND, "-d", splice(@args, 0, $fi + 1));
+        } elsif (`file -L $COMMAND` =~ /[pP]erl/) {
+            $debugger = 'perl';
+            $COMMAND = "$PERL -d $COMMAND";
+        }
+    } elsif ($debugger eq 'perl') {
         fix_spaces(\@args);
-        my $fi = scriptname_index(@args);
-        $COMMAND = join(" ", $COMMAND, "-d", splice(@args, 0, $fi + 1));
-    } elsif (`file -L $COMMAND` =~ /[pP]erl/) {
-        $debugger = 'perl';
-        $COMMAND = "$PERL -d $COMMAND";
+        $COMMAND = join(" ", map { protect($_) } $COMMAND, "-d", @args);
     }
-} elsif ($debugger eq 'perl') {
-    fix_spaces(\@args);
-    $COMMAND = join(" ", map { protect($_) } $COMMAND, "-d", @args);
 }
 
 sub is_python_script {
@@ -379,7 +376,7 @@ sub is_python_script {
 }
 
 # Similar set of cases for python
-if (! $debugger) {
+if ($COMMAND && ! $debugger) {
     if ($COMMAND =~ /\bpython/) {
         $debugger = 'python';
     } elsif (is_python_script($COMMAND)) {
@@ -396,7 +393,13 @@ if (! $debugger) {
     }
 }
 
-$debugger ||= 'gdb';
+$debugger //= ($COMMAND ? 'gdb' : 'rr');
+if ($debugger eq 'rr') {
+    $debugger = 'rr';
+    $rrpid ||= choose_pid_for_rr();
+    $COMMAND = '';
+    $opt{interactive} = 1;
+}
 
 if ($debugger eq 'perl') {
   my $argfile = "$TMPDIR/debug-args/perl-args-$$";
@@ -461,7 +464,7 @@ END
     $jorendb .= "/jorendb.js";
   }
   die "cannot find jorendb.js" if ! -f $jorendb;
-      
+
   unshift(@args, "-f", $jorendb, "--");
 
   my $cwd = Cwd::getcwd();
