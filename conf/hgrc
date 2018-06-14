@@ -191,8 +191,12 @@ rebase_default = heads(descendants(workparent) and public())
 
 workheads = heads(descendants(parents(not public() and ancestors(.)) and public()))
 
-allbook($1) = not public() and (ancestors(bookmark($1)) + descendants(bookmark($1)))
-alltopic($1) = not public() and (ancestors(topic($1)) + descendants(topic($1)))
+my($1) = not public() and $1
+lineage(r) = ancestors(r) + descendants(r)
+
+allbook($1) = my(lineage(bookmark($1)))
+alltopic($1) = my(lineage(topic($1)))
+allbranch($1) = my(lineage($1))
 
 [diff]
 git = 1
@@ -224,7 +228,7 @@ cacerts = /etc/pki/tls/certs/ca-bundle.crt
 [merge-tools]
 #kdiff3.args = --auto --L1 common --L2 pulled --L3 mq $base $local $other -o $output -cs SyncMode=1
 kdiff3.executable = ~/bin/kdiff3-wrapper
-kdiff3.args = --auto $base $local $other -o $output -cs SyncMode=1
+kdiff3.args = --auto --L1 prepatch --L2 tochange --L3 postpatch $base $local $other -o $output -cs SyncMode=1
 kdiff3.gui = True
 kdiff3.premerge = True
 kdiff3.binary = False
