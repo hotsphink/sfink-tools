@@ -113,6 +113,7 @@ class PythonLog(gdb.Command):
     def __init__(self):
         gdb.Command.__init__(self, "log", gdb.COMMAND_USER)
         self.LogFile = None
+        self.ThreadTable = {}
 
     def openlog(self, filename, quiet=False):
         self.LogFile = open(filename, "a+")
@@ -134,6 +135,12 @@ class PythonLog(gdb.Command):
         if ts not in ("int", "unsigned int", "uint32_t", "int32_t", "uint64_t", "int64_t"):
             return "(%s) %s" % (ts, s)
         return s
+
+    def thread_id(self, fs_base=None):
+        '''Return the thread id in the format "T<num>" for the given fs_base, or the current value of that register if not given. This is a hack that is not guaranteed to work -- when rr starts a new process under the hood, gdb may shift the thread numbers around. This is a heuristic to grab an id the first time a thread is encountered; there is no guarantee that it won't map multiple threads to the same ID. (That could be fixed, but I haven't bothered yet.)'''
+        if fs_base is None:
+            fs_base = gdb.execute("p/x $fs_base", to_string=True).split(" ")[2].strip()
+        return self.ThreadTable.setdefault(fs_base, "T" + str(gdb.selected_thread().num))
 
     def invoke(self, arg, from_tty):
         if self.LogFile is None:
@@ -167,7 +174,7 @@ class PythonLog(gdb.Command):
                      arg)
 
         # Replace $thread with "T3", where 3 is the gdb's notion of thread number.
-        out = out.replace("$thread", "T" + str(gdb.selected_thread().num))
+        out = out.replace("$thread", self.thread_id())
 
         # Let gdb handle other $ vars.
         out = re.sub(r'(\$\w+)', lambda m: self.evaluate(m.group(1)), out)
