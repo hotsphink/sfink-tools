@@ -28,7 +28,7 @@ use strict;
 use warnings;
 use File::Temp qw(tempdir);
 use Cwd qw(abs_path);
-use File::Basename qw(dirname);
+use File::Basename qw(dirname basename);
 
 my $TMPDIR = tempdir(CLEANUP => 1);
 
@@ -131,6 +131,8 @@ Usage: debug [env=VAL...] [options] <program> args...
    --gdb            Gdb mode
    --record         Record under rr, then replay
    --rrpid=PID      The pid to debug (default is to guess; crashes are preferred)
+                    The pid can also be NAME, which will be matched against the
+                    basename of commands
    --rrargs='args'  Additional arguments to pass to 'rr replay'.
    --js[=PATH]      Jorendb mode, with optional PATH to jorendb.js
    --check PATTERN  Run the command and scan its output for PATTERN. If it is
@@ -169,6 +171,10 @@ END
 my ($COMMAND, @args) = @ARGV;
 
 sub choose_pid_for_rr {
+    my ($pattern) = @_;
+
+    return $pattern if defined($pattern) && $pattern =~ /^\d+$/;
+
     # Find a process from the last run that crashed. Use the first one that
     # exited with a signal, falling back to the first nonzero exit code,
     # falling back to the last process.
@@ -179,8 +185,21 @@ sub choose_pid_for_rr {
         push @info, [ split(/\t/) ];
     }
     die "rr ps format changed!" if shift(@info)->[2] ne 'EXIT';
+    if (defined $pattern) {
+        foreach (@info) {
+            my @cmd = split(/ /, $_->[3]);
+            return $_->[0] if basename($cmd[0]) eq $pattern;
+            return $_->[0] if @cmd > 1 && basename($cmd[1]) eq $pattern;
+        }
+        return;
+    }
     foreach (@info) {
-        return $_->[0] if $_->[2] < 0; # Exited with signal
+        my $exit = $_->[2];
+        next if $exit eq 'none';
+        return $_->[0] if $exit < 0; # Exited with signal
+    }
+    foreach (@info) {
+        return $_->[0] if $_->[2] == 11; # SIGSEGV gets translated into this somehow
     }
     foreach (@info) {
         return $_->[0] if $_->[2]; # Exited with error
@@ -396,7 +415,7 @@ if ($COMMAND && ! $debugger) {
 $debugger //= ($COMMAND ? 'gdb' : 'rr');
 if ($debugger eq 'rr') {
     $debugger = 'rr';
-    $rrpid ||= choose_pid_for_rr();
+    $rrpid = choose_pid_for_rr($rrpid);
     $COMMAND = '';
     $opt{interactive} = 1;
 }
