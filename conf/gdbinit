@@ -116,6 +116,10 @@ def watchmark
   watch -l *$word
 end
 
+def getheap
+  p *(js::gc::ChunkLocation*)(((uint64_t)$arg0) & ~js::gc::ChunkMask | js::gc::ChunkLocationOffset)
+end
+
 def watchofs
   # Usage: watchofs <ptr> <offset>
   watch -l *(void**)((char*)$arg0 + (size_t)$arg1)
