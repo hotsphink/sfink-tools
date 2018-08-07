@@ -9,6 +9,7 @@ import sys
 
 history_filename = os.path.expanduser("~/.traverse")
 def_ident_re = re.compile(r'^#(\d+) ((.*?)(?:\$(.*))?)$')
+alias_re = re.compile(r'^= (\d+) (.*)$')
 edge_re = re.compile(r'^[DR] (SUPPRESS_GC |/\d+ )?(\d+) (\d+)')
 stem_re = re.compile(r'([\w_]+)\(')
 
@@ -44,6 +45,7 @@ def stem(f):
 def load_file(callgraph_filename):
     callers = data['callers'] = {}
     callees = data['callees'] = {}
+    unmangled = data['unmangled'] = {}
 
     # Give these dummy entries to count from one
     names = data['names'] = [None]
@@ -56,20 +58,30 @@ def load_file(callgraph_filename):
                 ident, fullname, mangled, unmangled = m.groups()
                 names.append(fullname)
                 readable.append(unmangled or mangled)
-            else:
-                m = edge_re.match(line)
-                if m:
-                    suppress, caller, callee = m.groups()
-                    caller = int(caller)
-                    callee = int(callee)
-                    if not suppress:
-                        limits = 0
-                    elif "SUPPRESS_GC" in suppress:
-                        limits = 1
-                    else:
-                        limits = int(suppress[1:])
-                    callers.setdefault(callee, {})[caller] = limits
-                    callees.setdefault(caller, {})[callee] = limits
+                continue
+
+            m = alias_re.match(line)
+            if m:
+                mangled_id, unmangled = m.groups()
+                mangled_id = int(mangled_id)
+                if readable[mangled_id] == names[mangled_id]:
+                    readable[mangled_id] = unmangled
+                continue
+
+            m = edge_re.match(line)
+            if m:
+                suppress, caller, callee = m.groups()
+                caller = int(caller)
+                callee = int(callee)
+                if not suppress:
+                    limits = 0
+                elif "SUPPRESS_GC" in suppress:
+                    limits = 1
+                else:
+                    limits = int(suppress[1:])
+                callers.setdefault(callee, {})[caller] = limits
+                callees.setdefault(caller, {})[callee] = limits
+                continue
 
     gAvoid = set()
     for f in gAvoidFuncs:
