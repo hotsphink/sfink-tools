@@ -13,8 +13,17 @@ import os
 import re
 
 from os.path import abspath, dirname, expanduser
+from os import environ as env
 
 gdb.execute("source {}/gdbinit.rr".format(abspath(expanduser(dirname(__file__)))))
+
+DEFAULT_LOG_DIR = os.environ['HOME']
+share_root = os.path.join(env['HOME'], ".local", "share")
+if os.path.exists(share_root):
+    share_dir = os.path.join(share_root, "rr-logs")
+    if not os.path.exists(share_dir):
+        os.mkdir(share_dir)
+    DEFAULT_LOG_DIR = share_dir
 
 RUNNING_RR = None
 
@@ -126,7 +135,7 @@ class PythonLog(gdb.Command):
 
     def default_log_filename(self):
         tid = gdb.selected_thread().ptid[0]
-        return os.path.join(os.environ['HOME'], "rr-session-%s.log" % (tid,))
+        return os.path.join(DEFAULT_LOG_DIR, "rr-session-%s.log" % (tid,))
 
     def evaluate(self, expr):
         v = gdb.parse_and_eval(expr)
