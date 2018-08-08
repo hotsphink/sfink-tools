@@ -17,14 +17,6 @@ from os import environ as env
 
 gdb.execute("source {}/gdbinit.rr".format(abspath(expanduser(dirname(__file__)))))
 
-DEFAULT_LOG_DIR = os.environ['HOME']
-share_root = os.path.join(env['HOME'], ".local", "share")
-if os.path.exists(share_root):
-    share_dir = os.path.join(share_root, "rr-logs")
-    if not os.path.exists(share_dir):
-        os.mkdir(share_dir)
-    DEFAULT_LOG_DIR = share_dir
-
 RUNNING_RR = None
 
 def running_rr():
@@ -34,6 +26,24 @@ def running_rr():
         return RUNNING_RR
     RUNNING_RR = os.environ.get('GDB_UNDER_RR', False)
     return RUNNING_RR
+
+def setup_log_dir():
+    share_dir = None
+    if 'RR_LOGS' in env:
+        share_dir = env['RR_LOGS']
+    else:
+        share_root = os.path.join(env['HOME'], ".local", "share")
+        if os.path.exists(share_root):
+            share_dir = os.path.join(share_root, "rr-logs")
+
+    if share_dir is not None:
+        if not os.path.exists(share_dir):
+            os.mkdir(share_dir)
+        return share_dir
+
+    return os.environ['HOME']
+
+DEFAULT_LOG_DIR = setup_log_dir()
 
 def when():
     when = gdb.execute("when", False, True)
