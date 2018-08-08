@@ -12,8 +12,9 @@ import gdb
 import os
 import re
 
-from collections import defaultdict
-from importlib import reload  # For interactive use
+from os.path import abspath, dirname, expanduser
+
+gdb.execute("source {}/gdbinit.rr".format(abspath(expanduser(dirname(__file__)))))
 
 RUNNING_RR = None
 

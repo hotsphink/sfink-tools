@@ -23,10 +23,8 @@ I also have a set of gdb initialization files that I version-control here.
  - gdbinit.py : gdb python init file, defines some miscellany
  - gdbinit.symbols.py : Ted Mielczarek's source server integration for gdb
  - gdbinit.pahole.py : pahole and overlap commands, loaded by gdbstart.py
- - gdbinit.gecko : configuration to assist with debugging Gecko and SpiderMonkey
- - gdbinit.gecko.py : as above, though currently JIT-focused
+ - gdbinit.gecko.py : configuration to assist with debugging Gecko and SpiderMonkey
  - gdbinit.misc : some miscellaneous gdb helper commands
- - gdbinit.rr : gdb helper commands for running under rr (very little here)
  - gdbinit.rr.py : gdb helper commands for running under rr (lots here!)
  - gdbinit.sfink : a couple of things that depend on my personal file layout
 

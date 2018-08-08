@@ -1,3 +1,7 @@
+from os.path import abspath, dirname, expanduser
+
+gdb.execute("source {}/gdbinit.gecko".format(abspath(expanduser(dirname(__file__)))))
+
 ######################################################################
 
 def find_nearest_index(searchkey, collection, key=lambda x: x):
