@@ -16,30 +16,33 @@ Tools included:
 
 Configuration files:
 
-I also have a set of configuration files that I version-control here. They
-might be a little harder to install and use, because strangely enough I change
-the filename between the actual files and the ones here, and some of them refer
-to each other. Sorry.
+I also have a set of gdb initialization files that I version-control here.
 
- - .gdbinit : gdb init file in gdb command syntax
- - .gdbinit.py : gdb python init file, loaded by .gdbinit
- - .gdbinit.pahole.py : pahole command, loaded by .gdbinit
- - .gdbinit.symbols.py : Ted Mielczarek's source server integration for gdb
- - .hgrc : Mercurial configuration
+ - gdbstart.py : gdb init file that loads all of the below gdb startup files
+ - gdbinit : basic gdb configuration
+ - gdbinit.py : gdb python init file, defines some miscellany
+ - gdbinit.symbols.py : Ted Mielczarek's source server integration for gdb
+ - gdbinit.pahole.py : pahole and overlap commands, loaded by gdbstart.py
+ - gdbinit.gecko : configuration to assist with debugging Gecko and SpiderMonkey
+ - gdbinit.gecko.py : as above, though currently JIT-focused
+ - gdbinit.misc : some miscellaneous gdb helper commands
+ - gdbinit.rr : gdb helper commands for running under rr (very little here)
+ - gdbinit.rr.py : gdb helper commands for running under rr (lots here!)
+ - gdbinit.sfink : a couple of things that depend on my personal file layout
 
-Note that the filenames in this repo are missing the leading periods. I symlink
-the actual names into my sfink-tools checkout. So if you wanted to use these
-unmodified, you could do something like
+The easiest way to use these is to create a `~/.gdbinit` file with something
+like the following, with the appropriate path to your sfink-tools checkout:
 
-    cd $HOME
-    ln -s mycheckouts/sfink-tools/conf/gdbinit .gdbinit
-    ln -s mycheckouts/sfink-tools/conf/gdbinit.py .gdbinit.py
-    ln -s mycheckouts/sfink-tools/conf/gdbinit.pahole.py .gdbinit.pahole.py
-    ln -s mycheckouts/sfink-tools/conf/gdbinit.symbols.py .gdbinit.symbols.py
+    source ~/checkouts/sfink-tools/conf/gdbstart.py
 
-But more likely, you want to modify them. And even for me, it would be smarter
-to have .gdbinit load it straight from my sfink-tools checkout. Maybe I'll do
-that someday.
+That will load all of the above except for `gdbinit.sfink`. Alternatively, you
+could just source the individual files you want to use from the above list.
+
+Other configuration files:
+
+ - hgrc : Mercurial configuration
+
+I use this via a symlink from ~/.hgrc.
 
 ----------------------------------------------------------------------
 
@@ -87,7 +90,7 @@ Examples:
  - `debug firefox -no-remote -P BugPictures`
 
    runs firefox within gdb within emacs, with the given arguments
-   
+
  - `debug -i firefox -no-remote -P NakedBugPictures`
 
    same, but stops at the gdb prompt before running firefox

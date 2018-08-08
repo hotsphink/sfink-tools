@@ -1,0 +1,3 @@
+def rfin
+  reverse-finish
+end

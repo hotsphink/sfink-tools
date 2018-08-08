@@ -1,0 +1,25 @@
+# .gdbinit file for debugging Mozilla code (Gecko, SpiderMonkey)
+
+def pmethod
+        p/a *(void**)(*((PRUint64*)mCallee) + 8 * mVTableIndex)
+end
+
+def showstring
+  x/($1.Length())s $1.BeginReading()
+end
+
+def watchmark
+  # First arg is the gc cell address
+  # Second arg is the color
+  #
+  # Note that it is often handy to make the resulting watchpoint conditional on
+  # having a matching address (since it will be breaking for anything sharing the
+  # mark word)
+  set $word = js::debug::GetMarkWordAddress($arg0)
+  set $mask = js::debug::GetMarkMask($arg0, $arg1)
+  watch -l *$word
+end
+
+def getheap
+  p *(js::gc::ChunkLocation*)(((uint64_t)$arg0) & ~js::gc::ChunkMask | js::gc::ChunkLocationOffset)
+end

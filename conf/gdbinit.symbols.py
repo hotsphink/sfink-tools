@@ -39,6 +39,7 @@ def munge_build_id(build_id):
                                    reversed(b[6:8]), b[8:16])) + '0'
 
 def try_fetch_symbols(filename, build_id, destination):
+    print('try_fetch_symbols(filename={}, build_id={}, dest={}'.format(filename, build_id, destination))
     debug_file = os.path.join(destination, build_id[:2], build_id[2:] + '.debug')
     if os.path.exists(debug_file):
         return debug_file

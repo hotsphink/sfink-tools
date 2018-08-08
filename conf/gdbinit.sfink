@@ -1,0 +1,5 @@
+add-auto-load-safe-path ~/src
+
+def pretty
+  source /home/sfink/src/mozilla2/obj-js-debug/dist/bin/js-gdb.py
+end
