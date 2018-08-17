@@ -1,4 +1,4 @@
-# 'pahole' and 'overlap' commands for examining types
+# 'pahole' and 'offset' commands for examining types
 
 # Copyright (C) 2008, 2009, 2012 Free Software Foundation, Inc.
 
@@ -25,6 +25,20 @@ class TraversalNodeType(Enum):
     START_STRUCT = 2,
     END_STRUCT = 3,
     HOLE = 4
+
+def type_to_string(type):
+    # I had some complicated code to display template parameters here, but it
+    # doesn't work quite right and on further reflection the actual problem is
+    # a gdb bug anyway. So stop trying.
+    #
+    # See https://sourceware.org/bugzilla/show_bug.cgi?id=23545
+
+    name = str(type)
+    csu = 'struct' if type.code == gdb.TYPE_CODE_STRUCT else 'union'
+    if name.startswith(csu + ' '):
+        return name
+    else:
+        return '%s %s' % (csu, name)
 
 def traverse_type(type, max_level=0, name_anon=False):
 
@@ -54,14 +68,16 @@ def traverse_type(type, max_level=0, name_anon=False):
 
         info = {
             'type': type,
-            'name': type.name or type.tag or stripped_type.name or stripped_type.tag,
+            #'name': type.name or type.tag or stripped_type.name or stripped_type.tag,
+            'name': type_to_string(type),
             'field_name': field_name,
-            'size_bits': size_bits,
             'level': level,
             'parent': parent,
             'top_bitpos': top_bitpos,
             'bitpos': bitpos,
+            'size_bits': size_bits,
             'path': path,
+            'truncated': (max_level and level >= max_level),
         }
 
         if stripped_type.code not in (gdb.TYPE_CODE_STRUCT, gdb.TYPE_CODE_UNION):
@@ -80,6 +96,7 @@ def traverse_type(type, max_level=0, name_anon=False):
             if not hasattr(field, 'bitpos'):
                 continue
 
+            # Allow limiting the depth of traversal.
             if max_level and info['level'] >= max_level:
                 continue
 
@@ -89,13 +106,20 @@ def traverse_type(type, max_level=0, name_anon=False):
             if bitpos != fbitpos:
                 yield {
                     'node_type': TraversalNodeType.HOLE,
+                    'type': '<hole>',
+                    'name': '<%d-bit hole>' % (fbitpos - bitpos),
+                    'field_name': None,
                     'level': level + 1,
-                    'parent': parent,
-                    'next_field': field.name,
+                    'parent': info,
+                    'top_bitpos': top_bitpos + bitpos,
                     'bitpos': bitpos,
                     'size_bits': fbitpos - bitpos,
-                    'field_bitpos': fbitpos,
+                    'path': path,
+                    'next_field': field.name,
                 }
+
+            # Advance past the hole, to the start of the field.
+            bitpos = fbitpos
 
             if field.bitsize > 0:
                 fieldsize = field.bitsize
@@ -107,15 +131,22 @@ def traverse_type(type, max_level=0, name_anon=False):
             if field.is_base_class:
                 field_name = '<base>'
                 base_counter += 1
+
             yield from traverse(field.type, info, level + 1, field_name, top_bitpos + bitpos, fieldsize, bitpos)
 
             if stripped_type.code == gdb.TYPE_CODE_STRUCT:
-                bitpos = fbitpos + fieldsize
+                bitpos += fieldsize
 
         info['node_type'] = TraversalNodeType.END_STRUCT
         yield info
 
-    yield from traverse(type, parent=None, level=0, field_name=None, top_bitpos=0, size_bits=type.sizeof*8, bitpos=0)
+    yield from traverse(type,
+                        parent=None,
+                        level=0,
+                        field_name=None,
+                        top_bitpos=0,
+                        size_bits=type.sizeof*8,
+                        bitpos=0)
 
 class Pahole (gdb.Command):
     """Show the holes in a structure.
@@ -133,7 +164,7 @@ It accepts an optional max-depth argument:
         if arg.startswith("/"):
             m = re.match(r'^/(\d+) +', arg)
             if m:
-                max_level = int(m.group(1))
+                max_level = int(m.group(1), 0)
                 arg = arg[m.span()[1]:]
 
         type = gdb.lookup_type(arg)
@@ -165,10 +196,16 @@ It accepts an optional max-depth argument:
 
             indent = ' ' * (2 * info['level'])
             if nt == TraversalNodeType.START_STRUCT:
-                desc = ('%s : ' % (info['field_name'],)) if info['field_name'] else ''
-                print('%s%sstruct %s {' % (indent, desc, info['name'] or ''))
+                desc = indent
+                if info['field_name']:
+                    desc += '%s : ' % info['field_name']
+                desc += info['name']
+                if not info['truncated']:
+                    desc += ' {'
+                print(desc)
             elif nt == TraversalNodeType.END_STRUCT:
-                print('%s%s} %s' % (' ' * (header_len - sofar), indent, info['name'] or ''))
+                if not info['truncated']:
+                    print('%s%s} %s' % (' ' * (header_len - sofar), indent, info['name'] or ''))
             elif nt == TraversalNodeType.SIMPLE:
                 print('%s%s : %s' % (indent, info['field_name'], info['type']))
             elif nt == TraversalNodeType.HOLE:
@@ -178,7 +215,7 @@ It accepts an optional max-depth argument:
 
 Pahole()
 
-class TypeOverlap (gdb.Command):
+class TypeOffset (gdb.Command):
     """Displays the fields at the given offset (in bytes) of a type.
 The optional /N parameter determines the size of the region inspected;
 defaults to the size of a pointer."""
@@ -186,24 +223,24 @@ defaults to the size of a pointer."""
     default_width = gdb.lookup_type("void").pointer().sizeof
 
     def __init__ (self):
-        super (TypeOverlap, self).__init__ ("overlap", gdb.COMMAND_NONE,
+        super (TypeOffset, self).__init__ ("offset", gdb.COMMAND_NONE,
                                        gdb.COMPLETE_SYMBOL)
 
     def invoke (self, arg, from_tty):
         width = gdb.lookup_type("void").pointer().sizeof
         m = re.match(r'/(\d+) ', arg)
         if m:
-            width = int(m.group(1))
+            width = int(m.group(1), 0)
             arg = arg[m.span()[1]:]
         (offset, typename) = arg.split(" ")
-        offset = int(offset)
+        offset = int(offset, 0)
         type = gdb.lookup_type(typename)
         type = type.strip_typedefs ()
         if type.code not in (gdb.TYPE_CODE_STRUCT, gdb.TYPE_CODE_UNION):
             raise TypeError('%s is not a class/struct/union type' % arg)
 
         begin, end = offset, offset + width - 1
-        print("Scanning for %d..%d" % (begin, end))
+        print("Scanning byte offsets %d..%d" % (begin, end))
         for info in traverse_type(type, name_anon=True):
             if info['node_type'] == TraversalNodeType.END_STRUCT:
                 continue
@@ -214,13 +251,16 @@ defaults to the size of a pointer."""
                 continue
             (bytepos, bytesize) = (int(info['top_bitpos']/8), int(info['size_bits']/8))
             fend = bytepos + bytesize - 1
+            #print("checking {}+{} of type {}".format(bytepos, bytesize, info['node_type']))
             if fend < begin:
                 continue
             if bytepos > end:
                 continue
-            name_of_type = info.get('name') or str(info['type'])
+            name_of_type = info.get('name') or type_to_string(info['type'])
             if info['node_type'] == TraversalNodeType.HOLE:
-                name_of_type = (info['parent'] or {}).get('name', 'struct')
-            print('overlap at %d..%d with %s : %s' % (bytepos, fend, info['path'], name_of_type))
+                name_of_type += " in " + (info['parent'] or {}).get('name', 'struct')
+                if info['next_field']:
+                    name_of_type += " before field '" + info['next_field'] + "'"
+            print('overlap at byte %d..%d with %s : %s' % (bytepos, fend, info['path'], name_of_type))
 
-TypeOverlap()
+TypeOffset()

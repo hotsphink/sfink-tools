@@ -12,3 +12,5 @@ set print object on
 
 # Static members are much too noisy in many classes.
 set print static-members off
+
+set python print-stack full
