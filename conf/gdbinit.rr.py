@@ -133,12 +133,33 @@ class PythonLog(gdb.Command):
     def __init__(self):
         gdb.Command.__init__(self, "log", gdb.COMMAND_USER)
         self.LogFile = None
+        self.Replacements = {}
+        self.RepPattern = None
         self.ThreadTable = {}
+
+    def update_rep_pattern(self):
+        self.RepPattern = None
+        if self.Replacements.keys():
+            self.RepPattern = re.compile('|'.join(self.Replacements.keys()))
+
+    def scan_log(self):
+        pos = self.LogFile.tell()
+        self.LogFile.seek(0)
+
+        self.Replacements = {}
+        for lineno, line in enumerate(self.LogFile):
+            m = re.match(r'^s/((?:[^\\]|\\.)+)/(.*?)/\w+$', line)
+            if m:
+                self.Replacements[m.group(1)] = m.group(2)
+
+        self.LogFile.seek(pos)
+        self.update_rep_pattern()
 
     def openlog(self, filename, quiet=False):
         self.LogFile = open(filename, "a+")
         if not quiet:
             print("Logging to %s" % (self.LogFile.name,))
+        self.scan_log()
 
     def stoplog(self):
         self.LogFile = False
@@ -152,8 +173,15 @@ class PythonLog(gdb.Command):
         s = str(v)
         t = v.type
         ts = str(t)
-        if ts not in ("int", "unsigned int", "uint32_t", "int32_t", "uint64_t", "int64_t"):
-            return "(%s) %s" % (ts, s)
+
+        # Ugh. In some situations, the value will be prefixed with its type,
+        # and others it will not. Enough will not that I wanted to add it in.
+
+        if s.startswith("("):
+            return s
+        BORING_TYPES = ("int", "unsigned int", "uint32_t", "int32_t", "uint64_t", "int64_t")
+        if ts in BORING_TYPES:
+            return s
         return s
 
     def thread_id(self, fs_base=None):
@@ -167,15 +195,27 @@ class PythonLog(gdb.Command):
             self.openlog(self.default_log_filename())
 
         if arg.startswith('-'):
-            if '-sorted'.startswith(arg):
+            opt = arg
+            if ' ' in opt:
+                pos = opt.index(' ')
+                opt = arg[0:pos]
+                arg = arg[pos+1:]
+
+            if '-sorted'.startswith(opt):
                 # log -s : same as log with no options, display log in execution order.
                 self.dump(sort=True)
-            elif '-dump'.startswith(arg):
+            elif '-dump'.startswith(opt):
                 # log -d : display log in entry order
                 self.dump()
-            elif '-edit'.startswith(arg):
+            elif '-noreplace'.startswith(opt):
+                # log -n : display log in execution order, without processing replacements
+                self.dump(sort=True, replace=False)
+            elif '-edit'.startswith(opt):
                 # log -e : edit the log in $EDITOR
                 self.edit()
+            elif '-replace'.startswith(opt):
+                # log -r ORIG NEW : replace occurrences of ORIG in the log with NEW
+                self.replace(arg)
             else:
                 print("unknown log option")
             return
@@ -187,36 +227,64 @@ class PythonLog(gdb.Command):
         if not self.LogFile:
             return
 
+        out = self.process_message(arg)
+
+        self.LogFile.write("%s %s\n" % (now(), out))
+
+        # If any substitutions were made, display the resulting log message.
+        out = self.apply_replacements(out)
+        if out != arg:
+            print(out)
+
+    def process_message(self, message):
         # Replace {expr} with the result of evaluating the (gdb) expression expr.
         # Allow one level of curly bracket nesting within expr.
         out = re.sub(r'\{((?:\{[^\}]*\}|\\\}|[^\}])*)\}',
                      lambda m: self.evaluate(m.group(1)),
-                     arg)
+                     message)
 
         # Replace $thread with "T3", where 3 is the gdb's notion of thread number.
         out = out.replace("$thread", self.thread_id())
 
         # Let gdb handle other $ vars.
-        out = re.sub(r'(\$\w+)', lambda m: self.evaluate(m.group(1)), out)
+        return re.sub(r'(\$\w+)', lambda m: self.evaluate(m.group(1)), out)
 
-        self.LogFile.write("%s %s\n" % (now(), out))
+    def apply_replacements(self, message):
+        if self.RepPattern is not None:
+            return re.sub(self.RepPattern, lambda m: self.Replacements[m.group(0)], message)
+        return message
 
-        # If any substitutions were made, display the resulting log message.
-        if out != arg:
-            print(out)
+    def replace(self, arg):
+        # TODO: validate syntax
+        orig, new = arg.split(' ', 1)
+        self.LogFile.write("s/{orig}/{new}/g\n".format(orig=orig, new=new))
+        print("Replacing all '{orig}' with '{new}'".format(orig=orig, new=new))
+        self.update_rep_pattern()
 
-    def dump(self, sort=False):
+    def dump(self, sort=False, replace=True):
         if not self.LogFile:
             print("No log file open")
             return
+
+        self.scan_log()
+        if replace:
+            for orig, new in self.Replacements.items():
+                print("[[Replacing '{orig}' with '{new}']]".format(orig=orig, new=new))
 
         self.LogFile.seek(0)
 
         messages = []
         for lineno, line in enumerate(self.LogFile):
+            if line.startswith("s/"):
+                continue
             line = line.strip()
+
             (timestamp, message) = line.split(" ", 1)
             (event, ticks) = timestamp.split("/", 1)
+
+            if replace:
+                line = self.apply_replacements(line)
+
             messages.append((int(event), int(ticks), lineno, line))
 
         now = nowTuple()
