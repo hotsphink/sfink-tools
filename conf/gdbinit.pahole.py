@@ -234,6 +234,7 @@ defaults to the size of a pointer."""
             arg = arg[m.span()[1]:]
         (offset, typename) = arg.split(" ")
         offset = int(offset, 0)
+
         type = gdb.lookup_type(typename)
         type = type.strip_typedefs ()
         if type.code not in (gdb.TYPE_CODE_STRUCT, gdb.TYPE_CODE_UNION):
@@ -246,16 +247,18 @@ defaults to the size of a pointer."""
                 continue
             if 'top_bitpos' not in info or 'size_bits' not in info:
                 continue
+
             # Not all that interesting to say that the whole type overlaps.
             if info['level'] == 0:
                 continue
+
             (bytepos, bytesize) = (int(info['top_bitpos']/8), int(info['size_bits']/8))
             fend = bytepos + bytesize - 1
-            #print("checking {}+{} of type {}".format(bytepos, bytesize, info['node_type']))
             if fend < begin:
                 continue
             if bytepos > end:
                 continue
+
             name_of_type = info.get('name') or type_to_string(info['type'])
             if info['node_type'] == TraversalNodeType.HOLE:
                 name_of_type += " in " + (info['parent'] or {}).get('name', 'struct')
