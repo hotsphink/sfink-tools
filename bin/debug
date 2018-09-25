@@ -11,7 +11,7 @@
 #  - For shell scripts, assume we're running firefox (yeah, nice and
 #    general, huh?) and use the -g flag
 #  - If expicitly requested via --js, the debugger will be jorendb. But by default,
-#    running a JS file will use gdb.
+#    running a JS file with the JS shell will use gdb.
 #
 # The command given may be a regular command in $PATH, a shell alias,
 # or even a shell function (of a very restricted and undocumented syntax).
@@ -39,10 +39,7 @@ if ($ENV{DEBUG_EDITOR}) {
   @EMACS = $ENV{DEBUG_EDITOR} =~ /(\".*?\"|\'.*?\'|\S+)/g;
 }
 
-# my $gdb = "/home/sfink/src/gdb-CVS/gdb/gdb";
-# my $gdb = "/home/sfink/src/archer/gdb/gdb";
 my $gdb = "gdb";
-# $gdb = "gdb" if (! -x $gdb);
 
 my $PERL = "/usr/bin/perl";
 $PERL = "perl" if (! -x $PERL);
@@ -87,9 +84,9 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
     $rrpid = shift(@ARGV);
   } elsif ($_ =~ /--rrpid=(.*)/) {
     $rrpid = $1;
-  } elsif ($_ eq '--rrargs') {
+  } elsif ($_ eq '--rrargs' || $_ eq '--rr') {
     $rr_args = shift(@ARGV);
-  } elsif ($_ =~ /--rrargs=(.*)/) {
+  } elsif ($_ =~ /--rr(?:args)?=(.*)/) {
     $rr_args = $1;
   } elsif ($_ eq '--js' || $_ eq '-j') {
     die if $debugger;
@@ -133,7 +130,7 @@ Usage: debug [env=VAL...] [options] <program> args...
    --rrpid=PID      The pid to debug (default is to guess; crashes are preferred)
                     The pid can also be NAME, which will be matched against the
                     basename of commands
-   --rrargs='args'  Additional arguments to pass to 'rr replay'.
+   --rr='args'      Additional arguments to pass to 'rr replay'.
    --js[=PATH]      Jorendb mode, with optional PATH to jorendb.js
    --check PATTERN  Run the command and scan its output for PATTERN. If it is
                     found, kill emacs and continue. This is useful when you
