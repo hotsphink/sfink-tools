@@ -9,11 +9,6 @@ end
 #  python reload($arg0)
 #end
 
-# from 10 20 'p strlen("%s")'
-def pyrange
-  python for x in xrange($arg0, $arg1): gdb.execute($arg2 % (x,))
-end
-
 def loudstep
   disp/i $pc
   set $i = 0
