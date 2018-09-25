@@ -23,3 +23,15 @@ end
 def getheap
   p *(js::gc::ChunkLocation*)(((uint64_t)$arg0) & ~js::gc::ChunkMask | js::gc::ChunkLocationOffset)
 end
+
+def markinfo
+  p js::debug::GetMarkInfo((js::gc::Cell*)$arg0)
+end
+
+def proxyhandler
+  p ((js::detail::ProxyDataLayout)((void**)$arg0)[2]).handler
+end
+
+def ccwtarget
+  p js::UncheckedUnwrapWithoutExpose((JSObject*)$arg0)
+end
