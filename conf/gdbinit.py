@@ -43,6 +43,58 @@ Repeat()
 
 ######################################################################
 
+# pdo expr
+# Example: pdo p data[[i for i in range(10,20)]].key
+# Example: pdo p {i for i in range(10,20)}*{j for j in [1, -1]}
+# Special forms:
+#  10..20 - equivalent to [i for i in range(10, 20)]
+class PDo(gdb.Command):
+    """Repeat gdb command, substituted with Python list expressions"""
+    def __init__(self):
+        gdb.Command.__init__(self, "pdo", gdb.COMMAND_USER)
+
+    def commands(self, cmd):
+        inbrackets = True
+        m = re.match(r'^(.*?)\[\[(.*?)\]\](.*)$', cmd)
+        if not m:
+            m = re.match(r'^(.*?)\{(.*?)\}(.*)$', cmd)
+            if not m:
+                yield(cmd)
+                return
+            inbrackets = False
+        (pre, expr, post) = m.groups()
+
+        values = None
+        m = re.match(r'(.*?)\.\.(.*)', expr)
+        if m:
+            start, limit = int(m.group(1)), int(m.group(2))
+            values = range(start, limit)
+        else:
+            values = eval('[' + expr + ']')
+
+        for v in values:
+            if inbrackets:
+                yield from self.commands(pre + '[' + str(v) + ']' + post)
+            else:
+                yield from self.commands(pre + str(v) + post)
+
+    def invoke(self, arg, from_tty):
+        opts = ""
+        if arg.startswith("/"):
+            rest = arg.index(" ")
+            opts = arg[1:rest]
+            arg = arg[rest+1:]
+        verbose = "v" in opts
+
+        for cmd in self.commands(arg):
+            if verbose:
+                print("(pdo) " + cmd)
+            gdb.execute(cmd)
+
+PDo()
+
+######################################################################
+
 # reappend "stem" "tail" [limit]
 # Example: reappend "p obj->shape" "->parent" 3
 class RepeatedAppend(gdb.Command):
