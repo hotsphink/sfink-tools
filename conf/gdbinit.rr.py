@@ -148,6 +148,9 @@ class PythonLog(gdb.Command):
 
         self.Replacements = {}
         for lineno, line in enumerate(self.LogFile):
+            if not line.startswith("! "):
+                continue
+            line = line[2:]
             m = re.match(r'^s/((?:[^\\]|\\.)+)/(.*?)/\w+$', line)
             if m:
                 self.Replacements[m.group(1)] = m.group(2)
@@ -257,7 +260,7 @@ class PythonLog(gdb.Command):
     def replace(self, arg):
         # TODO: validate syntax
         orig, new = arg.split(' ', 1)
-        self.LogFile.write("s/{orig}/{new}/g\n".format(orig=orig, new=new))
+        self.LogFile.write("! s/{orig}/{new}/g\n".format(orig=orig, new=new))
         print("Replacing all '{orig}' with '{new}'".format(orig=orig, new=new))
         self.update_rep_pattern()
 
@@ -275,7 +278,7 @@ class PythonLog(gdb.Command):
 
         messages = []
         for lineno, line in enumerate(self.LogFile):
-            if line.startswith("s/"):
+            if line.startswith("! "):
                 continue
             line = line.strip()
 
