@@ -207,6 +207,9 @@ class PythonLog(gdb.Command):
             if '-sorted'.startswith(opt):
                 # log -s : same as log with no options, display log in execution order.
                 self.dump(sort=True)
+            elif '-verbose'.startswith(opt):
+                # log -v : display log in execution order, with replacements and originals
+                self.dump(sort=True, replace=True, verbose=True)
             elif '-dump'.startswith(opt):
                 # log -d : display log in entry order
                 self.dump()
@@ -235,8 +238,8 @@ class PythonLog(gdb.Command):
         self.LogFile.write("%s %s\n" % (now(), out))
 
         # If any substitutions were made, display the resulting log message.
-        out = self.apply_replacements(out)
         if out != arg:
+        out = self.apply_replacements(out, verbose=False)
             print(out)
 
     def process_message(self, message):
@@ -252,7 +255,11 @@ class PythonLog(gdb.Command):
         # Let gdb handle other $ vars.
         return re.sub(r'(\$\w+)', lambda m: self.evaluate(m.group(1)), out)
 
-    def apply_replacements(self, message):
+    def apply_replacements(self, message, verbose=False):
+        def get_rep(text):
+            rep = self.Replacements[text]
+            return "%s (%s)" % (text, rep) if verbose else rep
+
         if self.RepPattern is not None:
             return re.sub(self.RepPattern, lambda m: self.Replacements[m.group(0)], message)
         return message
@@ -264,7 +271,7 @@ class PythonLog(gdb.Command):
         print("Replacing all '{orig}' with '{new}'".format(orig=orig, new=new))
         self.update_rep_pattern()
 
-    def dump(self, sort=False, replace=True):
+    def dump(self, sort=False, replace=True, verbose=False):
         if not self.LogFile:
             print("No log file open")
             return
@@ -286,7 +293,7 @@ class PythonLog(gdb.Command):
             (event, ticks) = timestamp.split("/", 1)
 
             if replace:
-                line = self.apply_replacements(line)
+                line = self.apply_replacements(line, verbose)
 
             messages.append((int(event), int(ticks), lineno, line))
 
