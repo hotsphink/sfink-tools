@@ -185,7 +185,7 @@ class PythonLog(gdb.Command):
         BORING_TYPES = ("int", "unsigned int", "uint32_t", "int32_t", "uint64_t", "int64_t")
         if ts in BORING_TYPES:
             return s
-        return s
+        return "(%s) %s" % (ts, s)
 
     def thread_id(self, fs_base=None):
         '''Return the thread id in the format "T<num>" for the given fs_base, or the current value of that register if not given. This is a hack that is not guaranteed to work -- when rr starts a new process under the hood, gdb may shift the thread numbers around. This is a heuristic to grab an id the first time a thread is encountered; there is no guarantee that it won't map multiple threads to the same ID. (That could be fixed, but I haven't bothered yet.)'''
