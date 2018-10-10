@@ -133,30 +133,22 @@ class PythonLog(gdb.Command):
     def __init__(self):
         gdb.Command.__init__(self, "log", gdb.COMMAND_USER)
         self.LogFile = None
-        self.Replacements = {}
-        self.RepPattern = None
         self.ThreadTable = {}
-
-    def update_rep_pattern(self):
-        self.RepPattern = None
-        if self.Replacements.keys():
-            self.RepPattern = re.compile('|'.join(self.Replacements.keys()))
 
     def scan_log(self):
         pos = self.LogFile.tell()
         self.LogFile.seek(0)
 
-        self.Replacements = {}
+        labels.clear()
         for lineno, line in enumerate(self.LogFile):
             if not line.startswith("! "):
                 continue
             line = line[2:]
             m = re.match(r'^s/((?:[^\\]|\\.)+)/(.*?)/\w+$', line)
             if m:
-                self.Replacements[m.group(1)] = m.group(2)
+                labels.label(m.group(1), m.group(2))
 
         self.LogFile.seek(pos)
-        self.update_rep_pattern()
 
     def openlog(self, filename, quiet=False):
         self.LogFile = open(filename, "a+")
@@ -170,22 +162,6 @@ class PythonLog(gdb.Command):
     def default_log_filename(self):
         tid = gdb.selected_thread().ptid[0]
         return os.path.join(DEFAULT_LOG_DIR, "rr-session-%s.log" % (tid,))
-
-    def evaluate(self, expr):
-        v = gdb.parse_and_eval(expr)
-        s = str(v)
-        t = v.type
-        ts = str(t)
-
-        # Ugh. In some situations, the value will be prefixed with its type,
-        # and others it will not. Enough will not that I wanted to add it in.
-
-        if s.startswith("("):
-            return s
-        BORING_TYPES = ("int", "unsigned int", "uint32_t", "int32_t", "uint64_t", "int64_t")
-        if ts in BORING_TYPES:
-            return s
-        return "(%s) %s" % (ts, s)
 
     def thread_id(self, fs_base=None):
         '''Return the thread id in the format "T<num>" for the given fs_base, or the current value of that register if not given. This is a hack that is not guaranteed to work -- when rr starts a new process under the hood, gdb may shift the thread numbers around. This is a heuristic to grab an id the first time a thread is encountered; there is no guarantee that it won't map multiple threads to the same ID. (That could be fixed, but I haven't bothered yet.)'''
@@ -253,30 +229,23 @@ class PythonLog(gdb.Command):
         # Replace {expr} with the result of evaluating the (gdb) expression expr.
         # Allow one level of curly bracket nesting within expr.
         out = re.sub(r'\{((?:\{[^\}]*\}|\\\}|[^\}])*)\}',
-                     lambda m: self.evaluate(m.group(1)),
+                     lambda m: util.evaluate(m.group(1)),
                      message)
 
         # Replace $thread with "T3", where 3 is the gdb's notion of thread number.
         out = out.replace("$thread", self.thread_id())
 
         # Let gdb handle other $ vars.
-        return re.sub(r'(\$\w+)', lambda m: self.evaluate(m.group(1)), out)
+        return re.sub(r'(\$\w+)', lambda m: util.evaluate(m.group(1)), out)
 
     def apply_replacements(self, message, verbose=False):
-        def get_rep(text):
-            rep = self.Replacements[text]
-            return "%s (%s)" % (text, rep) if verbose else rep
-
-        if self.RepPattern is not None:
-            return re.sub(self.RepPattern, lambda m: get_rep(m.group(0)), message)
-        return message
+        return re.sub(labels.pattern(), lambda m: labels.get(m.group(0)), message)
 
     def replace(self, arg):
         # TODO: validate syntax
         orig, new = arg.split(' ', 1)
         self.LogFile.write("! s/{orig}/{new}/g\n".format(orig=orig, new=new))
         print("Replacing all '{orig}' with '{new}'".format(orig=orig, new=new))
-        self.update_rep_pattern()
 
     def dump(self, sort=False, replace=True, verbose=False):
         if not self.LogFile:
@@ -285,7 +254,7 @@ class PythonLog(gdb.Command):
 
         self.scan_log()
         if replace:
-            for orig, new in self.Replacements.items():
+            for orig, new in labels.items():
                 print("[[Replacing '{orig}' with '{new}']]".format(orig=orig, new=new))
 
         self.LogFile.seek(0)
