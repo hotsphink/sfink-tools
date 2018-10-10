@@ -197,6 +197,7 @@ class PythonLog(gdb.Command):
         if self.LogFile is None:
             self.openlog(self.default_log_filename())
 
+        print_only = False
         if arg.startswith('-'):
             opt = arg
             if ' ' in opt:
@@ -219,12 +220,17 @@ class PythonLog(gdb.Command):
             elif '-edit'.startswith(opt):
                 # log -e : edit the log in $EDITOR
                 self.edit()
+            elif '-print-only'.startswith(opt):
+                # log -p : display the log message without logging it permanently
+                print_only = True
             elif '-replace'.startswith(opt):
                 # log -r ORIG NEW : replace occurrences of ORIG in the log with NEW
                 self.replace(arg)
             else:
                 print("unknown log option")
-            return
+
+            if not print_only:
+                return
 
         if not arg:
             self.dump(sort=True)
@@ -235,11 +241,12 @@ class PythonLog(gdb.Command):
 
         out = self.process_message(arg)
 
-        self.LogFile.write("%s %s\n" % (now(), out))
+        if not print_only:
+            self.LogFile.write("%s %s\n" % (now(), out))
 
         # If any substitutions were made, display the resulting log message.
-        if out != arg:
         out = self.apply_replacements(out, verbose=False)
+        if print_only or out != arg:
             print(out)
 
     def process_message(self, message):
@@ -261,7 +268,7 @@ class PythonLog(gdb.Command):
             return "%s (%s)" % (text, rep) if verbose else rep
 
         if self.RepPattern is not None:
-            return re.sub(self.RepPattern, lambda m: self.Replacements[m.group(0)], message)
+            return re.sub(self.RepPattern, lambda m: get_rep(m.group(0)), message)
         return message
 
     def replace(self, arg):
