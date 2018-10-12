@@ -136,6 +136,7 @@ class PythonLog(gdb.Command):
         self.ThreadTable = {}
 
     def scan_log(self):
+        old = labels.copy()
         pos = self.LogFile.tell()
         self.LogFile.seek(0)
 
@@ -149,6 +150,10 @@ class PythonLog(gdb.Command):
                 labels.label(m.group(1), m.group(2))
 
         self.LogFile.seek(pos)
+
+        for k, v in old.items():
+            if k not in labels:
+                self.replace(k, v)
 
     def openlog(self, filename, quiet=False):
         self.LogFile = open(filename, "a+")
@@ -199,9 +204,6 @@ class PythonLog(gdb.Command):
             elif '-print-only'.startswith(opt):
                 # log -p : display the log message without logging it permanently
                 print_only = True
-            elif '-replace'.startswith(opt):
-                # log -r ORIG NEW : replace occurrences of ORIG in the log with NEW
-                self.replace(arg)
             else:
                 print("unknown log option")
 
@@ -218,10 +220,11 @@ class PythonLog(gdb.Command):
         out = self.process_message(arg)
 
         if not print_only:
+            self.sync_added()
             self.LogFile.write("%s %s\n" % (now(), out))
 
         # If any substitutions were made, display the resulting log message.
-        out = self.apply_replacements(out, verbose=False)
+        out = labels.apply(out, verbose=False)
         if print_only or out != arg:
             print(out)
 
@@ -238,14 +241,8 @@ class PythonLog(gdb.Command):
         # Let gdb handle other $ vars.
         return re.sub(r'(\$\w+)', lambda m: util.evaluate(m.group(1)), out)
 
-    def apply_replacements(self, message, verbose=False):
-        return re.sub(labels.pattern(), lambda m: labels.get(m.group(0)), message)
-
-    def replace(self, arg):
-        # TODO: validate syntax
-        orig, new = arg.split(' ', 1)
-        self.LogFile.write("! s/{orig}/{new}/g\n".format(orig=orig, new=new))
-        print("Replacing all '{orig}' with '{new}'".format(orig=orig, new=new))
+    def replace(self, name, value):
+        self.LogFile.write("! s/{orig}/{new}/g\n".format(orig=name, new=value))
 
     def dump(self, sort=False, replace=True, verbose=False):
         if not self.LogFile:
@@ -269,7 +266,7 @@ class PythonLog(gdb.Command):
             (event, ticks) = timestamp.split("/", 1)
 
             if replace:
-                line = self.apply_replacements(line, verbose)
+                line = labels.apply(line, verbose)
 
             messages.append((int(event), int(ticks), lineno, line))
 
@@ -288,12 +285,22 @@ class PythonLog(gdb.Command):
             for message in messages:
                 print(message[3])
 
+    def sync_added(self):
+        for k in labels.added:
+            v = labels.get(k)
+            if v is not None:
+                self.replace(k, v)
+
+        # FIXME: This is a global change; you can't have two users.
+        labels.added = []
+
     def edit(self):
         if not self.LogFile:
             print("No log file open")
             return
 
         filename = self.LogFile.name
+        self.sync_added()
         self.LogFile.close()
         os.system(os.environ.get('EDITOR', 'emacs') + " " + filename)
         self.openlog(filename, quiet=True)

@@ -101,12 +101,16 @@ class Labels(dict):
     def __init__(self):
         self.dirty = True
         self.pattern()
+        self.added = []
 
     def label(self, token, name):
         self[token] = name
 
     def __setitem__(self, key, value):
+        if dict.get(self, key) == value:
+            return
         dict.__setitem__(self, key, value)
+        self.added.append(key)
         self.dirty = True
 
     def __delitem__(self, key):
@@ -116,6 +120,11 @@ class Labels(dict):
     def get(self, text, verbose=False):
         rep = self[text]
         return "%s [[%s]]" % (text, rep) if verbose else rep
+
+    def copy(self):
+        c = Labels()
+        c.update(self)
+        return c
 
     def pattern(self):
         if self.dirty:
@@ -134,6 +143,45 @@ class Labels(dict):
         return re.sub(self.pattern(), lambda m: self.get(m.group(0), verbose), text)
 
 labels = Labels()
+
+class LabelCmd(gdb.Command):
+    def __init__(self, name):
+        super(LabelCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_NONE)
+
+    def invoke(self, arg, from_tty):
+        if len(arg) == 0:
+            self.show_all_labels()
+        elif ' ' in arg:
+            pos = arg.index(' ')
+            self.set_label(arg[0:pos], arg[pos+1:])
+        elif '=' in arg:
+            pos = arg.index('=')
+            self.set_label(arg[0:pos], arg[pos+1:])
+        else:
+            self.get_label(arg)
+
+    def get_label(self, name):
+        if name in labels:
+            gdb.write(labels[name] + "\n")
+        else:
+            gdb.write("Label not found\n")
+
+    def set_label(self, name, value):
+        if re.fullmatch(r'0x[0-9a-fA-F]+', name):
+            labels[name] = value
+        else:
+            v = gdb.parse_and_eval(name)
+            m = re.search(r'0x[0-9a-fA-F]+', str(v))
+            if m:
+                labels[m.group(0)] = value
+            else:
+                gdb.write("No labelable value found in " + str(v) + "\n")
+
+    def show_all_labels(self):
+        for name, value in labels.items():
+            gdb.write("{} = {}\n".format(name, value))
+
+LabelCmd('label')
 
 class util:
     def evaluate(expr, replace=True):
@@ -202,17 +250,15 @@ class PrintCmd(gdb.Command):
         verbose = 'v' in fmt
         raw = 'r' in fmt
         fmt = fmt.replace('v', '')
+        fmtStr = "/" + fmt if fmt else ''
 
         for e in self.enumerateExprs(arg):
+            # in gdb 8.2, this could be done with gdb.set_convenience_variable.
             v = gdb.parse_and_eval(e)
             valueHolderHack.value = v
-            fmtStr = "/" + fmt if fmt else ''
             output = gdb.execute("print" + fmtStr + " $__lastval()", from_tty, to_string=True)
-
-            raw = 'r' in fmt
             if not raw:
                 output = labels.apply(output, verbose)
-
             gdb.write(output)
 
 PrintCmd('p')
