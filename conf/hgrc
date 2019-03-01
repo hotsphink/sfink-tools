@@ -5,6 +5,7 @@ merge = kdiff3
 #verbose = True
 #debug = True
 interface = curses
+interface.histedit = curses
 mergemarkers = detailed
 
 # Change the default of various commands. See https://www.mercurial-scm.org/wiki/FriendlyHGPlan
@@ -54,6 +55,12 @@ histedit =
 shelve =
 hggit = ~/lib/hg/hg-git/hggit
 show =
+absorb =
+
+# Additional functionality
+fsmonitor =
+blackbox =
+journal =
 
 # Nonstandard additional commands
 qbackout = ~/lib/version-control-tools/hgext/qbackout/
@@ -62,15 +69,12 @@ mqext = ~/lib/version-control-tools/hgext/mqext
 #crecord = ~/lib/hg/crecord-upstream/crecord
 evolve = ~/lib/hg/evolve/hgext3rd/evolve
 topic = ~/lib/hg/evolve/hgext3rd/topic
-
-# breaks hg help --keyword foo
-#hgsubversion = ~/lib/hg/hgsubversion/hgsubversion
+hgsubversion = ~/lib/hg/hgsubversion/hgsubversion
 
 # Facebook stuff
 # smartlog = ~/lib/hg/hg-experimental/hgext3rd/smartlog.py
 # githelp = ~/lib/hg/hg-experimental/hgext3rd/githelp.py
-chistedit = ~/lib/hg/hg-experimental/hgext3rd/chistedit.py
-absorb = ~/lib/hg/hg-experimental/hgext3rd/absorb/
+#chistedit = ~/lib/hg/hg-experimental/hgext3rd/chistedit.py
 
 # Mozilla/bugzilla/tryserver integration
 #qimportbz = ~/.mozbuild/version-control-tools/hgext/qimportbz
@@ -85,10 +89,8 @@ mozext = ~/lib/version-control-tools/hgext/mozext/
 # firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
 firefoxtree = ~/lib/version-control-tools/hgext/firefoxtree
 
+format-source = ~/.mozbuild/version-control-tools/hgext/format-source
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
-fsmonitor =
-blackbox =
-journal =
 
 [alias]
 ##################### aliases I actually use #####################
@@ -97,32 +99,23 @@ ts = treestatus
 view = qshow
 s = qseries -v
 
-# qedit: bring up a text editor on the patch series file, marking applied
-# patches as unrearrangable
-
-qedit = !S=$(hg root --mq)/series; cp $S{,.bak} && perl -pale 'BEGIN { chomp(@a = qx(hg qapplied -q)); die if $?; @a{@a}=(); }; s/^/# (applied) / if exists $a{$F[0]}' $S > $S.new && ${EDITOR-vim} $S.new && sed -e 's/^# .applied. //' $S.new > $S
-
 ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(::$r and not public())" --template list
 sl = ls
 
 lg = log --template list --graph
-
-b2t = topics $1 -r 'allbook($1)'
-
-lsbranch = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents((::$r + descendants($r)) and not public())" --template list
-
-simple_lls = !$HG ls $1 | tac | perl -lne 'print ".~$. $_"' | tac
-lls = !$HG ls $1 | tac | perl -lne '$n = $. - 1; print sprintf "%-4s %s", $. < 5 ? "." . "^" x $n : ".~$n", " $_"' | tac
 
 lsb = log -r 'bookmark() and not public()' -T '{pad("{bookmarks}", 30)} {desc|firstline}\n'
 
 lst = topics --age
 
 che = chistedit -r 'not public() and ancestors(.)'
+he = histedit -r 'not public() and ancestors(.)'
 
 advance = !while $HG next --evolve; do :; done
 
 geckoversion = !$HG cat -r $1 'path:config/milestone.txt' | tail -1
+
+lsbranch = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents((::$r + descendants($r)) and not public())" --template list
 
 ######### aliases I would use if I remembered they existed #######
 
@@ -132,7 +125,34 @@ recommit = !$HG uncommit --all && $HG amend -i
 
 interdiff = !set -x; $HG export --hidden $1 > /tmp/left.diff; $HG export --hidden $2 > /tmp/right.diff; interdiff /tmp/left.diff /tmp/right.diff
 
+###### aliases for scenarios that I don't run into anymore ######
+
+# qedit: bring up a text editor on the patch series file, marking applied
+# patches as unrearrangable
+
+qedit = !S=$(hg root --mq)/series; cp $S{,.bak} && perl -pale 'BEGIN { chomp(@a = qx(hg qapplied -q)); die if $?; @a{@a}=(); }; s/^/# (applied) / if exists $a{$F[0]}' $S > $S.new && ${EDITOR-vim} $S.new && sed -e 's/^# .applied. //' $S.new > $S
+
+b2t = topics $1 -r 'allbook($1)'
+
+simple_lls = !$HG ls $1 | tac | perl -lne 'print ".~$. $_"' | tac
+lls = !$HG ls $1 | tac | perl -lne '$n = $. - 1; print sprintf "%-4s %s", $. < 5 ? "." . "^" x $n : ".~$n", " $_"' | tac
+
 ############### aliases I keep around to learn from ##############
+
+# Example invocation:
+#    hg git-delete-remote default/bad-branch
+gitremotedelete = ! \
+    remote=`echo $HG_ARGS | sed 's_/.*__' | sed 's_.* __'`;
+    branch=`echo $HG_ARGS | sed 's_.*/__'`;
+    remote_url=$($HG paths $remote | sed 's_^git+ssh://__');
+    git_dir=$($HG root)/.hg/git;
+    # Delete the remote branch
+    git --git-dir=$git_dir push $remote_url :$branch;
+    # Delete local ref to remote branch
+    git --git-dir=$git_dir branch -rd $remote/$branch;
+    # Delete local branch
+    git --git-dir=$git_dir branch -D $branch
+    echo "Don't forget to run "'`'"hg bookmark -d $branch"'`'
 
 # For Callek, really. I use em.
 workon = !bash -c 'cd $($HG root) && $EDITOR $($HG status -n -m -a ${1+--change $1})' -- "$@"
@@ -156,8 +176,6 @@ msg = log -r . --template '{desc}\n'
 
 spew = !$HG export -r 'not public()' | perl -lne '$$r ||= "none"; $$r = $$1 if /^# Node ID (.{12})/; print "$$r $$_"'
 
-he = histedit -r 'not public() and ancestors(.)'
-
 # wip = log --graph --rev=wip --template=wip
 
 # Usage: hg enbug <desc> # desc should be oneword
@@ -170,6 +188,7 @@ enbug = !msg=$($HG log -r . --template '{desc}\n'); echo "$msg" | grep -q "^Bug"
 yay = !msg="$($HG log -r . --template '{desc}\n'), r=$1"; $HG commit --amend -m "$msg"; echo "$msg"
 
 reb = rebase -d rebase_default
+wip = log --graph --rev=wip --template=wip
 
 [revsetalias]
 with_parents(s) = parents(s) or s
@@ -177,7 +196,7 @@ with_parents(s) = parents(s) or s
 npkw($1) = not public() and keyword($1)
 
 whichbook($1) = last(descendants($1))
-wip = (parents(not public()) or not public() or . or (head() and branch(default))) and (not obsolete() or unstable()^) and not closed() and not (fxheads() - date(-90))
+wip = (parents(not public()) or not public() or . or (head() and branch(default))) and (not obsolete() or orphan()^) and not closed() and not (fxheads() - date(-90))
 
 # Where did this come from?
 rbhead = heads(descendants((parents(ancestor(ancestors(.) and not public())))) and public())
@@ -228,7 +247,7 @@ cacerts = /etc/pki/tls/certs/ca-bundle.crt
 [merge-tools]
 #kdiff3.args = --auto --L1 common --L2 pulled --L3 mq $base $local $other -o $output -cs SyncMode=1
 kdiff3.executable = ~/bin/kdiff3-wrapper
-kdiff3.args = --auto --L1 prepatch --L2 tochange --L3 postpatch $base $local $other -o $output -cs SyncMode=1
+kdiff3.args = --auto --L1 prepatch --L2 tochange --L3 postpatch $base $local $other -o $output --cs SyncMode=1
 kdiff3.gui = True
 kdiff3.premerge = True
 kdiff3.binary = False
@@ -239,12 +258,14 @@ username = sphink@gmail.com
 # apikey in ~/.config/hg/hgrc
 
 [bzexport]
+submit-method = moz-phab
+
 update-patch = True
 rename-patch = True
 unified = 10
 
 # Testing
-#skip-bugzilla-writes = True
+# dry-run = True
 
 # Testing
 #api_server = https://api-dev.bugzilla.mozilla.org/test/latest/
@@ -281,10 +302,10 @@ delay = 1
 pager = LESS='RF' less
 
 [hostsecurity]
-hg.mozilla.org:fingerprints = sha256:8E:AD:F7:6A:EB:44:06:15:ED:F3:E4:69:A6:64:60:37:2D:FF:98:88:37:BF:D7:B8:40:84:01:48:9C:26:CE:D9, sha256:81:3D:75:69:E3:76:F8:5B:31:1E:92:C9:CF:56:23:F6:4B:C2:82:77:E3:63:FB:7F:28:65:D0:9A:88:FB:BE:B7
+hg.mozilla.org:fingerprints = sha256:17:38:aa:92:0b:84:3e:aa:8e:52:52:e9:4c:2f:98:a9:0e:bf:6c:3e:e9:15:ff:0a:29:80:f7:06:02:5b:e8:48
 
 [templates]
-wip = '{label("wip.branch", if(branches,"{branches} "))}{label(ifeq(graphnode,"x","wip.obsolete","wip.{phase}"),"{rev}:{node|short}")}{label("wip.user", " {author|user}")}{label("wip.tags", if(tags," {tags}"))}{label("wip.tags", if(fxheads," {fxheads}"))}{if(bookmarks," ")}{label("wip.bookmarks", if(bookmarks,bookmarks))}{label(ifcontains(rev, revset("parents()"), "wip.here"), " {desc|firstline}")}\n'
+wip = '{label("wip.branch", if(branches,"{branches} "))}{label(ifeq(graphnode,"x","wip.obsolete","wip.{phase}"),"{rev}:{node|short}")}{label("wip.user", " {author|user}")}{label("wip.tags", if(tags," {tags}"))}{label("wip.tags", if(fxheads," {fxheads}"))}{if(bookmarks," ")}{label("wip.bookmarks", if(bookmarks,bookmarks))}{label(ifcontains(rev, revset("parents()"), "wip.here"), " {desc|firstline}")}'
 
 list = "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', topic)} {label('tags.normal', bookmarks)}\n"
 
@@ -330,7 +351,7 @@ wip.user = magenta
 
 [rebase]
 # Not sure if this is the correct format
-experimantal.inmemory = true
+experimental.inmemory = true
 
 [experimental]
 graphshorten = true
@@ -338,3 +359,8 @@ worddiff = true
 
 [hggit]
 usephases = True
+
+[format-source]
+clang-format = /home/sfink/src/mozilla/mach clang-format -assume-filename=$HG_FILENAME -p
+clang-format:configpaths = .clang-format, .clang-format-ignore
+clang-format:fileext = .cpp, .c, .h
