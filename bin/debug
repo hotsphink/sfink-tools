@@ -57,6 +57,7 @@ my $debugger;
 my $jorendb;
 my $rrpid;
 my $rr_args = '';
+my $verbose;
 
 # Ugh... custom arg handling because this script is supposed to be a
 # transparent wrapper, and so can't use a standard getopt-ish handler.
@@ -101,6 +102,8 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
     $opt{pattern} = $1;
   } elsif ($_ eq '--version') {
     print "Version $VERSION\n";
+  } elsif (($_ eq '-v') || ($_ eq '--verbose')) {
+      $verbose = 1;
   } elsif ($_ eq '-h' || $_ eq '--help') {
     usage();
   } else {
@@ -172,9 +175,21 @@ sub choose_pid_for_rr {
 
     return $pattern if defined($pattern) && $pattern =~ /^\d+$/;
 
-    # Find a process from the last run that crashed. Use the first one that
-    # exited with a signal, falling back to the first nonzero exit code,
-    # falling back to the last process.
+    # Find a process from the recording to debug. If a pattern was given,
+    # return the first one whose base command or arguments match that pattern.
+    # Otherwise, use:
+    #
+    # - the first one that exited with a signal, falling back to
+    # - the first erroring descendant process, falling back to
+    # - the last process.
+    #
+    # That middle one requires more explanation. The idea is that something
+    # errored out. If there was a sequence of commands, you want when the
+    # trouble started, so you choose the first process that errored. But that
+    # process may be propagating an error from something it ran, so don't just
+    # pick the first erroring process, pick the first one of its children that
+    # errored (if any; if none did, use the erroring parent). Recursively.
+    #
     open(my $fh, "rr ps $rr_args |");
     my @info;
     while(<$fh>) {
@@ -182,6 +197,7 @@ sub choose_pid_for_rr {
         push @info, [ split(/\t/) ];
     }
     die "rr ps format changed!" if shift(@info)->[2] ne 'EXIT';
+
     if (defined $pattern) {
         foreach (@info) {
             my @cmd = split(/ /, $_->[3]);
@@ -190,17 +206,43 @@ sub choose_pid_for_rr {
         }
         return;
     }
+
     foreach (@info) {
         my $exit = $_->[2];
         next if $exit eq 'none';
         return $_->[0] if $exit < 0; # Exited with signal
     }
+
     foreach (@info) {
         return $_->[0] if $_->[2] == 11; # SIGSEGV gets translated into this somehow
     }
+
+    my $first_error_pid;
+    my %status;
+    my %children;
     foreach (@info) {
-        return $_->[0] if $_->[2]; # Exited with error
+        my ($pid, $ppid, $status) = @$_;
+        $status{$pid} = $status;
+        push @{ $children{$ppid} }, $pid;
+        $first_error_pid ||= $pid if $status; # Exited with error
     }
+
+    FIND_DESCENDANT:
+    while ($first_error_pid) {
+        print "scanning pid $first_error_pid\n"
+            if $verbose;
+        for my $kid (@{ $children{$first_error_pid} }) {
+            if ($status{$kid}) {
+                $first_error_pid = $kid;
+                next FIND_DESCENDANT;
+            }
+        }
+        print "using pid $first_error_pid status $status{$first_error_pid} as first, deepest erroring descendant\n"
+            if $verbose;
+        return $first_error_pid;
+    }
+
+    # Last process in the trace.
     return $info[-1][0];
 }
 
