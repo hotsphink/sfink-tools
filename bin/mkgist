@@ -1,0 +1,94 @@
+#!/usr/bin/python3
+
+import argparse
+import json
+import os
+import requests
+import sys
+
+from os.path import join, basename, dirname, exists
+
+# Sample ~/.config/mkgist.json file:
+# {
+#     "version": 1,
+#     "authtoken": "feeddeadbeef2daddeadbeefdeaddeadbeefdad1"
+# }
+
+parser = argparse.ArgumentParser(description = 'Create or edit a gist')
+parser.add_argument('-u', '--url', default="https://api.github.com/gists",
+                    help='github gist api url')
+parser.add_argument('--token', type=str,
+                    help='auth token')
+parser.add_argument('-f', '--filename', default='text.txt',
+                    help='name of file to create')
+parser.add_argument('-d', '--description', default='mkgist-created gist',
+                    help='description of gist')
+parser.add_argument('--update', default='',
+                    help='update an existing gist instead of creating a new one')
+parser.add_argument('-a', '--all', action='store_true',
+                    help='output all URLs')
+parser.add_argument('data', nargs='*',
+                    help='actual data to post')
+
+args = parser.parse_args()
+
+cfgpath = os.path.expanduser("~/.config/mkgist.json")
+with open(cfgpath) as fh:
+    cfg = json.load(fh)
+    assert cfg['version'] == 1
+
+if args.token is None:
+    args.token = cfg['authtoken']
+
+if len(args.data) == 1 and exists(args.data[0]):
+    print("This script takes the data on the command line or stdin. You passed a filename. Don't do that. I'll let it go this time.")
+    with open(args.data[0], "r") as fh:
+        args.data = [ fh.read() ]
+    if args.filename == 'text.txt':
+        args.filename = args.data[0]
+
+if not args.data:
+    print("Reading data from stdin")
+    args.data = [ sys.stdin.read() ]
+
+payload = {
+    "description": args.description,
+    "public": True,
+    "files": {
+        args.filename: {
+            "content": ' '.join(args.data)
+        },
+    }
+}
+
+auth = {'Authorization': 'bearer ' + args.token}
+
+if args.update:
+    print("Updating gist")
+    r = requests.patch(args.url + '/' + args.update, headers=auth, data=json.dumps(payload))
+else:
+    print("Posting gist")
+    r = requests.post(args.url, headers=auth, data=json.dumps(payload))
+obj = r.json()
+with open("/tmp/mkgist.raw", "w") as fh:
+    fh.write(r.text)
+
+raw_url = obj['files'][args.filename]['raw_url']
+short_raw = join(dirname(dirname(raw_url)), basename(raw_url))
+
+if args.all:
+    fields = obj.copy()
+    fields.update(obj['files'][args.filename])
+    fields['short_raw'] = short_raw
+    fields['git_push_url'] = fields['git_pull_url'].replace('https://', 'ssh://git@')
+    print('''\
+short    : {short_raw}
+html     : {html_url}
+json     : {url}
+pull     : {git_pull_url}
+push     : {git_push_url}
+comments : {comments_url}
+raw      : {raw_url}
+    '''.format(**fields))
+else:
+    print(short_raw)
