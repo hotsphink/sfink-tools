@@ -207,26 +207,33 @@ sub choose_pid_for_rr {
         return;
     }
 
-    foreach (@info) {
-        my $exit = $_->[2];
-        next if $exit eq 'none';
-        return $_->[0] if $exit < 0; # Exited with signal
-    }
-
-    foreach (@info) {
-        return $_->[0] if $_->[2] == 11; # SIGSEGV gets translated into this somehow
-    }
-
     my $first_error_pid;
     my %status;
     my %children;
+    my @sigs;
     foreach (@info) {
         my ($pid, $ppid, $status) = @$_;
+        $status = -11 if $status eq 11; # SIGSEGV gets translated to this sometimes??
+        print "pid $pid exited with status $status\n"
+            if $verbose;
+        push @sigs, $_ if $status ne 'none' && $status < 0; # Caught a signal
         $status{$pid} = $status;
         push @{ $children{$ppid} }, $pid;
         $first_error_pid ||= $pid if $status; # Exited with error
     }
 
+    if (@sigs > 0) {
+        sub getrank {
+            my $exit = shift->[2];
+            return { -11 => 1, -6 => 2, -9 => 1000 }->{$exit} || 10 + -$exit;
+        }
+        @sigs = sort { getrank($a) <=> getrank($b) } @sigs;
+        print @sigs . " exited with signals, choosing $sigs[0]->[0] with exit $sigs[0]->[2]\n"
+            if $verbose;
+        return $sigs[0]->[0];
+    }
+
+    # Regular (positive) nonzero exit status. Find deepest erroring descendant.
     FIND_DESCENDANT:
     while ($first_error_pid) {
         print "scanning pid $first_error_pid\n"
