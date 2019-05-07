@@ -350,8 +350,9 @@ wip.tags = yellow
 wip.user = magenta
 
 [rebase]
-# Not sure if this is the correct format
-experimental.inmemory = true
+# Turned this off because it can causes topics to disappear during rebase.
+# (as of evolve 8.4.0-ish.)
+#experimental.inmemory = true
 
 [experimental]
 graphshorten = true
