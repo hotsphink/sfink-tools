@@ -18,7 +18,6 @@ qdiff = -U 8 -p
 qnew = -U
 qexport = -v
 qbackout = -U
-next = --evolve
 
 [phases]
 publishing = False
