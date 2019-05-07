@@ -96,7 +96,7 @@ ts = treestatus
 view = qshow
 s = qseries -v
 
-ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(::$r and not public())" --template list
+ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(not public() and ::$r)" --template list
 sl = ls
 
 lg = log --template list --graph
@@ -113,6 +113,8 @@ advance = !while $HG next --evolve; do :; done
 geckoversion = !$HG cat -r $1 'path:config/milestone.txt' | tail -1
 
 lsbranch = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents((::$r + descendants($r)) and not public())" --template list
+
+entopic = topic -r 'ancestors(.) and not public()'
 
 ######### aliases I would use if I remembered they existed #######
 
@@ -200,6 +202,9 @@ rbhead = heads(descendants((parents(ancestor(ancestors(.) and not public())))) a
 live = reverse(::. and not public()) + parents(::. and not public())
 
 local = reverse(ancestor(.+inbound)::.)
+
+# From IRC
+nexttag($1) = first($1:: and tag())
 
 # I made this one up
 workparent = last(ancestors(.) and public())
