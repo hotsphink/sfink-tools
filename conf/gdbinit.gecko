@@ -35,3 +35,24 @@ end
 def ccwtarget
   p js::UncheckedUnwrapWithoutExpose((JSObject*)$arg0)
 end
+
+# Set of functions for tracking JIT code back to its creator.
+
+def codeloc
+  set $code_=$arg0
+  watch *(void**)$code_
+end
+
+def eccopy
+  set $offset_=(long)$code_ - (long)dst
+  echo offset=
+  p/x $offset
+  set $src_ = m_formatter.m_buffer.m_buffer.mBegin
+  set $precode_ = (long)$src_ + $offset_
+  watch *(void**)$precode_
+end
+
+def realloc
+  set $precode_ = (long)aPtr + $offset_
+  watch *(void**)$precode_
+end
