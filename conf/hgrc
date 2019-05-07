@@ -65,8 +65,6 @@ journal =
 # Nonstandard additional commands
 qbackout = ~/lib/version-control-tools/hgext/qbackout/
 mqext = ~/lib/version-control-tools/hgext/mqext
-#crecord = ~/lib/hg/crecord/crecord
-#crecord = ~/lib/hg/crecord-upstream/crecord
 evolve = ~/lib/hg/evolve/hgext3rd/evolve
 topic = ~/lib/hg/evolve/hgext3rd/topic
 hgsubversion = ~/lib/hg/hgsubversion/hgsubversion
@@ -89,7 +87,7 @@ mozext = ~/lib/version-control-tools/hgext/mozext/
 # firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
 firefoxtree = ~/lib/version-control-tools/hgext/firefoxtree
 
-format-source = ~/.mozbuild/version-control-tools/hgext/format-source
+# format-source = ~/.mozbuild/version-control-tools/hgext/format-source
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
 
 [alias]
