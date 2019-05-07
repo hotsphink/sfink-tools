@@ -472,15 +472,19 @@ if ($debugger eq 'perl') {
   print ARGFILE "$_\n" foreach (@args);
   close ARGFILE;
 
+  print "argfile=$argfile\n" if $verbose;
+
   my $eval = <<"END";
 (let ((default-directory "$ENV{CWD}")
       (gud-chdir-before-run nil))
  (perldb "$COMMAND"))
-(insert-string "chomp(\@DB::ARGS=`cat $argfile`)")
+(insert "chomp(\@DB::ARGS=`cat $argfile`)")
 (comint-send-input)
-(insert-string "\@ARGV=\@DB::ARGS")
+(insert "\@ARGV=\@DB::ARGS")
 (comint-send-input)
 END
+
+  print "eval=$eval\n" if $verbose;
 
 # For whatever reason, the process sentinel stuff doesn't take here
 #
@@ -490,9 +494,9 @@ END
 #  (get-buffer-process (current-buffer))
 #  (lambda (process event)
 #   (if (equal event "finished\n") (kill-emacs))))
-# (insert-string "DB::NonStop(1)")
+# (insert "DB::NonStop(1)")
 # (comint-send-input)
-# (insert-string "c")
+# (insert "c")
 # (comint-send-input)
 # END
 #   }
@@ -583,11 +587,11 @@ foreach (@args) {
 chop($str) if @args;
 print ARGS $str, "\n";
 my $init_eval = <<"END";
- (insert-string "source $fname")
+ (insert "source $fname")
  (comint-send-input)
- (insert-string "cd $ENV{CWD}")
+ (insert "cd $ENV{CWD}")
  (comint-send-input)
- (insert-string "set annotate 1")
+ (insert "set annotate 1")
  (comint-send-input)
 END
 
@@ -598,7 +602,7 @@ if (defined $ENV{DBG_DISPLAY}) {
   my $app_display = $ENV{DISPLAY};
   $ENV{DISPLAY} = $ENV{DBG_DISPLAY};
   $init_eval .= <<"END";
- (insert-string "set env DISPLAY $app_display")
+ (insert "set env DISPLAY $app_display")
  (comint-send-input)
 END
 }
@@ -608,7 +612,7 @@ END
 unless ($opt{interactive}) {
     print STDERR "Running $COMMAND immediately\n";
     $init_eval .= <<"END";
- (insert-string "run")
+ (insert "run")
  (comint-send-input)
 END
 }
