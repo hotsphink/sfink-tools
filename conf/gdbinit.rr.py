@@ -32,13 +32,14 @@ def setup_log_dir():
     if 'RR_LOGS' in env:
         share_dir = env['RR_LOGS']
     else:
+        # If ~/.local/share exists, use that as the default location of
+        # rr-logs/. (If it does not exist, don't create it!)
         share_root = os.path.join(env['HOME'], ".local", "share")
         if os.path.exists(share_root):
             share_dir = os.path.join(share_root, "rr-logs")
 
     if share_dir is not None:
-        if not os.path.exists(share_dir):
-            os.mkdir(share_dir)
+        os.makedirs(share_dir, exist_ok=True)
         return share_dir
 
     return os.environ['HOME']
@@ -113,7 +114,9 @@ Usage:
         super(PythonWhen, self).__init__('_when')
 
     def invoke(self):
-        return str(when())
+        return when()
+
+PythonWhen()
 
 class PythonNow(gdb.Command):
     """Output <when>/<when-ticks>"""
@@ -177,6 +180,8 @@ class PythonLog(gdb.Command):
     def invoke(self, arg, from_tty):
         if self.LogFile is None:
             self.openlog(self.default_log_filename())
+
+        opt, arg = util.split_command_arg(arg)
 
         print_only = False
         if arg.startswith('-'):

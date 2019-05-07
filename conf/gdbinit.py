@@ -107,18 +107,35 @@ class Labels(dict):
         self[token] = name
 
     def __setitem__(self, key, value):
+        print("setting %s to %s, was %s" % (key, value, self.get(key)))
         if dict.get(self, key) == value:
             return
         dict.__setitem__(self, key, value)
         self.added.append(key)
         self.dirty = True
 
+    def canon(self, s):
+        try:
+            n = int(s, 0)
+            if n < 0:
+                return "%#x" % (n & 0xffffffffffffffff)
+            else:
+                return "%#x" % n
+        except:
+            return s
+
     def __delitem__(self, key):
         dict.__delitem__(self, key)
         self.dirty = True
 
-    def get(self, text, verbose=False):
-        rep = self[text]
+    def __getitem__(self, key):
+        return dict.__getitem__(self, self.canon(key))
+
+    def __contains__(self, key):
+        return dict.__contains__(self, self.canon(key))
+
+    def get(self, text, default=None, verbose=False):
+        rep = dict.get(self, text, default)
         return "%s [[%s]]" % (text, rep) if verbose else rep
 
     def copy(self):
@@ -140,7 +157,17 @@ class Labels(dict):
         return self.repPattern
 
     def apply(self, text, verbose=False):
-        return re.sub(self.pattern(), lambda m: self.get(m.group(0), verbose), text)
+        return re.sub(self.pattern(), lambda m: self.get(m.group(0), None, verbose), text)
+
+class ValueHolderHack(gdb.Function):
+    def __init__(self):
+        super(ValueHolderHack, self).__init__('__lastval')
+        self.value = None
+
+    def invoke(self, *args):
+        return self.value
+
+valueHolderHack = ValueHolderHack()
 
 labels = Labels()
 
@@ -167,15 +194,25 @@ class LabelCmd(gdb.Command):
             gdb.write("Label not found\n")
 
     def set_label(self, name, value):
-        if re.fullmatch(r'0x[0-9a-fA-F]+', name):
+        if re.fullmatch(r'0x[0-9a-fA-F]+', name) or name.lstrip('-').isdecimal():
             labels[name] = value
-        else:
-            v = gdb.parse_and_eval(name)
-            m = re.search(r'0x[0-9a-fA-F]+', str(v))
-            if m:
-                labels[m.group(0)] = value
-            else:
-                gdb.write("No labelable value found in " + str(v) + "\n")
+            return
+
+        v = gdb.parse_and_eval(name)
+        m = re.search(r'0x[0-9a-fA-F]+', str(v))
+        if not m:
+            m = re.search(r'-?[0-9]{4,20}', str(v))
+        if not m:
+            gdb.write("No labelable value found in " + str(v) + "\n")
+            return
+
+        gdb.write("gots %s, setting labels[%s] = %s\n" % (str(v), m.group(0), value))
+
+        labels[m.group(0)] = value
+        # eg label $3 SOMETHING
+        # should set $SOMETHING to the actual value of $3
+        valueHolderHack.value = v
+        gdb.execute("set ${}=$__lastval()".format(value), from_tty=False, to_string=True)
 
     def show_all_labels(self):
         for name, value in labels.items():
@@ -183,7 +220,29 @@ class LabelCmd(gdb.Command):
 
 LabelCmd('label')
 
+class UnlabelCmd(gdb.Command):
+    def __init__(self, name):
+        super(UnlabelCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_NONE)
+
+    def invoke(self, arg, from_tty):
+        del labels[arg]  # FIXME: Remove the other variants too.
+
+UnlabelCmd('unlabel')
+
 class util:
+    def split_command_arg(arg, allow_dash=False):
+        options = ''
+        if arg.startswith("/"):
+            pos = arg.index(" ") if " " in arg else len(arg)
+            options = arg[1:pos]
+            arg = arg[pos+1:]
+        elif allow_dash and arg.startswith("-"):
+            pos = arg.index(" ") if " " in arg else len(arg)
+            options = arg[1:pos]
+            arg = arg[pos+1:]
+
+        return options, arg
+
     def evaluate(expr, replace=True):
         v = gdb.parse_and_eval(expr)
         s = str(v)
@@ -199,16 +258,6 @@ class util:
         if ts in BORING_TYPES:
             return s
         return "(%s) %s" % (ts, s)
-
-class ValueHolderHack(gdb.Function):
-    def __init__(self):
-        super(ValueHolderHack, self).__init__('__lastval')
-        self.value = None
-
-    def invoke(self, *args):
-        return self.value
-
-valueHolderHack = ValueHolderHack()
 
 class PrintCmd(gdb.Command):
     """like gdb's builtin 'print' function, with label replacements and special syntax.
@@ -238,23 +287,20 @@ class PrintCmd(gdb.Command):
         #   r = raw
         # to skip label substitutions.
 
-        fmt = ''
-        if arg.startswith('/'):
-            pos = arg.index(" ")
-            if pos < 2:
-                print("invalid /FMT")
-                return
-            fmt = arg[1:pos]
-            arg = arg[pos+1:]
-
+        fmt, arg = util.split_command_arg(arg)
         verbose = 'v' in fmt
         raw = 'r' in fmt
+
         fmt = fmt.replace('v', '')
         fmtStr = "/" + fmt if fmt else ''
 
         for e in self.enumerateExprs(arg):
             # in gdb 8.2, this could be done with gdb.set_convenience_variable.
-            v = gdb.parse_and_eval(e)
+            try:
+                v = gdb.parse_and_eval(e)
+            except gdb.error as exc:
+                gdb.write(str(exc) + "\n")
+                return
             valueHolderHack.value = v
             output = gdb.execute("print" + fmtStr + " $__lastval()", from_tty, to_string=True)
             if not raw:
