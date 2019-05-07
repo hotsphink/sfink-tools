@@ -1,6 +1,6 @@
 [ui]
 username = Steve Fink <sfink@mozilla.com>
-merge = kdiff3
+###merge = kdiff3
 #traceback = True
 #verbose = True
 #debug = True
@@ -247,7 +247,7 @@ cacerts = /etc/pki/tls/certs/ca-bundle.crt
 [merge-tools]
 #kdiff3.args = --auto --L1 common --L2 pulled --L3 mq $base $local $other -o $output -cs SyncMode=1
 kdiff3.executable = ~/bin/kdiff3-wrapper
-kdiff3.args = --auto --L1 prepatch --L2 tochange --L3 postpatch $base $local $other -o $output --cs SyncMode=1
+kdiff3.args = --auto --L1 prepatch --L2 tochange --L3 postpatch $base $local $other -o $output --auto --cs SyncMode=1
 kdiff3.gui = True
 kdiff3.premerge = True
 kdiff3.binary = False
