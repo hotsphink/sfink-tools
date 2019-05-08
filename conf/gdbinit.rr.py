@@ -11,6 +11,7 @@
 import gdb
 import os
 import re
+import tempfile
 
 from os.path import abspath, dirname, expanduser
 from os import environ as env
@@ -125,11 +126,28 @@ class PythonNow(gdb.Command):
 
     def invoke(self, arg, from_tty):
         try:
-            print(now())
+            gdb.write(now() + "\n")
         except gdb.error:
-            print("?? when/when-ticks unavailable (not running under rr?)")
+            gdb.write("?? when/when-ticks unavailable (not running under rr?)\n")
 
 PythonNow()
+
+class SharedFile(io.TextIOWrapper):
+    def __init__(self, filename):
+        self.fh = open(filename, "ba+")
+        super(SharedFile, self).__init__(self.fh)
+        self.last_known_size = self.seek(0, 2)
+
+    def changed(self):
+        return self.last_known_size != self.seek(0, 2)
+
+    def record_end(self):
+        self.last_known_size = self.tell()
+
+    def write(self, buffer):
+        nbytes = super(SharedFile, self).write(buffer)
+        self.record_end()
+        return nbytes
 
 class PythonLog(gdb.Command):
     """Append current event/tick-count with message to log file"""
@@ -137,35 +155,39 @@ class PythonLog(gdb.Command):
         gdb.Command.__init__(self, "log", gdb.COMMAND_USER)
         self.LogFile = None
         self.ThreadTable = {}
+        self.ExpectedSize = None
+        gdb.events.before_prompt.connect(lambda: self.sync_log())
 
-    def scan_log(self):
-        old = labels.copy()
-        pos = self.LogFile.tell()
-        self.LogFile.seek(0)
+    def openlog(self, filename, quiet=False):
+        if self.LogFile:
+            self.LogFile.close()
+        self.LogFile = SharedFile(filename)
+        if not quiet:
+            gdb.write("Logging to %s\n" % (self.LogFile.name,))
 
         labels.clear()
+
+        self.LogFile.seek(0)
+
         for lineno, line in enumerate(self.LogFile):
             if not line.startswith("! "):
                 continue
-            line = line[2:]
-            m = re.match(r'^s/((?:[^\\]|\\.)+)/(.*?)/\w+$', line)
-            if m:
-                labels.label(m.group(1), m.group(2))
 
-        self.LogFile.seek(pos)
+            rest = line[2:].rstrip()
+            cmd = rest.split(" ", 1)[0]
+            rest = rest[len(cmd)+1:]
+            if cmd == "replace":
+                k, v, t = rest.split(" ", 2)
+                labels.label(k, v, t)
+                continue
 
-        for k, v in old.items():
-            if k not in labels:
-                self.replace(k, v)
+            gdb.write("Unhandled log command: {}\n".format(line))
 
-    def openlog(self, filename, quiet=False):
-        self.LogFile = open(filename, "a+")
-        if not quiet:
-            print("Logging to %s" % (self.LogFile.name,))
-        self.scan_log()
+        self.LogFile.record_end()
 
     def stoplog(self):
-        self.LogFile = False
+        self.LogFile.close()
+        self.LogFile = None
 
     def default_log_filename(self):
         tid = gdb.selected_thread().ptid[0]
@@ -174,10 +196,26 @@ class PythonLog(gdb.Command):
     def thread_id(self, fs_base=None):
         '''Return the thread id in the format "T<num>" for the given fs_base, or the current value of that register if not given. This is a hack that is not guaranteed to work -- when rr starts a new process under the hood, gdb may shift the thread numbers around. This is a heuristic to grab an id the first time a thread is encountered; there is no guarantee that it won't map multiple threads to the same ID. (That could be fixed, but I haven't bothered yet.)'''
         if fs_base is None:
-            fs_base = gdb.execute("p/x $fs_base", to_string=True).split(" ")[2].strip()
+            fs_base = gdb.parse_and_eval("$fs_base")
         return self.ThreadTable.setdefault(fs_base, "T" + str(gdb.selected_thread().num))
 
+    def sync_log(self):
+        '''Add any new labels to the log, and grab any updates if another process updated the file.'''
+        if not self.LogFile:
+            #print("Checking changed: no log yet")
+            return
+
+        if labels.dirty:
+            for k, (v, t) in labels.flush_added():
+                #print("writing {} -> ({}) {} to log".format(k, t, v))
+                self.LogFile.write("! replace {} {} {}\n".format(k, v, t))
+
+        if self.LogFile.changed():
+            #print("Checking changed: yes (or dirty)")
+            self.openlog(self.LogFile.name)
+
     def invoke(self, arg, from_tty):
+        # We probably ought to flush out dirty labels here.
         if self.LogFile is None:
             self.openlog(self.default_log_filename())
 
@@ -210,7 +248,7 @@ class PythonLog(gdb.Command):
                 # log -p : display the log message without logging it permanently
                 print_only = True
             else:
-                print("unknown log option")
+                gdb.write("unknown log option\n")
 
             if not print_only:
                 return
@@ -225,13 +263,12 @@ class PythonLog(gdb.Command):
         out = self.process_message(arg)
 
         if not print_only:
-            self.sync_added()
             self.LogFile.write("%s %s\n" % (now(), out))
 
         # If any substitutions were made, display the resulting log message.
         out = labels.apply(out, verbose=False)
         if print_only or out != arg:
-            print(out)
+            gdb.write(out + "\n")
 
     def process_message(self, message):
         # Replace {expr} with the result of evaluating the (gdb) expression expr.
@@ -246,18 +283,10 @@ class PythonLog(gdb.Command):
         # Let gdb handle other $ vars.
         return re.sub(r'(\$\w+)', lambda m: util.evaluate(m.group(1)), out)
 
-    def replace(self, name, value):
-        self.LogFile.write("! s/{orig}/{new}/g\n".format(orig=name, new=value))
-
     def dump(self, sort=False, replace=True, verbose=False):
         if not self.LogFile:
-            print("No log file open")
+            gdb.write("No log file open\n")
             return
-
-        self.scan_log()
-        if replace:
-            for orig, new in labels.items():
-                print("[[Replacing '{orig}' with '{new}']]".format(orig=orig, new=new))
 
         self.LogFile.seek(0)
 
@@ -285,27 +314,17 @@ class PythonLog(gdb.Command):
                     place = i - 1
                     break
             for i, message in enumerate(messages):
-                print("%s%s" % ("=> " if i == place else "   ", message[3]))
+                gdb.write("%s%s\n" % ("=> " if i == place else "   ", message[3]))
         else:
             for message in messages:
-                print(message[3])
-
-    def sync_added(self):
-        for k in labels.added:
-            v = labels.get(k)
-            if v is not None:
-                self.replace(k, v)
-
-        # FIXME: This is a global change; you can't have two users.
-        labels.added = []
+                gdb.write(message[3] + "\n")
 
     def edit(self):
         if not self.LogFile:
-            print("No log file open")
+            gdb.write("No log file open\n")
             return
 
         filename = self.LogFile.name
-        self.sync_added()
         self.LogFile.close()
         os.system(os.environ.get('EDITOR', 'emacs') + " " + filename)
         self.openlog(filename, quiet=True)

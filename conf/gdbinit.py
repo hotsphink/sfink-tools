@@ -69,7 +69,7 @@ class PDo(gdb.Command):
 
         for cmd in self.commands(arg):
             if verbose:
-                print("(pdo) " + cmd)
+                gdb.write("(pdo) " + cmd + "\n")
             gdb.execute(cmd)
 
 PDo("pdo")
@@ -97,22 +97,54 @@ RepeatedAppend()
 
 ######################################################################
 
+# Polyfill gdb.set_convenience_variable()
+
+# The gdb version I was developing with originally did not have the convenience
+# variable APIs that were added later. So this is a workaround, where I create
+# a gdb function that returns a value, and set it via gdb.execute.
+class ValueHolderHack(gdb.Function):
+    def __init__(self):
+        super(ValueHolderHack, self).__init__('__lastval')
+        self.value = None
+
+    def invoke(self, *args):
+        return self.value
+
+valueHolderHack = ValueHolderHack()
+
+def set_convenience_variable_hack(name, value):
+    valueHolderHack.value = value
+    gdb.execute("set ${}=$__lastval()".format(name), from_tty=False, to_string=True)
+
+if not hasattr(gdb, 'set_convenience_variable'):
+    setattr(gdb, 'set_convenience_variable', set_convenience_variable_hack)
+
+######################################################################
+
 class Labels(dict):
     def __init__(self):
         self.dirty = True
         self.pattern()
         self.added = []
 
-    def label(self, token, name):
-        self[token] = name
+    def label(self, token, name, type, gdbval=None):
+        self[token] = (name, type)
+
+        if gdbval is None:
+            gdbval = gdb.parse_and_eval("({}) {}".format(type, token))
+
+        gdb.set_convenience_variable(name, gdbval)
 
     def __setitem__(self, key, value):
-        print("setting %s to %s, was %s" % (key, value, self.get(key)))
         if dict.get(self, key) == value:
             return
+        # print("setting {} : {} -> {}".format(key, self.get(key), value))
         dict.__setitem__(self, key, value)
         self.added.append(key)
         self.dirty = True
+
+    def clear(self):
+        dict.clear(self)
 
     def canon(self, s):
         try:
@@ -123,6 +155,12 @@ class Labels(dict):
                 return "%#x" % n
         except:
             return s
+
+    def flush_added(self):
+        ret = [(k, self[k]) for k in self.added]
+        self.added = []
+        self.dirty = False
+        return ret
 
     def __delitem__(self, key):
         dict.__delitem__(self, key)
@@ -136,7 +174,10 @@ class Labels(dict):
 
     def get(self, text, default=None, verbose=False):
         rep = dict.get(self, text, default)
-        return "%s [[%s]]" % (text, rep) if verbose else rep
+        if rep != default:
+            return "%s [[$%s]]" % (text, rep[0]) if verbose else "$" + rep[0]
+        else:
+            return "%s [[$%s]]" % (text, rep) if verbose else "$" + rep
 
     def copy(self):
         c = Labels()
@@ -157,17 +198,10 @@ class Labels(dict):
         return self.repPattern
 
     def apply(self, text, verbose=False):
-        return re.sub(self.pattern(), lambda m: self.get(m.group(0), None, verbose), text)
-
-class ValueHolderHack(gdb.Function):
-    def __init__(self):
-        super(ValueHolderHack, self).__init__('__lastval')
-        self.value = None
-
-    def invoke(self, *args):
-        return self.value
-
-valueHolderHack = ValueHolderHack()
+        return re.sub(
+            self.pattern(),
+            lambda m: self.get(m.group(0), None, verbose),
+            text)
 
 labels = Labels()
 
@@ -189,13 +223,13 @@ class LabelCmd(gdb.Command):
 
     def get_label(self, name):
         if name in labels:
-            gdb.write(labels[name] + "\n")
+            gdb.write(labels[name][0] + "\n")
         else:
             gdb.write("Label not found\n")
 
     def set_label(self, name, value):
         if re.fullmatch(r'0x[0-9a-fA-F]+', name) or name.lstrip('-').isdecimal():
-            labels[name] = value
+            labels[name] = (value, 'void*')
             return
 
         v = gdb.parse_and_eval(name)
@@ -206,17 +240,15 @@ class LabelCmd(gdb.Command):
             gdb.write("No labelable value found in " + str(v) + "\n")
             return
 
-        gdb.write("gots %s, setting labels[%s] = %s\n" % (str(v), m.group(0), value))
+        # gdb.write("gots %s, setting labels[%s] = %s\n" % (str(v), m.group(0), value))
 
-        labels[m.group(0)] = value
-        # eg label $3 SOMETHING
+        # label $3 SOMETHING
         # should set $SOMETHING to the actual value of $3
-        valueHolderHack.value = v
-        gdb.execute("set ${}=$__lastval()".format(value), from_tty=False, to_string=True)
+        labels.label(m.group(0), value, str(v.type), gdbval=v)
 
     def show_all_labels(self):
-        for name, value in labels.items():
-            gdb.write("{} = {}\n".format(name, value))
+        for name, (value, t) in labels.items():
+            gdb.write("({}) {} = ${}\n".format(t, name, value))
 
 LabelCmd('label')
 
@@ -295,14 +327,14 @@ class PrintCmd(gdb.Command):
         fmtStr = "/" + fmt if fmt else ''
 
         for e in self.enumerateExprs(arg):
-            # in gdb 8.2, this could be done with gdb.set_convenience_variable.
             try:
                 v = gdb.parse_and_eval(e)
             except gdb.error as exc:
                 gdb.write(str(exc) + "\n")
                 return
-            valueHolderHack.value = v
-            output = gdb.execute("print" + fmtStr + " $__lastval()", from_tty, to_string=True)
+            gdb.set_convenience_variable('__expr', v)
+            output = gdb.execute("print" + fmtStr + " $__expr",
+                                 from_tty, to_string=True)
             if not raw:
                 output = labels.apply(output, verbose)
             gdb.write(output)
