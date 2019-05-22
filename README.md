@@ -8,6 +8,7 @@ Tools included:
 
  - json : Interactive navigation of a JSON file
  - debug : Start up a debugger within emacs on various types of files
+ - rr-exits : List out all rr recordings with their worst exit codes
  - em : Start up emacs on the files touched by a patch, on a relevant line number
  - traverse.py : Gecko-specific, sorta. Utility for traversing a callgraph.
  - wig : Patch harder
