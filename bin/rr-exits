@@ -1,0 +1,34 @@
+#!/usr/bin/perl
+
+use strict;
+
+my $top = "$ENV{HOME}/.rr";
+opendir(my $dir, $top);
+for my $tracedir (readdir($dir)) {
+    next if $tracedir =~ /^\./;
+    next if ! -d "$top/$tracedir";
+    next if $tracedir eq 'latest-trace';
+    open(my $fh, "rr ps $tracedir 2>/dev/null |");
+    my ($worst, $worst_st);
+    my $zeropid;
+    while(<$fh>) {
+        chomp;
+        my (undef, undef, $status) = split(/\s+/, $_);
+        next if $status eq 'EXIT';
+        if ($status == 0) {
+            $zeropid = $_;
+            next;
+        }
+
+        $worst //= $_;
+        $worst_st //= $status;
+        if ($status < $worst_st) {
+            $worst_st = $status;
+            $worst = $_;
+        }
+    }
+    $worst ||= $zeropid;
+    if ($worst) {
+        printf("% 20s %s\n", $tracedir, $worst);
+    }
+}
