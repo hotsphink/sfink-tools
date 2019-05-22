@@ -20,6 +20,15 @@ def watchmark
   watch -l *$word
 end
 
+def manualmark
+  # Same args as watchmark
+  set $addr=(uintptr_t)$arg0
+  set $bit=($addr & js::gc::ChunkMask) / js::gc::CellBytesPerMarkBit + $arg1
+  set $bitmap=(uintptr_t*)(($addr & ~js::gc::ChunkMask) | js::gc::ChunkMarkBitmapOffset)
+  set $mask=((uintptr_t)1) << ($bit % 64)
+  set $word=&$bitmap[$bit / 64]
+end
+
 def getheap
   p *(js::gc::ChunkLocation*)(((uint64_t)$arg0) & ~js::gc::ChunkMask | js::gc::ChunkLocationOffset)
 end
