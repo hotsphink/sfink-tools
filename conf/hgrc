@@ -1,6 +1,7 @@
 [ui]
 username = Steve Fink <sfink@mozilla.com>
 ###merge = kdiff3
+merge = meld
 #traceback = True
 #verbose = True
 #debug = True
@@ -88,6 +89,7 @@ firefoxtree = ~/lib/version-control-tools/hgext/firefoxtree
 
 # format-source = ~/.mozbuild/version-control-tools/hgext/format-source
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
+clang-format = ~/.mozbuild/version-control-tools/hgext/clang-format
 
 [alias]
 ##################### aliases I actually use #####################
@@ -138,20 +140,7 @@ lls = !$HG ls $1 | tac | perl -lne '$n = $. - 1; print sprintf "%-4s %s", $. < 5
 
 ############### aliases I keep around to learn from ##############
 
-# Example invocation:
-#    hg git-delete-remote default/bad-branch
-gitremotedelete = ! \
-    remote=`echo $HG_ARGS | sed 's_/.*__' | sed 's_.* __'`;
-    branch=`echo $HG_ARGS | sed 's_.*/__'`;
-    remote_url=$($HG paths $remote | sed 's_^git+ssh://__');
-    git_dir=$($HG root)/.hg/git;
-    # Delete the remote branch
-    git --git-dir=$git_dir push $remote_url :$branch;
-    # Delete local ref to remote branch
-    git --git-dir=$git_dir branch -rd $remote/$branch;
-    # Delete local branch
-    git --git-dir=$git_dir branch -D $branch
-    echo "Don't forget to run "'`'"hg bookmark -d $branch"'`'
+# See gitremotedelete in ~/.config/hg/hgrc
 
 # For Callek, really. I use em.
 workon = !bash -c 'cd $($HG root) && $EDITOR $($HG status -n -m -a ${1+--change $1})' -- "$@"
@@ -188,6 +177,7 @@ yay = !msg="$($HG log -r . --template '{desc}\n'), r=$1"; $HG commit --amend -m 
 
 reb = rebase -d rebase_default
 wip = log --graph --rev=wip --template=wip
+smart-annotate = annotate -w --skip ignored_changesets
 
 [revsetalias]
 with_parents(s) = parents(s) or s
@@ -218,6 +208,10 @@ lineage(r) = ancestors(r) + descendants(r)
 allbook($1) = my(lineage(bookmark($1)))
 alltopic($1) = my(lineage(topic($1)))
 allbranch($1) = my(lineage($1))
+ignored_changesets = desc("ignore-this-changeset") or extdata(get_ignored_changesets)
+
+[extdata]
+get_ignored_changesets = shell:cat `hg root`/.hg-annotate-ignore-revs 2> /dev/null || true
 
 [diff]
 git = 1
