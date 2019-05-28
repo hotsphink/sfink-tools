@@ -202,6 +202,11 @@ class Labels(dict):
 
         return self.repPattern
 
+    def reloaded(self):
+        self.dirty = True
+        self.pattern()
+        self.added = []
+
     def apply(self, text, verbose=False):
         return re.sub(
             self.pattern(),
@@ -280,6 +285,7 @@ class util:
                 pos = arg.index(" ") if " " in arg else len(arg)
                 options.append(arg[1:pos])
                 if pos == len(arg):
+                    arg = ''
                     break
                 arg = arg[pos+1:]
 

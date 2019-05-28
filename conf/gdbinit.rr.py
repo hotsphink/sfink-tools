@@ -4,7 +4,7 @@
 # now
 # set logfile /tmp/mylog.txt
 # log some message
-# log -dump
+# log -unsorted
 # log -sorted
 # log -edit
 
@@ -188,6 +188,7 @@ class PythonLog(gdb.Command):
 
             gdb.write("Unhandled log command: {}\n".format(line))
 
+        labels.reloaded()
         self.LogFile.record_end()
 
     def stoplog(self):
@@ -262,6 +263,7 @@ class PythonLog(gdb.Command):
                 do_dump = False
             elif 'raw'.startswith(opt):
                 # log/r : do not do any label replacements in message
+                dump_args['replace'] = False
                 raw = True
             elif 'print-only'.startswith(opt):
                 # log/p : display the log message without logging it permanently
@@ -348,19 +350,19 @@ class PythonLog(gdb.Command):
 class ParameterLogFile(gdb.Parameter):
     def __init__(self, logger):
         super(ParameterLogFile, self).__init__('logfile', gdb.COMMAND_SUPPORT, gdb.PARAM_STRING)
-        self.logfile = None
         self.logger = logger
 
     def get_set_string(self):
         if self.value:
-            self.logfile = self.value
             self.logger.openlog(self.logfile)
             return "logging to %s" % self.logfile
         else:
             return "logging stopped"
 
     def get_show_string(self, svalue):
-        return self.logfile
+        if not self.logger.LogFile:
+            return "<no logfile active>"
+        return self.logger.LogFile.name
 
 if running_rr():
     ParameterLogFile(PythonLog())
