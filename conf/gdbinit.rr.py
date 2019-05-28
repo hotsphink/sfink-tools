@@ -159,12 +159,17 @@ class PythonLog(gdb.Command):
         gdb.events.before_prompt.connect(lambda: self.sync_log())
 
     def openlog(self, filename, quiet=False):
+        first_open = not self.LogFile
+
         if self.LogFile:
             self.LogFile.close()
+
         self.LogFile = SharedFile(filename)
         if not quiet:
             gdb.write("Logging to %s\n" % (self.LogFile.name,))
 
+        if first_open:
+            self.sync_log()
         labels.clear()
 
         self.LogFile.seek(0)
@@ -219,55 +224,66 @@ class PythonLog(gdb.Command):
         if self.LogFile is None:
             self.openlog(self.default_log_filename())
 
-        opt, arg = util.split_command_arg(arg)
+        opts, arg = util.split_command_arg(arg, allow_dash=True)
+        # print("after split, opt={} arg={}".format(opts, arg))
 
-        print_only = False
-        if arg.startswith('-'):
-            opt = arg
-            if ' ' in opt:
-                pos = opt.index(' ')
-                opt = arg[0:pos]
-                arg = arg[pos+1:]
+        do_addentry = False
+        dump_args = {'sort': True}
+        do_print = False
+        do_dump = True
+        raw = False
 
-            if '-sorted'.startswith(opt):
-                # log -s : same as log with no options, display log in execution order.
-                self.dump(sort=True)
-            elif '-verbose'.startswith(opt):
-                # log -v : display log in execution order, with replacements and originals
-                self.dump(sort=True, replace=True, verbose=True)
-            elif '-dump'.startswith(opt):
-                # log -d : display log in entry order
-                self.dump()
-            elif '-noreplace'.startswith(opt):
-                # log -n : display log in execution order, without processing replacements
-                self.dump(sort=True, replace=False)
-            elif '-edit'.startswith(opt):
-                # log -e : edit the log in $EDITOR
+        if arg:
+            do_addentry = True
+            do_dump = False
+
+        for opt in opts:
+            if 'sorted'.startswith(opt):
+                # log/s : same as log with no options, display log in execution order.
+                dump_args['sort'] = True
+                do_dump = True
+            elif 'verbose'.startswith(opt):
+                # log/v : display log in execution order, with replacements and originals
+                dump_args['sort'] = True
+                dump_args['replace'] = True
+                dump_args['verbose'] = True
+            elif 'unsorted'.startswith(opt):
+                # log/u : display log in entry order
+                dump_args['sort'] = False
+                do_dump = True
+            elif 'noreplace'.startswith(opt):
+                # log/n : display log in execution order, without processing replacements
+                dump_args['sort'] = True
+                dump_args['replace'] = False
+                do_dump = True
+            elif 'edit'.startswith(opt):
+                # log/e : edit the log in $EDITOR
                 self.edit()
-            elif '-print-only'.startswith(opt):
-                # log -p : display the log message without logging it permanently
-                print_only = True
+                do_dump = False
+            elif 'raw'.startswith(opt):
+                # log/r : do not do any label replacements in message
+                raw = True
+            elif 'print-only'.startswith(opt):
+                # log/p : display the log message without logging it permanently
+                do_print = True
+                do_dump = False
             else:
-                gdb.write("unknown log option\n")
+                gdb.write("unknown log option '{}'\n".format(opt))
 
-            if not print_only:
-                return
+        if do_addentry:
+            out = self.process_message(arg)
+            if not raw:
+                out = labels.apply(out, verbose=False)
+            # If any substitutions were made, display the resulting log message.
+            if out != arg:
+                do_print = True
+            if self.LogFile:
+                self.LogFile.write("%s %s\n" % (now(), out))
 
-        if not arg:
-            self.dump(sort=True)
-            return
+        if do_dump:
+            self.dump(**dump_args)
 
-        if not self.LogFile:
-            return
-
-        out = self.process_message(arg)
-
-        if not print_only:
-            self.LogFile.write("%s %s\n" % (now(), out))
-
-        # If any substitutions were made, display the resulting log message.
-        out = labels.apply(out, verbose=False)
-        if print_only or out != arg:
+        if do_print:
             gdb.write(out + "\n")
 
     def process_message(self, message):

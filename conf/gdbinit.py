@@ -136,6 +136,7 @@ class Labels(dict):
         gdb.set_convenience_variable(name, gdbval)
 
     def __setitem__(self, key, value):
+        key = self.canon(key)
         if dict.get(self, key) == value:
             return
         # print("setting {} : {} -> {}".format(key, self.get(key), value))
@@ -153,7 +154,7 @@ class Labels(dict):
                 return "%#x" % (n & 0xffffffffffffffff)
             else:
                 return "%#x" % n
-        except:
+        except ValueError:
             return s
 
     def flush_added(self):
@@ -173,11 +174,10 @@ class Labels(dict):
         return dict.__contains__(self, self.canon(key))
 
     def get(self, text, default=None, verbose=False):
-        rep = dict.get(self, text, default)
-        if rep != default:
-            return "%s [[$%s]]" % (text, rep[0]) if verbose else "$" + rep[0]
-        else:
-            return "%s [[$%s]]" % (text, rep) if verbose else "$" + rep
+        rep = dict.get(self, self.canon(text), default)
+        if rep == default:
+            return default
+        return "%s [[$%s]]" % (text, rep[0]) if verbose else "$" + rep[0]
 
     def copy(self):
         c = Labels()
@@ -190,9 +190,14 @@ class Labels(dict):
                 # Pattern that never matches
                 self.repPattern = re.compile(r'^(?!.).')
             else:
-                # TODO: Match both hex and numeric representations.
-                # (Or perhaps insert both in __setitem__?)
-                self.repPattern = re.compile('|'.join(self.keys()))
+                # This requires word boundaries, and does not match words
+                # starting with '$' (to avoid replacing eg $3, though honestly
+                # if you set a label for 3 you kind of deserve what you get.)
+                reps = []
+                for key in self.keys():
+                    reps.append(key)
+                    reps.append(str(int(key, 16)))
+                self.repPattern = re.compile(r'\b(?<!\$)' + '|'.join(reps) + r'\b')
             self.dirty = False
 
         return self.repPattern
@@ -263,15 +268,20 @@ UnlabelCmd('unlabel')
 
 class util:
     def split_command_arg(arg, allow_dash=False):
-        options = ''
+        options = []
         if arg.startswith("/"):
             pos = arg.index(" ") if " " in arg else len(arg)
-            options = arg[1:pos]
+            options.extend(arg[1:pos])
             arg = arg[pos+1:]
         elif allow_dash and arg.startswith("-"):
-            pos = arg.index(" ") if " " in arg else len(arg)
-            options = arg[1:pos]
-            arg = arg[pos+1:]
+            # Support multiple options: -foo -bar
+            all_options = []
+            while arg.startswith('-'):
+                pos = arg.index(" ") if " " in arg else len(arg)
+                options.append(arg[1:pos])
+                if pos == len(arg):
+                    break
+                arg = arg[pos+1:]
 
         return options, arg
 
@@ -319,7 +329,8 @@ class PrintCmd(gdb.Command):
         #   r = raw
         # to skip label substitutions.
 
-        fmt, arg = util.split_command_arg(arg)
+        opts, arg = util.split_command_arg(arg)
+        fmt = ''.join(o[0] for o in opts)
         verbose = 'v' in fmt
         raw = 'r' in fmt
 
