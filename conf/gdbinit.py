@@ -123,16 +123,32 @@ if not hasattr(gdb, 'set_convenience_variable'):
 
 class Labels(dict):
     def __init__(self):
+        # Substitution pattern maintenance -- this class keeps a compiled regex
+        # 'pattern' up to date with its set of keys. The pattern is lazily
+        # generated whenever it's needed and the set of keys has changed since
+        # the last time it was rebuilt.
         self.dirty = True
         self.pattern()
+
+        # This class supports a single external consumer that feeds off a "log"
+        # of added keys. Every key added will be appended to a list that is
+        # cleared out when flush_added() is called to retrieve all adds since
+        # the previous call. (If the class is clear()ed, 'added' will be
+        # reset.)
         self.added = []
 
-    def label(self, token, name, type, gdbval=None):
-        self[token] = (name, type)
+    def label(self, token, name, typestr, gdbval=None):
+        self[token] = (name, typestr)
 
+        #print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
         if gdbval is None:
-            gdbval = gdb.parse_and_eval("({}) {}".format(type, token))
-
+            try:
+                gdbval = gdb.parse_and_eval("({}) {}".format(typestr, token))
+            except gdb.error as e:
+                # This can happen if we load in a set of labels before the type
+                # exists. TODO: queue up a setting for when the type shows up.
+                gdb.write("unknown type: " + str(e) + "\n")
+                return
         gdb.set_convenience_variable(name, gdbval)
 
     def __setitem__(self, key, value):
@@ -146,6 +162,7 @@ class Labels(dict):
 
     def clear(self):
         dict.clear(self)
+        self.dirty = True
 
     def canon(self, s):
         try:
@@ -158,9 +175,9 @@ class Labels(dict):
             return s
 
     def flush_added(self):
+        '''Retrieve the list of entries added since the last call to this method.'''
         ret = [(k, self[k]) for k in self.added]
         self.added = []
-        self.dirty = False
         return ret
 
     def __delitem__(self, key):
@@ -186,6 +203,7 @@ class Labels(dict):
 
     def pattern(self):
         if self.dirty:
+            #print("Rebuilding pattern with {} replacements".format(len(self)))
             if len(self) == 0:
                 # Pattern that never matches
                 self.repPattern = re.compile(r'^(?!.).')
@@ -197,15 +215,10 @@ class Labels(dict):
                 for key in self.keys():
                     reps.append(key)
                     reps.append(str(int(key, 16)))
-                self.repPattern = re.compile(r'\b(?<!\$)' + '|'.join(reps) + r'\b')
+                self.repPattern = re.compile(r'\b(?<!\$)(?:' + '|'.join(reps) + r')\b')
             self.dirty = False
 
         return self.repPattern
-
-    def reloaded(self):
-        self.dirty = True
-        self.pattern()
-        self.added = []
 
     def apply(self, text, verbose=False):
         return re.sub(
@@ -215,6 +228,17 @@ class Labels(dict):
 
 labels = Labels()
 
+def index_of_first(s, tokens, start=0):
+    bestpos = None
+    for token in tokens:
+        try:
+            pos = s.index(token, start)
+            if bestpos is None or pos < bestpos:
+                bestpos = pos
+        except ValueError:
+            pass
+    return bestpos
+
 class LabelCmd(gdb.Command):
     def __init__(self, name):
         super(LabelCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_NONE)
@@ -222,27 +246,36 @@ class LabelCmd(gdb.Command):
     def invoke(self, arg, from_tty):
         if len(arg) == 0:
             self.show_all_labels()
-        elif ' ' in arg:
-            pos = arg.index(' ')
+            return
+
+        if arg.startswith('variable '):
+            start=len('variable ')
+            pos = index_of_first(arg, [' ', '='], start)
+            if pos is None:
+                gdb.write("invalid usage\n")
+                return
+            self.set_label(arg[start:pos], arg[pos+1:])
+            return
+
+        pos = index_of_first(arg, [' ', '='])
+        if pos is not None:
             self.set_label(arg[0:pos], arg[pos+1:])
-        elif '=' in arg:
-            pos = arg.index('=')
-            self.set_label(arg[0:pos], arg[pos+1:])
-        else:
-            self.get_label(arg)
+            return
+
+        self.get_label(arg)
 
     def get_label(self, name):
         if name in labels:
             gdb.write(labels[name][0] + "\n")
         else:
-            gdb.write("Label not found\n")
+            gdb.write("Label '{}' not found\n".format(name))
 
     def set_label(self, name, value):
-        if re.fullmatch(r'0x[0-9a-fA-F]+', name) or name.lstrip('-').isdecimal():
-            labels[name] = (value, 'void*')
+        if re.fullmatch(r'0x[0-9a-fA-F]+', value) or value.lstrip('-').isdecimal():
+            labels[value] = (name, 'void*')
             return
 
-        v = gdb.parse_and_eval(name)
+        v = gdb.parse_and_eval(value)
         m = re.search(r'0x[0-9a-fA-F]+', str(v))
         if not m:
             m = re.search(r'-?[0-9]{4,20}', str(v))
@@ -254,11 +287,11 @@ class LabelCmd(gdb.Command):
 
         # label $3 SOMETHING
         # should set $SOMETHING to the actual value of $3
-        labels.label(m.group(0), value, str(v.type), gdbval=v)
+        labels.label(m.group(0), name, str(v.type), gdbval=v)
 
     def show_all_labels(self):
         for name, (value, t) in labels.items():
-            gdb.write("({}) {} = ${}\n".format(t, name, value))
+            gdb.write("${} = ({}) {}\n".format(value, t, name))
 
 LabelCmd('label')
 
@@ -267,7 +300,7 @@ class UnlabelCmd(gdb.Command):
         super(UnlabelCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_NONE)
 
     def invoke(self, arg, from_tty):
-        del labels[arg]  # FIXME: Remove the other variants too.
+        del labels[arg]
 
 UnlabelCmd('unlabel')
 
@@ -291,8 +324,11 @@ class util:
 
         return options, arg
 
-    def evaluate(expr, replace=True):
-        v = gdb.parse_and_eval(expr)
+    def evaluate(expr, replace=True, brieftype=True):
+        try:
+            v = gdb.parse_and_eval(expr)
+        except gdb.error:
+            raise
         s = str(v)
         t = v.type
         ts = str(t)
@@ -305,6 +341,20 @@ class util:
         BORING_TYPES = ("int", "unsigned int", "uint32_t", "int32_t", "uint64_t", "int64_t")
         if ts in BORING_TYPES:
             return s
+        # If the type name is in the value, as in js::gc::CellColor::Black,
+        # then we don't need to see the cast.
+        if ts in s:
+            return s
+        if brieftype:
+            ots = ts
+            ts = ts.replace('const ', '')
+            ts = ts.replace(' const', '')
+            ts = re.sub(r'\w+::', '', ts)
+            ts = ts.replace(' *', '*')
+            # Same check as above, but sometimes the type gets aliased into a
+            # different namespace. So try even harder to throw it out.
+            if ts in s:
+                return s
         return "(%s) %s" % (ts, s)
 
 class PrintCmd(gdb.Command):

@@ -169,6 +169,7 @@ class PythonLog(gdb.Command):
             gdb.write("Logging to %s\n" % (self.LogFile.name,))
 
         if first_open:
+            #print("Syncing with log for the first time")
             self.sync_log()
         labels.clear()
 
@@ -188,7 +189,7 @@ class PythonLog(gdb.Command):
 
             gdb.write("Unhandled log command: {}\n".format(line))
 
-        labels.reloaded()
+        labels.flush_added()
         self.LogFile.record_end()
 
     def stoplog(self):
@@ -208,17 +209,23 @@ class PythonLog(gdb.Command):
     def sync_log(self):
         '''Add any new labels to the log, and grab any updates if another process updated the file.'''
         if not self.LogFile:
+            # Note: can't really just open the log immediately, because we
+            # won't have the type info for the replacements when gdb first gets
+            # going.
+            #
             #print("Checking changed: no log yet")
             return
 
-        if labels.dirty:
-            for k, (v, t) in labels.flush_added():
-                #print("writing {} -> ({}) {} to log".format(k, t, v))
-                self.LogFile.write("! replace {} {} {}\n".format(k, v, t))
+        #for k, (v, t) in labels.flush_added():
+        added = labels.flush_added()
+        #print("grabbing new labels: {}".format([v for k, (v, t) in added]))
+        for k, (v, t) in added:
+            #print("writing {} -> ({}) {} to log".format(k, t, v))
+            self.LogFile.write("! replace {} {} {}\n".format(k, v, t))
 
         if self.LogFile.changed():
             #print("Checking changed: yes (or dirty)")
-            self.openlog(self.LogFile.name)
+            self.openlog(self.LogFile.name, quiet=False)  # TEMP! FIXME!
 
     def invoke(self, arg, from_tty):
         # We probably ought to flush out dirty labels here.
