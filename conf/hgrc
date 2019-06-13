@@ -89,7 +89,7 @@ firefoxtree = ~/lib/version-control-tools/hgext/firefoxtree
 
 # format-source = ~/.mozbuild/version-control-tools/hgext/format-source
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
-clang-format = ~/.mozbuild/version-control-tools/hgext/clang-format
+#clang-format = ~/.mozbuild/version-control-tools/hgext/clang-format
 
 [alias]
 ##################### aliases I actually use #####################
