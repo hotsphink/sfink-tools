@@ -20,6 +20,11 @@ end
 
 # construct <type>
 # Do Not Trust
+#
+# Alternative approach that has worked:
+#  p (nsCString*)malloc(sizeof(nsCString))
+#  p $->nsTString()
+#
 def construct
   p $obj = ($arg0 *) operator new(sizeof($arg0), malloc(sizeof($arg0)))
 end

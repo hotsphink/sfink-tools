@@ -276,6 +276,7 @@ class LabelCmd(gdb.Command):
             return
 
         v = gdb.parse_and_eval(value)
+        # FIXME! If there is a pretty printer for v, then we will fail to see the hex values we need. Want to skip it.
         m = re.search(r'0x[0-9a-fA-F]+', str(v))
         if not m:
             m = re.search(r'-?[0-9]{4,20}', str(v))
@@ -289,6 +290,7 @@ class LabelCmd(gdb.Command):
         # should set $SOMETHING to the actual value of $3
         labels.label(m.group(0), name, str(v.type), gdbval=v)
 
+    # FIXME! Getting duplicate labels
     def show_all_labels(self):
         for name, (value, t) in labels.items():
             gdb.write("${} = ({}) {}\n".format(value, t, name))
@@ -299,6 +301,7 @@ class UnlabelCmd(gdb.Command):
     def __init__(self, name):
         super(UnlabelCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_NONE)
 
+    # FIXME! Gtting KeyError, yet 'label' still shows
     def invoke(self, arg, from_tty):
         del labels[arg]
 
