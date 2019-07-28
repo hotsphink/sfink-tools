@@ -17,13 +17,13 @@ parser.add_argument('--group', '-g', metavar='GROUP', type=str,
                     default='Talos', help='restrict to jobs in with job_group_name containing GROUP')
 parser.add_argument('--verbose', '-v', type=bool,
                     default=False, help='verbose logging')
-parser.add_argument('url', type=str, nargs='*',
+parser.add_argument('url', type=str, nargs='?',
                     default=None, help='push url')
 
 args = parser.parse_args()
 
-if args.url:
-    m = re.search(r'revision=([0-9a-fA-F]+)', args.url[0])
+if args.url is not None:
+    m = re.search(r'revision=([0-9a-fA-F]+)', args.url)
     if not m:
         print('If an argument is given, it must be the URL of a push (it should have &revision=... in it somewhere)')
         sys.exit(1)
