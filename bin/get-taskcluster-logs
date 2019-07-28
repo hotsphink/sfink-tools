@@ -75,6 +75,7 @@ def get_log_info(job):
                 'job_type_name': job['job_type_name'],
                 'log_url': log['url'],
             }
+    raise Exception("Did not find a log tagged with name 'builds-4h' in job {}".format(job['id']))
 
 def generate_logs(project, push_id):
     for job in generate_jobs(args.project, push_id):
