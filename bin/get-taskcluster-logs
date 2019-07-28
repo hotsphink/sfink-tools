@@ -1,0 +1,105 @@
+#!/usr/bin/python3
+
+import argparse
+import os
+import re
+import requests
+import sys
+
+parser = argparse.ArgumentParser(description="Download logs from taskcluster")
+parser.add_argument('--revision', '-r', metavar='REV', type=str,
+                    help='download logs for this revision')
+parser.add_argument('--repository', '--repo', '-R', metavar='REPO', type=str,
+                    default='try', help='repository')
+parser.add_argument('--project', '-p', metavar='PROJECT', type=str,
+                    default='try', help='project name')
+parser.add_argument('--group', '-g', metavar='GROUP', type=str,
+                    default='Talos', help='restrict to jobs in with job_group_name containing GROUP')
+parser.add_argument('--verbose', '-v', type=bool,
+                    default=False, help='verbose logging')
+parser.add_argument('url', type=str, nargs='*',
+                    default=None, help='push url')
+
+args = parser.parse_args()
+
+if args.url:
+    m = re.search(r'revision=([0-9a-fA-F]+)', args.url[0])
+    if not m:
+        print('If an argument is given, it must be the URL of a push (it should have &revision=... in it somewhere)')
+        sys.exit(1)
+    args.revision=m.group(1)
+
+if not (args.repository and args.revision):
+    print("Not enough params given")
+    sys.exit(1)
+
+def fetch_page(url, desc=None, **kwargs):
+    if args.verbose:
+        print("Fetching {}".format(url))
+    r = requests.get(url, headers={'User-Agent': 'log-batch-fetcher/thatbastard/sfink'}, **kwargs)
+    if r.status_code != 200:
+        print("Error: Failed to fetch {}, status code {}".format(" ".join([desc, "page " + url]), r.status_code))
+        sys.exit(1)
+    return r
+
+#hg_url = 'https://hg.mozilla.org/{repo}/rev/{rev}'.format(repo=args.repository, rev=args.revision)
+#fetch_page(hg_url, "hg revision")
+
+push_url = 'https://treeherder.mozilla.org/api/project/{project}/push/?revision={rev}'.format(project=args.project, rev=args.revision)
+r = fetch_page(push_url, "push info")
+d = r.json()
+push_id = d['results'][0]['id']
+print("Found push id {} for {}".format(push_id, args.revision))
+
+def generate_jobs(project, push_id):
+    count=200
+    job_list_url_format = 'https://treeherder.mozilla.org/api/project/{project}/jobs/?push_id={push_id}&count={count}&offset={offset}'
+    offset = 0
+    while True:
+        job_list_url = job_list_url_format.format(project=project, push_id=push_id, count=count, offset=offset)
+        r = fetch_page(job_list_url, "job list")
+        d = r.json()
+        for res in d['results']:
+            yield res
+        if len(d['results']) < count:
+            break
+        offset += count
+
+def get_log_info(job):
+    log_url = 'https://treeherder.mozilla.org/api/project/{project}/job-log-url/?job_id={job_id}'.format(project=args.project, job_id=job['id'])
+    r = fetch_page(log_url, "job")
+    for log in r.json():
+        if log['name'] == 'builds-4h':
+            return {
+                'job_id': job['id'],
+                'job_type_name': job['job_type_name'],
+                'log_url': log['url'],
+            }
+
+def generate_logs(project, push_id):
+    for job in generate_jobs(args.project, push_id):
+        if args.group in job['job_group_name']:
+            yield get_log_info(job)
+
+push_dir = "push{push_id}-{rev}".format(push_id=push_id, rev=args.revision)
+try:
+    os.mkdir(push_dir)
+except OSError:
+    pass
+
+outfiles = []
+for loginfo in generate_logs(args.project, push_id):
+    log_name = "job{id}-{jobtype}.txt".format(
+        jobtype=loginfo['job_type_name'].replace('/', '_'),
+        id=loginfo['job_id']
+    )
+    filename = os.path.join(push_dir, log_name)
+    r = fetch_page(loginfo['log_url'], stream=True)
+    with open(filename, "wb") as fh:
+        for chunk in r.iter_content(chunk_size=1048576):
+            if chunk:
+                fh.write(chunk)
+    print("Wrote " + filename)
+    outfiles.append(filename)
+
+print("Wrote {} log files to {}/".format(len(outfiles), push_dir))
