@@ -7,7 +7,7 @@ This is going to be more of a summary overview than an in-depth description or t
 
 A number of things here use local crap that I've piled up over time. I've published a repository containing some of them. At the moment, I have it uploaded to two difference places. I don't know how long I'll keep them in sync before giving up on one:
 
-* (mercurial) https://bitbucket.org/sfink/sfink-tools
+* (mercurial) https://hg.sr.ht/~sfink/sfink-tools
 * (git) https://github.com/hotsphink/sfink-tools
 
 Code Management
@@ -15,7 +15,7 @@ Code Management
 
 I use mercurial. I like mercurial. I used git first, for quite a while, but it just doesn't stick in my brain.
 
-I formerly used mq, and when I'd finally had enough of it, I tried to make my vanilla hg workflow provide as many of the same benefits as possible. I also use evolve[1], though it's mostly just to make some things nicer.
+I formerly used mq, and when I'd finally had enough of it, I tried to make my vanilla hg workflow provide as many of the same benefits as possible. I also use evolve[1], though it's mostly just to make some things nicer. I'm currently torn between using bookmarks and topics, and use a little of each.
 
 I use phases heavily to keep track of what's "mine". If you're pushing to any personal repositories, be sure to mark them non-publishing.
 
@@ -31,11 +31,11 @@ so I can pull with
 
     % hg pull unified
 
-Read more on the unified repo at <http://mozilla-version-control-tools.readthedocs.io/en/latest/hgmozilla/unifiedrepo.html>. I will usually rebase on top of inbound. `./mach mercurial-setup` should set you up with firefoxtree, which will cause the above pull to advance some local tags that will conveniently give you the head of the various repositories. My usual next step is
+Read more on the unified repo at <http://mozilla-version-control-tools.readthedocs.io/en/latest/hgmozilla/unifiedrepo.html>. I will usually rebase on top of central. `./mach mercurial-setup` should set you up with firefoxtree, which will cause the above pull to advance some local tags that will conveniently give you the head of the various repositories. My usual next step is
 
-    % hg rebase -d inbound
+    % hg rebase -d central
 
-That assumes you are currently updated to the "patch stack" that you want to rebase, probably with a bookmark at its head.
+That assumes you are currently updated to the "patch stack" that you want to rebase, probably with a bookmark at its head (or the whole stack is on a topic.)
 
 What's my state?
 ----------------
@@ -44,29 +44,35 @@ The biggest thing I missed from mq was an easy way to see my current "patch stac
 
 ```
     % hg ls
-    418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
-    418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
-    418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers 
-    418165|9b790021a607   Bug 1367900 - Record the values and thresholds for GC triggers 
+    418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem
+    418149|44e7e11f4a71   No bug. Attempt to get error output to appear.
+    418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers
+    418165|9b790021a607   Bug 1367900 - Record the values and thresholds for GC triggers
     418171|5e12353100f6   Bug 1167452 - Incrementalize weakmap marking weakmap.incremental
 ```
 
-You can't see the colors, sorry. (Or if you can, you're looking at this document on bitbucket and the colors are random and crazy.) But the first line is orange, and is the public[2] revision that my current patch stack is based on. The remaining lines are the ancestry of my current checkout. Note the weird format: I have it display "<changeset>|<rev>" so I can double-click the hash and copy it. If I were smarter, I would teach my terminal to work with the normal ':' separator. Without breaking URL highlighting.
+You can't see the colors, sorry. But the first line is orange, and is the public[2] revision that my current patch stack is based on. The remaining lines are the ancestry of my current checkout. Note the weird format: I have it display "<changeset>|<rev>" so I can double-click the hash and copy it. If I were smarter, I would teach my terminal to work with the normal ':' separator. Without breaking URL highlighting.
 
-"weakmap.incremental" is green in my terminal. It's a bookmark name. Bookmarks are my way of keeping track of multiple things I'm working on. They're sort of feature branches, except I have a bad habit of piling up a bunch of unrelated things in my patch stack. If they start interfering with each other too much, I'll rebase them onto the tip of my mozilla-inbound checkout and give them their own bookmark names:
+"weakmap.incremental" is green in my terminal. It's a bookmark name. Bookmarks are my way of keeping track of multiple things I'm working on. They're sort of feature branches, except I have a bad habit of piling up a bunch of unrelated things in my patch stack. If they start interfering with each other too much, I'll rebase them onto the tip of my mozilla-central checkout and give them their own bookmark names:
 
-    % hg rebase -d inbound weakmap.incremental
+    % hg rebase -d central weakmap.incremental
     % hg book -r 9b790021a607 gc.triggers
-    % hg rebase -d inbound gc.triggers
+    % hg rebase -d central gc.triggers
 
 The implementation of `hg ls` in my ~/.hgrc is:
 
     [alias]
     # Will only show changesets that chain to the working copy.
-    ls = !if [[ -n "$1" ]]; then r="$1"; else r=.; fi; $HG log -r "parents(::$r and not public()) + ::$r and not public()" --template "{label('changeset.{phase}', '{rev}|{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', bookmarks)}\n"
+    ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(not public() and ::$r)" --template list
     sl = ls
 
-(Note that I mistype `hg ls` as `hg sl` about 40% of the time. You may not be so burdened.) There are better aliases for this. I think ./mach mercurial setup might give you `hg wip` or something now? But I like the terse output format of mine. (Just ignore that monstrosity of a template in the implementation.)
+    [revsetalias]
+    with_parents(s) = parents(s) or s
+
+    [templates]
+    list = "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', topic)} {label('tags.normal', bookmarks)}\n"
+
+(Note that I mistype `hg ls` as `hg sl` about 40% of the time. You may not be so burdened.) There are better aliases for this. I think ./mach mercurial setup might give you `hg wip` or something now? But I like the terse output format of mine. (Just ignore that monstrosity of a template in the implementation.) You can grab all of this stuff from the same repository that contains this document.
 
 That works for a single stack of patches underneath a root bookmark. To see all of my stacks, I do:
 
@@ -90,10 +96,10 @@ Working on code
 
 ### Updating, bookmarking
 
-When starting on something new, I'll update to 'inbound' (feel free to use 'central' if you don't want to live dangerously. Given that you'll have to rebase onto inbound before landing anyway, 'central' is probably a much smarter choice.) Then I'll create a bookmark for the feature/fix I'm working on:
+When starting on something new, I'll update to 'central'. Then I'll create a bookmark for the feature/fix I'm working on:
 
     % hg pull unified
-    % hg update -r inbound
+    % hg update -r central
     % hg book remove.xul
 
 Notice the clunky name "remove.xul". I formerly used '-' to separate words in my bookmark names, but '-' is a revset operator. It'll still work for many things (and I think it'd work with everything if you did eg `hg log -r 'bookmark("remove-xul")'`, but that's too much typing). Using periods as separators, that's just `hg log -r remove.xul`.
@@ -110,15 +116,15 @@ Then while I'm being a good boy and continuing to work on the feature named in t
 
 `hg amend` is a command from the evolve extension[1]. If you're not using it, you could substitute `hg commit --amend`, but it will annoyingly keep asking you to update the commit message. There's a fix, but this document is about my workflow, not yours.
 
-But often, I will get distracted and begin working on a different feature. I *could* update to inbound or central and start again, but that tends to touch too many source files and slow down my rebuilds, and I have a lot of inertia, so usually I'll just start hacking within the same bookmarked patch stack. When done or ready to work on the original (or a new) feature, I'll make another commit.
+Often, I will get distracted and begin working on a different feature. I *could* update to central and start again, but that tends to touch too many source files and slow down my rebuilds, and I have a lot of inertia, so usually I'll just start hacking within the same bookmarked/topiced patch stack. When done or ready to work on the original (or a new) feature, I'll make another commit.
 
 When I want to go back to working on the original feature, I *still* won't bother to clean things up, because I'm a bad and lazy person. Instead, I'll just start making a bunch of micro-commits pertaining to various of the patches in my current stack (possibly one at a time with `hg commit`, or possibly picking apart my working directory changes with `hg commit -i`; see below). I use a naming convention in the patch descriptions of "M-<which feature I'm changing>". So after a little while, my patch stack might look like:
 
 ```shell
-    418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
-    418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
-    418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers 
-    418165|9b790021a607   Bug 1367900 - Record the values and thresholds for GC triggers 
+    418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem
+    418149|44e7e11f4a71   No bug. Attempt to get error output to appear.
+    418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers
+    418165|9b790021a607   Bug 1367900 - Record the values and thresholds for GC triggers
     418171|5e12353100f6   Bug 1167452 - Incrementalize weakmap marking
     418172|deadbeef4dad   M-triggers
     418173|deadbeef4dad   M-static
@@ -127,22 +133,22 @@ When I want to go back to working on the original feature, I *still* won't bothe
     418176|deadbeef4dad   M-triggers
 ```
 
-What a mess, huh? Now comes the fun part. I'm a huge fan of the 'chistedit' extension[3]. The default 'histedit' will do the same thing using your text editor; I just really like the curses interface. I have an alias to make chistedit use a reasonable default for which revisions to show, which I suspect is no longer needed now that histedit has changed to default to something good. But mine is:
+What a mess, huh? Now comes the fun part. I'm a huge fan of the curses interface to the 'histedit' command. I have an alias to make histedit use a reasonable default for which revisions to show, which I suspect is no longer needed now that histedit has changed to default to something good. But mine is:
 
     [alias]
-    che = chistedit -r 'not public() and ancestors(.)'
+    he = histedit -i -r 'not public() and ancestors(.)'
 
-Now `hg che` will bring up a curses interface showing your patch stack. Use j/k to move the highlight around the list. Highlight one of the patches, say the first "M-triggers", and then use J/K (K in this case) to move it up or down in the list. Reshuffle the patches until you have your modification patches sitting directly underneath the main patch, eg
+Now `hg he` will bring up a curses interface showing your patch stack. Use j/k to move the highlight around the list. Highlight one of the patches, say the first "M-triggers", and then use J/K (K in this case) to move it up or down in the list. Reshuffle the patches until you have your modification patches sitting directly underneath the main patch, eg
 
 ```shell
-    pick  418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
-    pick  418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
-    pick  418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers 
+    pick  418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem
+    pick  418149|44e7e11f4a71   No bug. Attempt to get error output to appear.
+    pick  418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers
     pick  418173|deadbeef4dad   M-static
-    pick  418165|9b790021a607   Bug 1367900 - Record the values and thresholds for GC triggers 
+    pick  418165|9b790021a607   Bug 1367900 - Record the values and thresholds for GC triggers
     pick  418174|deadbeef4dad   M-triggers
     pick  418172|deadbeef4dad   M-triggers
-    pick  418176|deadbeef4dad   M-triggers 
+    pick  418176|deadbeef4dad   M-triggers
     pick  418171|5e12353100f6   Bug 1167452 - Incrementalize weakmap marking
     pick  418175|deadbeef4dad   M-weakmap
 ```
@@ -150,11 +156,11 @@ Now `hg che` will bring up a curses interface showing your patch stack. Use j/k 
 Now use 'r' to "roll" these patches into their parents. You should end up with something like:
 
 ```shell
-    pick  418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem 
-    pick  418149|44e7e11f4a71   No bug. Attempt to get error output to appear. 
-    pick  418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers 
+    pick  418116|8b3ea20f546c   Bug 1333000 - Display some additional diagnostic information for ConstraintTypeSet corruption, r=jandem
+    pick  418149|44e7e11f4a71   No bug. Attempt to get error output to appear.
+    pick  418150|12723a4fa5eb   Bug 1349531 - Remove non-threadsafe static buffers
     roll^ 418173|deadbeef4dad
-    pick  418165|9b790021a607   Bug 1367900 - Record the values and thresholds for GC triggers 
+    pick  418165|9b790021a607   Bug 1367900 - Record the values and thresholds for GC triggers
     roll^ 418174|deadbeef4dad
     roll^ 418172|deadbeef4dad
     roll^ 418176|deadbeef4dad
@@ -166,9 +172,9 @@ Notice the caret that shows the direction of the destination patch, and that the
 
 Now press 'c' to commit the changes. Whee! Use `hg ls` to see that everything is nice and pretty.
 
-There is a new `hg absorb` command that will take your working directory changes and automatically roll them into the appropriate non-public patch. I haven't started using it yet.
+There is an `hg absorb` command that will take your working directory changes and automatically roll them into the appropriate non-public patch. It is awesome. I actually reach for it first these days, so the above is a little bit of a lie -- I only fall back on the manual histediting when absorb fails me. (Which it will often, correctly, when you make changes that don't happen to overlap the previous changes for a given purpose. But it's safe to use to at least apply the portions that it *can* figure out.)
 
-(chistedit has other nice tricks. Use 'v' to see the patch. j/k now go up and down a line at a time. Space goes down a page, page up/down work. J/K now switch between patches. Oops, I just noticed I didn't update the help to include that. 'v' to return back to the patch list. Now try 'm', which will bring up an editor after you 'c' commit the changes, allowing you to edit the commit message for each patch so marked.)
+histedit has other nice tricks. Use 'v' to see the patch. j/k now go up and down a line at a time. Space goes down a page, page up/down work. J/K now switch between patches. Oops, I just noticed I didn't update the help to include that. 'v' to return back to the patch list. Now try 'm', which will bring up an editor after you 'c' commit the changes, allowing you to edit the commit message for each patch so marked.
 
 From my above example, you might think I use one changeset per bug. That's very bug-dependent; many times I'll have a whole set of patches for one bug, and I'll have multiple bugs in my patch stack at one time. If you do that too, be sure to put the bug number in your commit message early to avoid getting confused[4].
 
@@ -196,7 +202,7 @@ And if you accidentally get it wrong and amend a patch with stuff that doesn't b
     % hg uncommit -a
     % hg amend -i
 
-That will empty out the top patch, leaving the changes in your working directory, then bring up the interface to allow you to re-select just the stuff that belongs in that top patch. The remnants will be in your working directory, so proceed as usual.
+That will empty out the top patch, leaving the changes in your working directory, then bring up the interface to allow you to re-select just the stuff that belongs in that top patch. The remnants will be in your working directory, so proceed as usual. Alternatively, `hg split` will allow interactively splitting up a patch into multiple parts.
 
 ### Navigating through your stack
 
@@ -227,26 +233,17 @@ I don't remember what all that crap is for. It was mostly an attempt to get it t
 
 ### Uploading patches to bugs
 
-I'm an old fart, so I almost always upload patches to bugzilla and request review there insead of using MozReview. If I already have a bug, the procedure is generally
+I mostly use moz-phab now to submit bugs.
 
-    % hg bzexport -r :fitzgen 1234567 -e
- 
-In the common case where I have a patch per bug, I usually won't have put the bug number in my commit message yet, so due to this setting in my ~/.hgrc:
+    % moz-phab submit --reviewer fitzgen --bug 1234567 . .
 
-    [bzexport]
-    update-patch = 1
-
-bzexport will automatically prefix my commit message with "Bug 1234567 - ". It won't insert "r=fitzgen" or "r?fitzgen" or anything; I prefer to do that manually as a way to keep track of whether I've finished incorporating any review comments.
+I usually won't have put the bug number in my commit message yet, but moz-phab will do it for me (at the cost of updating the patch and often erroring out if you have any patches on top of it, since it tries to use the old patch instead of the new. But it's harmless.)
 
 If I don't already have a bug, I will create it via bzexport:
 
     % hg bzexport --new -r :fitzgen -e --title 'Crashes on Wednesdays'
 
-Now, I must apologize, but that won't work for you. You will have to do
-
-    % hg bzexport --new -C 'Core :: GC' -r :fitzgen -e --title 'Crashes on Wednesdays'
-
-because you don't have my fancy schmancy bzexport logic to automatically pick the component based on the files touched. Sorry about that; I'd have to do a bunch of cleanup to make that landable. And these days it would be better to rely on the moz.build bug component info instead of crawling through history.
+Now, I must apologize, but that won't work for you. My version of bzexport has fancy schmancy logic to automatically pick the component based on the files touched, and it invokes moz-phab to do the upload. Sorry about that; I'd have to do a bunch of cleanup to make that landable. And these days it would be better to rely on the moz.build bug component info instead of crawling through history.
 
 Other useful flags are `--blocks`, `--depends`, `--cc`, and `--feedback`. Though I'll often fill those in when the editor pops up.
 
@@ -256,15 +253,7 @@ If I need to upload multiple patches, I'll update to each in turn (often using `
 
 ### Uploading again
 
-I'm sloppy and frequently don't get things right on the first try, so I'll need to upload again. Now this is a little tricky, because you want to mark the earlier versions as obsolete. In mq times, this was pretty straightforward: your patches had names, and it could just find the bug's patch attachment with the matching name. Without names, it's harder. You might think that it would be easiest to look for a matching commit message, and you'd probably be right, but it turns out that I tend to screw up my early attempts enough that I have to change what my patches do, and that necessitates updating the commit message.
-
-So if you are using evolve, bzexport is smart and looks backwards through the history of each patch to find its earlier versions. (When you amend a changeset, or roll/fold another changeset into it, evolve records markers saying your old patch was "succeeded" by the new version.) For the most part, this Just Works. Unless you split one patch into two. Then which should be obsoleted? bzexport tries will make a valiant attempt to find an appropriate "base" changeset to use for each one. It isn't perfect, but I have not yet encountered a situation where it gets it wrong. (Or at least not very wrong. If you fold two patches together, it'll obsolete only one of the originals, for example.)
-
-Remember to use the -r flag again when you re-upload, assuming you're still ready for it to be reviewed. You don't need the bug number (or --new option) anymore, because bzexport will grab the bug number from the commit message, but it won't automatically re-request review from the same person. You might want to just upload the patch without requesting review, after all. But usually this second invocation would look like:
-
-    % hg bzexport -r :fitzgen
-
-(the lack of -e there means it won't even bother to bring up an editor for a new comment to go along with the updated attachment. If you want the comment, use `-e`. Or `--comment "another attempt"` if you prefer.)
+I originally had a detailed description of how bzexport helps with this case, but these days you'll need to use moz-phab and suffer through its weirdnesses.
 
 ### Incorporating review comments
 
@@ -272,21 +261,13 @@ I've already covered this. Update to the appropriate patch, make your changes, `
 
 ### Landing
 
-I update to the appropriate patch. Use `hg amend -m` to update the commit message, adding the "r=fitzgen". Or if I need to do a bunch of them, I will run `hg che` (or just `hg chistedit`), go to each relevant patch, use 'm' to change the action to 'mess' (short for "message"), 'c' to commit to this histedit action string, and edit the messages in my $EDITOR.
-
-Now I use chistedit to shuffle my landable patches to the top of the screen (#0 is the changeset directly atop a public changeset). Do not reorder them any more than necessary. I'll update to the last changeset I want to land, and `hg push mozilla-inbound -r .`. (Ok, really I use an 'mi' alias, and :gps magic makes '-r .' the default for mozilla repos. So I lied, I do `hg push mi`.)
-
-Next I'll usually do a final try push. I `cd` to the top of my source checkout, then run:
+I'll usually do a final try push. I `cd` to the top of my source checkout, then run:
 
     % ./mach try <try args>
 
-If you don't know try syntax, use https://mozilla-releng.net/trychooser/ to construct one. I've trained my brain to know various ones useful to what I work on, but you can't go too far wrong with
+If you don't know try syntax, use `mach try chooser` to construct one. I've trained my brain to know various ones useful to what I work on, but you can't go too far wrong with
 
     % ./mach try -b do -p all -u all[x64]
-
-And this part is another lie; I actually use my `hg trychooser` extension which has a slick curses UI based on a years-old database of try options. That I never use anymore. I do it manually, with something like
-
-    % hg trychooser -m 'try: -b do -p all -u all[x64]'
 
 ### Forking your stack
 
@@ -315,7 +296,7 @@ So being able to jump all over your various feature bookmarks and things is cool
 watchman
 --------
 
-Oh yeah, watchman. It makes many operations way, way faster. Or at least it did; recently, it often slows things down before it gives up and times out. Yeah, I ought to file a bug on it. The log doesn't say much.
+Oh yeah, watchman. It makes many operations way, way faster. Though everything is still slow.
 
 I can't remember how to set up watchman, sorry. It looks like I built it from source? Hm, maybe I should update, then. You need two pieces: the watchman daemon that monitors the filesystem, and the python mercurial extension that talks to the daemon to accelerate hg operations. The latter part can be enabled with
 
@@ -354,7 +335,7 @@ to bring up Emacs with rr replay running on the last rr recording I've made, aga
 
 to tell it which one. Or
 
-    % ./mach test --debugger=debug some/test/file
+    % ./mach mochitest --debugger=debug some/test/file
 
 to run the given test with hopefully the appropriate binary running under gdb inside Emacs inside the woman who swallowed a fly I don't know why. Or if you're truly crazy,
 
@@ -385,17 +366,13 @@ I have a .gdbinit file with some funky commands to set hardware watchpoints on G
     (rr) rfin
     (rr) log {$2+4} bytes are required   # {any gdb expr}
     (rr) n
-    (rr) log -dump
-    562/8443 T2 sees the bad value
-    562/8443 also, obj is now 0x7ff687749c00
-    346/945 7 bytes are required
-    (rr) log -sorted
+    (rr) log
        346/945 7 bytes are required
     => 562/8443 T2 sees the bad value
        562/8443 also, obj is now 0x7ff687749c00
-    (rr) log -edit  # brings up $EDITOR on your full log file
+    (rr) log/e                           # brings up $EDITOR on your full log file
 
-The idea is to be able to move around in time, logging various things, and then use `log -sorted` (abbreviated to `log -s`) to display the log messages *in chronological order according to the execution*. (Note that when you do this, the next point in time coming up will be labeled with "=>" to show you when you are.) You might consider using this in conjunction with `command` as a simple way of automatically tracing the evolution of some value:
+The idea is to be able to move around in time, logging various things, and then use `log` to display the log messages *in chronological order according to the execution*. (Note that when you do this, the next point in time coming up will be labeled with "=>" to show you when you are.) You might consider using this in conjunction with `command` as a simple way of automatically tracing the evolution of some value:
 
     (rr) b HashTable::put
     Breakpoint 1 set at HashTable::put(Entry)
@@ -405,7 +382,7 @@ The idea is to be able to move around in time, logging various things, and then 
     > end
     (rr) c
 
-Boom! You now have the value of mEntries every time put() is called. Or consider doing that with a hardware watchpoint. (But watch out for log messages in breakpoints; it will execute the log command every time you encounter the breakpoint, so if you go forwards and backwards across the breakpoint several times, you'll end up with a bunch of duplicate entries in your log. `log -edit` aka `log -e` is useful for manually cleaning those up.)
+Boom! You now have the value of mEntries every time put() is called. Or consider doing that with a hardware watchpoint. (But watch out for log messages in breakpoints; it will execute the log command every time you encounter the breakpoint, so if you go forwards and backwards across the breakpoint several times, you'll end up with a bunch of duplicate entries in your log. `log/e` is useful for manually cleaning those up.)
 
 Note that the default log filename is based on the process ID, and the logging will append entries across multiple `rr replay` runs. So if you run muliple sessions of `rr replay` on the same process recording, all of your log messages will be collected together. Use `set logfile <filename>` to switch to a different file.
 
@@ -418,9 +395,9 @@ Finally, there's a simple `pp` command, where `pp foo` is equivalent to `python 
     [extensions]
     evolve = ~/lib/hg/evolve/hgext3rd/evolve
 
-[2] "public" is the name of a mercurial phase. It means a changeset that has been pushed to mozilla-inbound or similar. Stuff you're working on will ordinarily be in the "draft" phase until you push it. [↩](#a1)
+[2] "public" is the name of a mercurial phase. It means a changeset that has been pushed to mozilla-central or similar. Stuff you're working on will ordinarily be in the "draft" phase until you push it. [↩](#a1)
 
-[3] `hg clone https://bitbucket.org/facebook/hg-experimental` somewhere, then activate it with
+[3] There is no [3] anymore. But it was: `hg clone https://bitbucket.org/facebook/hg-experimental` somewhere, then activate it with
 
     [extensions]
     chistedit = ~/lib/hg/hg-experimental/hgext3rd/chistedit.py

@@ -19,7 +19,7 @@ Configuration files:
 
 I also have a set of gdb initialization files that I version-control here.
 
- - gdbstart.py : gdb init file that loads all of the below gdb startup files
+ - gdbstart.py : gdb init file that loads all of the below gdb startup files (except for gdbinit.sfink)
  - gdbinit : basic gdb configuration
  - gdbinit.py : gdb python init file, defines some miscellany
  - gdbinit.symbols.py : Ted Mielczarek's source server integration for gdb
