@@ -92,7 +92,7 @@ def generate_logs(project, push_id):
     for job in generate_jobs(args.project, push_id):
         if args.group not in job['job_group_name']:
             continue
-        if args.type is not None or args.type in job['job_type_name']:
+        if args.type is None or args.type in job['job_type_name']:
             yield get_log_info(job)
 
 def get_names(project, push_id):
@@ -106,8 +106,12 @@ def get_names(project, push_id):
 push_url = 'https://treeherder.mozilla.org/api/project/{project}/push/?revision={rev}'.format(project=args.project, rev=args.revision)
 r = fetch_page(push_url, "push info")
 d = r.json()
+if not d['results']:
+    print("No push found for project={} rev={}".format(args.project, args.revision))
+    sys.exit(1)
 push_id = d['results'][0]['id']
-print("Found push id {} for {}".format(push_id, args.revision))
+if args.verbose:
+    print("Found push id {} for {}".format(push_id, args.revision))
 
 push_dir = "push{push_id}-{rev}".format(push_id=push_id, rev=args.revision[0:12])
 try:

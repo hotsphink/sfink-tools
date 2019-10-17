@@ -6,6 +6,7 @@ These are tools that I think might be useful to other people.
 
 Tools included:
 
+ - get-taskcluster-logs : Retrieve groups of log files from a push by scraping taskcluster
  - json : Interactive navigation of a JSON file
  - debug : Start up a debugger within emacs on various types of files
  - rr-exits : List out all rr recordings with their worst exit codes
@@ -42,6 +43,24 @@ Other configuration files:
  - hgrc : Mercurial configuration
 
 I use this via a symlink from ~/.hgrc.
+
+----------------------------------------------------------------------
+
+get-taskcluster-logs - Retrieve groups of log files from a push by scraping taskcluster
+
+Typical example: copy link location to a taskcluster push (what you get from
+clicking on the date for a push), and run
+
+    get-taskcluster-logs '<url>'
+
+Alternatively, use the topmost revision of a push with the -r flag:
+
+    get-taskcluster-logs -r <rev>
+
+By default, this downloads all logs for all Talos jobs in that push, and stores
+them in individual text files under a new directory.
+
+See --help for additional options and usage.
 
 ----------------------------------------------------------------------
 
