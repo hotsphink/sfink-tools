@@ -40,6 +40,7 @@ maxfuzz = 10
 progress =
 
 # Standard additional commands
+patchbomb =
 mq =
 record =
 rebase =
@@ -83,12 +84,13 @@ mozext = ~/lib/version-control-tools/hgext/mozext/
 
 # Note: if I use the .mozbuild version, it seems to get confused between
 #mozhg/util.py versions from ~/lib and ~/.mozbuild.
-# firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
-firefoxtree = ~/lib/version-control-tools/hgext/firefoxtree
+firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
 
 # format-source = ~/.mozbuild/version-control-tools/hgext/format-source
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
 #clang-format = ~/.mozbuild/version-control-tools/hgext/clang-format
+
+cmdconvert = ~/lib/hg/cmdconvert
 
 [alias]
 ##################### aliases I actually use #####################
@@ -303,6 +305,8 @@ hg.mozilla.org:fingerprints = sha256:17:38:aa:92:0b:84:3e:aa:8e:52:52:e9:4c:2f:9
 wip = '{label("wip.branch", if(branches,"{branches} "))}{label(ifeq(graphnode,"x","wip.obsolete","wip.{phase}"),"{rev}:{node|short}")}{label("wip.user", " {author|user}")}{label("wip.tags", if(tags," {tags}"))}{label("wip.tags", if(fxheads," {fxheads}"))}{if(bookmarks," ")}{label("wip.bookmarks", if(bookmarks,bookmarks))}{label(ifcontains(rev, revset("parents()"), "wip.here"), " {desc|firstline}")}'
 
 list = "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', topic)} {label('tags.normal', bookmarks)}\n"
+
+fulldesc = "{desc}\n"
 
 [bundleclone]
 prefers = uc2region=us-west-1
