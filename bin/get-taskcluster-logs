@@ -6,19 +6,36 @@ import re
 import requests
 import sys
 
-parser = argparse.ArgumentParser(description="Download logs from taskcluster")
-parser.add_argument('--revision', '-r', metavar='REV', type=str,
-                    help='download logs for this revision')
-parser.add_argument('--repository', '--repo', '-R', metavar='REPO', type=str,
-                    default='try', help='repository')
-parser.add_argument('--project', '-p', metavar='PROJECT', type=str,
-                    default='try', help='project name')
-parser.add_argument('--group', '-g', metavar='GROUP', type=str,
-                    default='Talos', help='restrict to jobs in with job_group_name containing GROUP')
-parser.add_argument('--verbose', '-v', type=bool,
-                    default=False, help='verbose logging')
-parser.add_argument('url', type=str, nargs='?',
-                    default=None, help='push url')
+from collections import defaultdict
+
+parser = argparse.ArgumentParser(description="Download logs from taskcluster into a new directory named push<id>-<rev>")
+parser.add_argument(
+    '--revision', '-r', metavar='REV', type=str,
+    help='download logs for this revision')
+parser.add_argument(
+    '--repository', '--repo', '-R', metavar='REPO', type=str,
+    default='try', help='repository (default: try)')
+parser.add_argument(
+    '--project', '-p', metavar='PROJECT', type=str,
+    default='try', help='project name')
+parser.add_argument(
+    '--group', '-g', metavar='GROUP', type=str,
+    default='Talos', help='restrict to jobs with job_group_name containing GROUP (default: Talos). List available groups with --list.')
+parser.add_argument(
+    '--type', metavar='TYPE', type=str,
+    default=None, help='restrict to jobs with job_type_name containing TYPE')
+parser.add_argument(
+    '--list', '--list-groups', action='store_true',
+    help='display a list of all available job groups')
+parser.add_argument(
+    '--list-all', action='store_true',
+    help='display a list of all available job groups and job types')
+parser.add_argument(
+    '--verbose', '-v', type=bool,
+    default=False, help='verbose logging')
+parser.add_argument(
+    'url', type=str, nargs='?',
+    default=None, help='push url (if given, revision and/or repository will be extracted)')
 
 args = parser.parse_args()
 
@@ -28,6 +45,9 @@ if args.url is not None:
         print('If an argument is given, it must be the URL of a push (it should have &revision=... in it somewhere)')
         sys.exit(1)
     args.revision=m.group(1)
+    m = re.search(r'\brepo=([\w\-]+)', args.url)
+    if m and args.repository == 'try':
+        args.repository = m.group(1)
 
 if not (args.repository and args.revision):
     print("Not enough params given")
@@ -41,15 +61,6 @@ def fetch_page(url, desc=None, **kwargs):
         print("Error: Failed to fetch {}, status code {}".format(" ".join([desc, "page " + url]), r.status_code))
         sys.exit(1)
     return r
-
-#hg_url = 'https://hg.mozilla.org/{repo}/rev/{rev}'.format(repo=args.repository, rev=args.revision)
-#fetch_page(hg_url, "hg revision")
-
-push_url = 'https://treeherder.mozilla.org/api/project/{project}/push/?revision={rev}'.format(project=args.project, rev=args.revision)
-r = fetch_page(push_url, "push info")
-d = r.json()
-push_id = d['results'][0]['id']
-print("Found push id {} for {}".format(push_id, args.revision))
 
 def generate_jobs(project, push_id):
     count=200
@@ -79,14 +90,41 @@ def get_log_info(job):
 
 def generate_logs(project, push_id):
     for job in generate_jobs(args.project, push_id):
-        if args.group in job['job_group_name']:
+        if args.group not in job['job_group_name']:
+            continue
+        if args.type is not None or args.type in job['job_type_name']:
             yield get_log_info(job)
 
-push_dir = "push{push_id}-{rev}".format(push_id=push_id, rev=args.revision)
+def get_names(project, push_id):
+    groups = defaultdict(int)
+    types = defaultdict(int)
+    for job in generate_jobs(args.project, push_id):
+        groups[job['job_group_name']] += 1
+        types[job['job_type_name']] += 1
+    return groups, types
+
+push_url = 'https://treeherder.mozilla.org/api/project/{project}/push/?revision={rev}'.format(project=args.project, rev=args.revision)
+r = fetch_page(push_url, "push info")
+d = r.json()
+push_id = d['results'][0]['id']
+print("Found push id {} for {}".format(push_id, args.revision))
+
+push_dir = "push{push_id}-{rev}".format(push_id=push_id, rev=args.revision[0:12])
 try:
     os.mkdir(push_dir)
 except OSError:
     pass
+
+if args.list or args.list_all:
+    (groups, types) = get_names(args.project, push_id)
+    if args.list_all:
+        print("Types:")
+        for name, count in types.items():
+            print("{} x {}".format(count, name))
+    print("Groups:")
+    for name, count in groups.items():
+        print("{} x {}".format(count, name))
+    sys.exit(0)
 
 outfiles = []
 for loginfo in generate_logs(args.project, push_id):
