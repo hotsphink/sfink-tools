@@ -81,6 +81,7 @@ bzexport = ~/lib/version-control-tools/hgext/bzexport/
 trychooser = ~/lib/hg/trychooser/
 mozext = ~/lib/version-control-tools/hgext/mozext/
 # reviewboard = ~/lib/version-control-tools/hgext/reviewboard/client.py
+phabsend-moz = ~/.mozbuild/phabsend-moz/phabricator.py
 
 # Note: if I use the .mozbuild version, it seems to get confused between
 #mozhg/util.py versions from ~/lib and ~/.mozbuild.
@@ -119,6 +120,12 @@ lsbranch = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents((::$r + des
 
 entopic = topic -r 'ancestors(.) and not public()'
 
+submit = phabsend
+phsend = phabsend
+phupdate = phabupdate
+phread = phabread
+phquery = phabqquery
+
 ######### aliases I would use if I remembered they existed #######
 
 file = files "relglob:$1"
@@ -143,7 +150,7 @@ lls = !$HG ls $1 | tac | perl -lne '$n = $. - 1; print sprintf "%-4s %s", $. < 5
 
 # See gitremotedelete in ~/.config/hg/hgrc
 
-# For Callek, really. I use em.
+# For Callek, really. I use `em`.
 workon = !bash -c 'cd $($HG root) && $EDITOR $($HG status -n -m -a ${1+--change $1})' -- "$@"
 
 # From junw, mostly what evolve does:
@@ -364,5 +371,12 @@ usephases = True
 clang-format = /home/sfink/src/mozilla/mach clang-format -assume-filename=$HG_FILENAME -p
 clang-format:configpaths = .clang-format, .clang-format-ignore
 clang-format:fileext = .cpp, .c, .h
+
+[phabricator]
+callsign = mozilla-central
+url = https://phabricator.services.mozilla.com
+
+[phabsend]
+setbaseparent = true
 
 # Personal configuration is in ~/.config/hg/hgrc
