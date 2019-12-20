@@ -361,22 +361,42 @@ class util:
         return "(%s) %s" % (ts, s)
 
 class PrintCmd(gdb.Command):
-    """like gdb's builtin 'print' function, with label replacements and special syntax.
+    """\
+like gdb's builtin 'print' function, with label replacements and special syntax.
+
+Any substring that matches a label SOMELABEL will be replaced with the
+literal string `$SOMELABEL`.
+
+If `m..n` is found anywhere in the string, the print will be repeated for
+every number in that range.
+
+If `{substr}**n` is found in the string, then substr will be repeated n
+times.
 """
 
     def __init__(self, name):
         super(PrintCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_COMMAND)
 
     def enumerateExprs(self, expr):
-        m = re.match(r'^(.*?)(\w+)\.\.(\w+)(.*)', expr)
-        if not m:
-            yield expr
+        m = re.match(r'(.*?)(\w+)\.\.(\w+)(.*)', expr)
+        if m:
+            start = gdb.parse_and_eval(m.group(2))
+            end = gdb.parse_and_eval(m.group(3))
+            for i in range(start, end):
+                newExpr = m.group(1) + str(i) + m.group(4)
+                yield from self.enumerateExprs(newExpr)
             return
-        start = gdb.parse_and_eval(m.group(2))
-        end = gdb.parse_and_eval(m.group(3))
-        for i in range(start, end):
-            newExpr = m.group(1) + str(i) + m.group(4)
+
+        m = re.match(r'(.*?)\{(.*?)\}\*\*(\d+)(.*)', expr)
+        if m:
+            start, subexpr, n, rest = m.groups()
+            n = int(n)
+            newExpr = start + ''.join(subexpr for _ in range(n)) + rest
             yield from self.enumerateExprs(newExpr)
+            return
+
+        yield expr
+        return
 
     def invoke(self, arg, from_tty):
         # Format for x command is: <repcount> oxdutfaicsz bhwg
