@@ -271,10 +271,9 @@ username = sphink@gmail.com
 # apikey in ~/.config/hg/hgrc
 
 [bzexport]
-submit-method = moz-phab
+#submit-method = bugzilla
 
 update-patch = True
-rename-patch = True
 unified = 10
 
 # Testing
@@ -381,11 +380,8 @@ clang-format = /home/sfink/src/mozilla/mach clang-format -assume-filename=$HG_FI
 clang-format:configpaths = .clang-format, .clang-format-ignore
 clang-format:fileext = .cpp, .c, .h
 
-[phabricator]
-callsign = mozilla-central
-url = https://phabricator.services.mozilla.com
-
 [phabsend]
 setbaseparent = true
+amend = true
 
 # Personal configuration is in ~/.config/hg/hgrc
