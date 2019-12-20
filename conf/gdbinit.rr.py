@@ -287,6 +287,11 @@ class PythonLog(gdb.Command):
             if out != arg:
                 do_print = True
             if self.LogFile:
+                gdb_out = gdb.execute("checkpoint", to_string=True)
+                m = re.search(r'Checkpoint (\d+)', gdb_out)
+                if m:
+                    checkpoint = m.group(1)
+                    out = "[c{}] ".format(checkpoint) + out
                 self.LogFile.write("%s %s\n" % (now(), out))
 
         if do_dump:
