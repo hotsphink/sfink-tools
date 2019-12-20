@@ -63,11 +63,11 @@ blackbox =
 journal =
 
 # Nonstandard additional commands
-qbackout = ~/lib/version-control-tools/hgext/qbackout/
+#qbackout = ~/lib/version-control-tools/hgext/qbackout/
 mqext = ~/lib/version-control-tools/hgext/mqext
 evolve = ~/lib/hg/evolve/hgext3rd/evolve
 topic = ~/lib/hg/evolve/hgext3rd/topic
-hgsubversion = ~/lib/hg/hgsubversion/hgsubversion
+#hgsubversion = ~/lib/hg/hgsubversion/hgsubversion
 
 # Facebook stuff
 # smartlog = ~/lib/hg/hg-experimental/hgext3rd/smartlog.py
