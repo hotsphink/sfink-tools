@@ -77,7 +77,7 @@ topic = ~/lib/hg/evolve/hgext3rd/topic
 # Mozilla/bugzilla/tryserver integration
 #qimportbz = ~/.mozbuild/version-control-tools/hgext/qimportbz
 qimportbz = ~/lib/version-control-tools/hgext/qimportbz
-bzexport = ~/lib/version-control-tools/hgext/bzexport/
+bzexport = ~/lib/hg/bzexport/
 trychooser = ~/lib/hg/trychooser/
 mozext = ~/lib/version-control-tools/hgext/mozext/
 # reviewboard = ~/lib/version-control-tools/hgext/reviewboard/client.py
