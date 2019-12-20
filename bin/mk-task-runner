@@ -1,0 +1,50 @@
+#!/usr/bin/python3
+
+import json
+import os
+import requests
+import shlex
+import sys
+
+task_url = 'https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/{}'.format(sys.argv[1])
+payload = requests.get(task_url).json()["payload"]
+payload["env"]["TASKCLUSTER_ROOT_URL"] = 'https://firefox-ci-tc.services.mozilla.com'
+# payload["env"]["GECKO_PATH"] = '/builds/worker/source'
+
+with open("run-task.sh", "w") as fh:
+    print('#!/bin/bash -x', file=fh)
+
+    # Write out the environment settings.
+    for k, v in payload["env"].items():
+        print("export {}={}".format(shlex.quote(k), shlex.quote(v)), file=fh)
+
+    print('if [ -d /builds/worker/fetches/gcc ]; then unset MOZ_FETCHES; fi', file=fh)
+
+    # Write out the command to execute.
+    command = []
+    for i, cmd in enumerate(payload["command"]):
+        if i == 0:
+            command.append('/builds/worker/source/taskcluster/scripts/run-task')
+            command.append('--keep')
+            command.append('--existing-gecko-checkout=/builds/worker/source')
+        else:
+            command.append(cmd)
+
+    command_str = ' '.join(shlex.quote(x)
+                           for x
+                           in command
+                           if 'fetch-hgfingerprint' not in x)
+    print('''\
+if [ "$1" = "--shell" ]; then
+  echo "Would have run:"
+  echo -- {command}
+else
+  {command} >&1 | tee build.log
+  echo "Running post-job shell"
+fi
+export PS1='task \h:\w\$ '
+exec bash
+'''.format(command=command_str), file=fh)
+
+os.chmod("run-task.sh", 0o777)
+print("Wrote run-task.sh")
