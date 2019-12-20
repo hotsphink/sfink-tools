@@ -181,9 +181,13 @@ spew = !$HG export -r 'not public()' | perl -lne '$$r ||= "none"; $$r = $$1 if /
 # bug, named bug.<bugno>.<desc>
 enbug = !msg=$($HG log -r . --template '{desc}\n'); echo "$msg" | grep -q "^Bug" || $HG commit --amend -m "Bug $1 - $msg"; book=$($HG log -r . --template '{activebookmark}\n'); [ -n "$book" ] && $HG book -m "$book" "bug.$1.$book"
 
+amendbug = !msg=$($HG log -r . --template '{desc}\n'); if echo "$msg" | grep -q "^Bug"; then echo "Message already contains bug number"; else $HG amend -m "Bug $1 - $msg" ; fi
+ambug = amendbug
+
 yay = !msg="$($HG log -r . --template '{desc}\n'), r=$1"; $HG commit --amend -m "$msg"; echo "$msg"
 
 reb = rebase -d rebase_default
+rebase! = rebase -d rebase_default
 wip = log --graph --rev=wip --template=wip
 smart-annotate = annotate -w --skip ignored_changesets
 
@@ -217,6 +221,11 @@ allbook($1) = my(lineage(bookmark($1)))
 alltopic($1) = my(lineage(topic($1)))
 allbranch($1) = my(lineage($1))
 ignored_changesets = desc("ignore-this-changeset") or extdata(get_ignored_changesets)
+
+# Intended for rebasing a new ministack on top of where it was inserted.
+sibling($1) = children(p1($1)) - $1
+
+cousin($1) = last(not public() and (children(ancestors($1)) - ancestors($1)))
 
 [extdata]
 get_ignored_changesets = shell:cat `hg root`/.hg-annotate-ignore-revs 2> /dev/null || true
