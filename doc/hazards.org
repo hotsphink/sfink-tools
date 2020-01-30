@@ -1,0 +1,640 @@
+#+OPTIONS: ^:nil
+
+* Problem definition
+
+** Most basic hazard
+
+#+BEGIN_SRC
+    void helium() {
+      JSObject* obj = getObject();
+      doSomethingThatMightGC();
+      use(obj);
+    }
+#+END_SRC
+
+obj is a valid GC pointer. doSomethingThatMightGC() runs, triggers GC, and the
+GC moves obj somewhere else. The GC has no way of updating obj (it might be on
+the stack, or in a register), so it continues pointing to the old location.
+
+** The rule: Thou Shalt Not Hold a GC Pointer Live Across a (Potential) GC
+
+A simple non-hazard:
+
+#+BEGIN_SRC
+    void hydrogen() {
+      JSObject* obj = getObject();
+      doSomethingThatMightGC();
+    }
+#+END_SRC
+
+Whatever holds obj will be invalidated, but it doesn't matter, since it isn't
+used afterwards.
+
+** Tricky hazard 1
+
+#+BEGIN_SRC
+    void lithium(JSObject* obj) {
+      MarkUsed raii(obj);
+      doSomethingThatMightGC();
+    }
+#+END_SRC
+
+#+BEGIN_SRC
+    class MarkUsed {
+      JSObject* mObj;
+
+    public:
+
+      MarkUsed(JSObject* obj) : mObj(obj) { JS::SetProperty(mObj, "used", true); }
+      ~SetUnused() { JS::SetProperty(mObj, "used", false); }
+    };
+#+END_SRC
+
+~obj~ is used in the destructor at the end of scope, so ~obj~ is live across
+doSomethingThatMightGC().
+
+** Rooting
+
+Not a hazard:
+
+#+BEGIN_SRC
+    void beryllium(JSContext* cx) {
+      Rooted<JSObject*> obj(cx, JS::NewObject());
+      doSomethingThatMightGC();
+      use(obj);
+    }
+#+END_SRC
+
+** Tricky hazard 2
+
+#+BEGIN_SRC
+    class Cleanup {
+    public:
+      Cleanup() {}
+      ~Cleanup() { doSomethingThatMightGC(); }
+    };
+
+    JSObject* boron(JSContext* cx) {
+      Cleanup cleanup;
+      Rooted<JSObject*> obj(cx, JS::NewObject());
+      doSomethingThatMightGC();
+      return obj;
+    }
+#+END_SRC
+
+** Easy fix (that doesn't work)
+
+#+BEGIN_SRC
+    class Cleanup {
+      public:
+        Cleanup() {}
+        ~Cleanup() { doSomethingThatMightGC(); }
+    };
+
+    JSObject* boron(JSContext* cx) {
+      Rooted<JSObject*> obj(cx, JS::NewObject());
+      Cleanup cleanup; // <-- Look! ~Cleanup() happens while obj is still rooted!
+      doSomethingThatMightGC();
+      return obj;
+    }
+#+END_SRC
+
+* Hazard analysis
+
+** Overview
+*** Global analysis
+
+The rooting hazard analysis is a global (whole-program) analysis as opposed to
+the function-local analysis like the current clang-based static analyses that
+we're using.
+
+- /local/: look at one function at a time in isolation
+- /global/: use information gathered from the entire source tree
+  - even if the main processing looks at a function at a time
+
+There has been talk about implementating a global analysis infrastructure on
+top of the clang plugin based analysis setup, but no concrete plans as yet.
+(Such things have been implemented, eg PhASAR, but I haven't looked at them.)
+
+*** Static
+
+Some code paths may never be invoked in practice, but the analysis will assume
+that they might be.
+
+*** Conservative
+
+- Any function pointer will be assumed to call something that can GC, unless
+  annotated otherwise.
+- Some paths leading to a GC can never be taken.
+- Some GC pointer variables will never store a GC pointer (eg JS::Value that
+  only holds undefined or numeric values in practice)
+
+*** Unsound
+
+- Analysis relies on the C++ type system
+  - if you cast to void* or uintptr_t, the analysis can't see it.
+  - Container types (eg hashtables) need to be specifically annotated for the
+    analysis to know that the overall array requires rooting.
+    - eg HashMap<T> needs rooting iff T needs rooting
+- If you take the address of a GC pointer, the analysis loses track of it.
+  - It will not complain if you hold a pointer to a pointer live across a GC.
+    - If that pointer is rooted or traced, this is ok.
+    - But at the point of the GC, we don't know if it is or not.
+- Some interior pointers (eg the pointer to the characters in a string) are
+  not considered to be invalidatable GC pointers.
+  - We have classes for managing these more safely, as well as (dynamically
+    enforced) IPromiseIWillNotGC tokens.
+    - AutoSuppressGCAnalysis, AutoCheckCannotGC
+    - *not* AutoAssertNoGC (which is a dynamic check that does not disable the
+      static checking)
+- Some hard-to-handle cases are annotated away.
+
+*** Incomplete
+
+- To be fully conservatively correct, callgraph should include an edge through
+  any function pointer invocation to every other function in the program.
+  - Executing JS source *is* assumed to call any native JS function in existence.
+
+*** Buggy
+
+- The conversion from C++ to the Sixgill data structures is not perfect.
+- gcc lies occasionally
+- some rare constructs are not handled and result in that function body being
+  discarded
+  - I keep track of how many of these there are
+- some correctness fixes find too many false alarms (work is ongoing)
+  - Big one: virtual method resolution is incorrect.
+- sfink writes buggy code
+
+** How do you run the blasted thing?
+
+- Easiest way: push to try.
+- If you want to hack on the analysis:
+  - push to try with ~--upload-xdbs~
+  - use ~js/src/devtools/rootAnalysis/analyze.py --first rawcalls~
+- If you are very brave, try to follow the instructions in
+  ~js/src/devtools/rootAnalysis/README.md~
+- I am working on making it entirely runnable from ~mach~.
+
+#+BEGIN_SRC
+# Install sixgill, matching gcc
+mach hazards bootstrap
+
+# Build a shell to run the analysis with
+mach hazards build-shell
+
+# Compile the tree and gather analysis info
+mach hazards gather
+
+# Analyze the gathered data and report on hazards
+mach hazards analyze
+#+END_SRC
+
+** Operational Overview
+
+1. Start up a server to gather the results of compilation
+2. Compile the entire source tree, with a plugin that sends the control flow
+   graph over to the server.
+3. Compile a JS shell (optimized, no debug, --enable-ctypes)
+4. Run the shell on some JS scripts that load in the compilation results and
+   analyzes them.
+
+(More details later)
+
+** Data structures
+*** gcc data structure
+
+- nasty awful opaque 'tree' type with unions of structs of unions of unions...
+- accessed via macros, some of which typecheck
+- newer features reuse old fields and accessors
+- it all feels pretty random
+
+#+BEGIN_SRC
+bool XIL_IsBaseField(tree field, bool *offset_zero)
+{
+  if (c_dialect_cxx() && DECL_NAME(field) == NULL) {
+    tree type = TREE_TYPE(field);
+    tree idnode = TYPE_NAME(type);
+    if (TREE_CODE(type) == RECORD_TYPE && idnode &&
+        TREE_CODE(idnode) == TYPE_DECL && !XIL_IsAnonymousCxx(idnode)) {
+      // figure out if this field is at offset zero.
+      tree offset = DECL_FIELD_OFFSET(field);
+      tree bit_offset = DECL_FIELD_BIT_OFFSET(field);
+      int byte_offset = TREE_UINT(offset) + (TREE_UINT(bit_offset) / 8);
+
+      if (offset_zero)
+        *offset_zero = (byte_offset == 0);
+      return true;
+    }
+  }
+
+  return false;
+}
+#+END_SRC
+
+*** sixgill data structures
+**** Sample C++ source
+
+#+BEGIN_SRC
+static void DeleteOffThreadJob(JSContext* cx, OffThreadJob* job) {
+  ShellContext* sc = GetShellContext(cx);
+  for (size_t i = 0; i < sc->offThreadJobs.length(); i++) {
+    if (sc->offThreadJobs[i] == job) {
+      sc->offThreadJobs.erase(&sc->offThreadJobs[i]);
+      js_delete(job);
+      return;
+    }
+  }
+
+  MOZ_CRASH("Off-thread job not found");
+}
+#+END_SRC
+
+**** Portion of sixgill output
+
+#+BEGIN_EXAMPLE
+block: _ZL1...$js.cpp:void DeleteOffThreadJob...:loop#0
+pentry: 1
+pexit:  6
+Call(1,2, __temp_1 := sc*.offThreadJobs.length())
+Assume(2,3, (i* < __temp_1*), true)
+Call(3,4, __temp_2 := sc*.offThreadJobs.operator[](i*))
+Assume(4,5, (__temp_2** ==p{js::shell::OffThreadJob} job*), false)
+Assign(5,6, i := (i* + 1))
+
+block: _ZL1...$js.cpp:void DeleteOffThreadJob...
+pentry: 1
+pexit:  15
+Call(1,2, sc := GetShellContext(cx*))
+Assign(2,3, i := 0)
+Loop(3,4, loop#0)
+Call(4,5, __temp_1 := sc*.offThreadJobs.length())
+Assume(5,6, (i* < __temp_1*), true)
+Assume(5,11, (i* < __temp_1*), false)
+Call(6,7, __temp_2 := sc*.offThreadJobs.operator[](i*))
+Assume(7,8, (__temp_2** ==p{js::shell::OffThreadJob} job*), true)
+Call(8,9, __temp_3 := sc*.offThreadJobs.operator[](i*))
+Call(9,10, sc*.offThreadJobs.erase(__temp_3*))
+Call(10,15, js_delete(job*))
+Call(11,12, MOZ_ReportCrash("Off-thread job not found","/builds/worker/checkouts/gecko/js/src/shell/js.cpp",390))
+Call(12,13, AnnotateMozCrashReason("MOZ_CRASH(Off-thread job not found)"))
+Assign(13,14, 0 := 390)
+Call(14,15, abort())
+#+END_EXAMPLE
+
+QUESTION: In that loop body, why isn't there an edge from 2 -> 6?? (through an Assume)
+
+**** Basic data structure setup
+
+- Each function gets translated into a ~Block~.
+- A ~Block~ has declarations and things, then one or more ~Body~s
+  - One ~Body~ for the overall function body
+  - One ~Body~ for each loop within the function
+- A ~Body~ is a list of edges (type ~PEdge~)
+- This is the control flow graph
+- Edges connect ~PPoints~. All computation happens on the edges.
+- ~PEdge~ has a field ~Index~ that gives the src and dst ~PPoint~s
+- Edges can be one of a small number of types:
+  - ~Assign~: assignment, lhs := rhs
+  - ~Call~: function invocation. May also include an assignment of the returned value.
+  - ~Assume~: branch of a conditional
+  - ~Loop~: entry to a loop, represented by another ~Body~
+  - ~Assembly~: inline assembly code
+- ~PEdges~ contain values, which may be expressions
+  - but no calls embedded within values; if that happens, the call will happen first and the return
+    value assigned to a temporary that is then used within the value
+- ~Body~s have a single entry point and a single exit point
+
+**** Simplified example fragment
+
+- Block "foo()"
+  - pentry (ID of starting point)
+  - pexit (ID of ending point)
+  - PEdge
+    - 0
+      - Index: 1, 2 (this is the 1 -> 2 edge)
+      - Kind: Assign
+      - Type
+        - Kind: Int
+      - Exp
+        - 0 (aka lhs)
+          - Kind: Var
+          - Variable
+            - Kind: Local
+            - Name: someLocalVariable
+        - 1 (aka rhs)
+          - Kind: Binop
+          - OpCode: Plus
+          - Exp
+            - 0
+              - Kind: Drf
+              - ...more...
+            - 1
+              - ...more...
+
+
+** Compilation
+
+Only including what I think might be relevant to this audience.
+
+*** Annotations
+
+Currently expands to ~__attribute__((annotate("stuff")))~.
+
+My apologies for the names. Surprisingly enough, I was *not* intentionally
+going for the "I can haz cheezburger" vibe.
+
+- JS_HAZ_GC_POINTER : this type holds a GC pointer, possibly encoded.
+- JS_HAZ_ROOTED : this type roots its contained GC pointer.
+- JS_HAZ_GC_INVALIDATED : this type contains something that is invalidated during a GC.
+- JS_HAZ_ROOTED_BASE : all subclasses will be considered rooted
+  - JS_HAZ_ROOTED type subclasses don't get this treatment. Most can't really
+    be subclasses usefully in the first place, and they might add unrooted
+    fields if they were.
+- MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS : shared with the clang-based
+  static analyses, indicates that eg HashMap<T,U> is a GC pointer (well,
+  invalidated by GC) iff T or U are GC pointers.
+
+#+BEGIN_SRC
+
+namespace JS {
+class JS_HAZ_GC_POINTER Value { ... };
+
+class JS_HAZ_ROOTED Rooted { ... };
+
+class AutoCheckCannotGC : public AutoAssertNoGC {
+  ...
+} JS_HAZ_GC_INVALIDATED;
+
+class JS_HAZ_ROOTED_BASE AutoRooter { ... }
+
+} /* namespace JS */
+
+class MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS HashMap { ... };
+
+#+END_SRC
+
+** Processing of generated data structures
+
+*** Compute the global callgraph
+
+- Resolves virtual method edges to all implementations of that method (based
+  on the static type).
+- Assume that we see all relevant source code; no binary extensions allowed.
+
+*** Compute the set of GC types and GC pointers
+
+- Start from the annotations, and trace through inheritance tree.
+
+*** Compute the set of functions that can GC.
+
+- The core is a simple reachability analysis in the global callgraph.
+- But also handle cases where GC is suppressed within an RAII scope.
+  - Function can reach GC but is always called with GC suppressed?
+- Nasty case that doesn't matter much: recursive roots
+  - A() <--> B(), nothing calls either one, one or the other calls other stuff
+- Generic callee any/all properties (any/all paths to F are within the scope where
+  some property holds)
+  - TODO: same for *caller* any/all properties (relative to a root or set of roots)
+  - This will be further explained a little later.
+- So set ~canGC~ to the set of functions that can reach a GC invocation, but
+  are not in ~all(LIMIT_CANNOT_GC)~.
+
+/Gory details of eliminating suppressed-GC functions from ~canGC~/
+
+Consider:
+
+#+BEGIN_SRC
+void foo() {
+    doSomethingThatMightGC();
+}
+
+void indirectGCExceptNot() {
+    AutoSuppressGC nogc;
+    foo();
+}
+#+END_SRC
+
+Assuming no other calls to ~indirectGCExceptNot()~, ~indirectGCExceptNot~ is
+/not/ in ~canGC~ because GC is always suppressed when it is called. This is
+important when locally analyzing a function that calls ~indirectGCExceptNot~
+with a GC pointer held live, because locally it very much looks like a hazard.
+(If the suppression is in the same function, then it's easy and it wouldn't
+matter whether the callee is in ~canGC~ or not. But if it's in the caller,
+local analysis can't see it.)
+
+*** Analyze every function in the code base
+
+Iterate over functions and look for unrooted GC pointers held live across a
+potential GC. Reiterating:
+
+- Unrooted: If a pointer is stored in a Rooted and extracted when needed, then
+  the copy in the Rooted is safe. If a value is extracted, GC happens, and then
+  the value is used again, this is problematic because the extracted value is
+  unrooted.
+- GC pointer: it must be a pointer to a GC cell. A pointer to a pointer to a GC
+  cell will not be invalidated. (The pointed-to cell should either be rooted or
+  traced so that it gets updated.)
+- held live: an invalidated GC pointer is harmless unless it is used again
+  after the GC.
+- live across a potential GC: in static analysis terms, the value is considered
+  to be "live" from the pointer where it was generated to the last time it is
+  used. We are looking for a potential GC within that range.
+
+#+BEGIN_SRC
+
+void foo() {
+    doSomethingThatMightGC();
+}
+
+void indirectGCExceptNot() {
+    AutoSuppressGC nogc;
+    foo();
+}
+
+void carbon() {
+    JSObject* obj = JS::NewObject();
+    indirectGCExceptNot();
+    use(obj);
+}
+
+void main() {
+    bar();
+    foo();
+}
+#+END_SRC
+
+Can ~foo()~ GC? Yes, but only in the call from ~main()~. So it will be in
+~canGC~. ~indirectGCExceptNot~ will not be in the set.
+
+When analyzing ~carbon()~, ~obj~ is live across ~indirectGCExceptNot()~, which
+is fine because it is not in ~canGC~.
+
+Now consider:
+
+#+BEGIN_SRC
+void obvious_hazard() {
+    JSObject* obj = JS::NewObject();
+    doSomethingThatMightGC();
+}
+
+void bar2() {
+    AutoSuppressGC nogc;
+    obvious_hazard();
+}
+#+END_SRC
+
+Assume there are no other calls to ~obvious_hazard()~ in the program. Should
+this report a hazard? No! The whole point of ~AutoSuppressGC~ is to be able to
+do stuff without worrying about a GC happening and messing everything up. If
+there aren't hazards within its scope, either directly or in called functions,
+then why is ~AutoSuppressGC~ there in the first place?
+
+From the analysis's point of view, ~any(LIMIT_CANNOT_GC)~ contains both ~foo~
+and ~obvious_hazard~, while ~all(LIMIT_CANNOT_GC)~ contains only
+~obvious_hazard~. (~any(LIMIT_CANNOT_GC)~ is never used; it's a currently
+useless byproduct. Though it ought to be used to suppress warnings of excessive
+rooting.)
+
+The full set of functions that can GC is all functions that can reach a GC
+invocation through the callee graph, but are not in the ~all(LIMIT_CANNOT_GC)~
+set. This is the ~canGC~ set.
+
+Note that when analyzing ~bar2~, we don't need to consider
+~all(LIMIT_CANNOT_GC)~ or ~canGC~ at all -- even if ~obvious_hazard~ were in
+~canGC~, we only call it within ~AutoSuppressGC~ so it wouldn't produce a
+hazard anyway. ~all(LIMIT_CANNOT_GC)~ is for the benefit of the local analysis
+of called functions, not callers, a fact that I repeatedly forget.
+
+*** In-depth look at main analysis function
+
+- Look at a single function (~processBodies()~)
+- Loop over all variables in the function (parameters, locals, ~this~, return
+  value)
+  - If the variable is unrooted, look at every edge in every body (~variableLiveAcrossGC()~)
+    - if the edge is just clobbering a previous value, ignore the edge
+    - if the edge uses the variable's value, look for a GC before the use (~findGCBeforeValueUse()~)
+
+~findGCBeforeValueUse(start_point)~:
+
+- start a backwards DFS through the body, starting at ~start_point~
+- record whether or not a GC was seen yet at every point in the traversal
+  - or rather, a function in ~canGC~
+- if an edge "kills" the variable's value (in reverse search order, so it's
+  really generating the value that is live across the GC), stop the search
+  - examples:
+    - ~obj = foo()~
+    - ~obj = aObj~
+    - ~MyClass c(...)~
+  - this is the beginning of the variable's live range
+  - report the hazard if we've found a GC by now
+- if an edge uses the variable's value, same as above but don't terminate the
+  search if a GC hasn't been found
+  - dump traversal of the sixigll ~Exp~ression datatype to find references to
+    the variable
+  - as a usability hack, don't terminate the search even if a GC /has/ been
+    found; continue backwards until a "better" use is encountered.
+    - ~obj = foo(); use1(obj); GC(); use2(obj);~
+- funky special case: some edges can "invalidate" a variable, which means
+  "whoops you thought it was live but it really wasn't"
+  - examples:
+    - ~UniquePtr.reset()~
+    - ~obj = nullptr~
+    - ~foo(std::move(obj))~
+- if a loop is encountered, propagate into it (to the exit point of the loop)
+- if we revisit a point, terminate the search if the earlier visitor in the
+  backwards scan already found a GC call by this point
+- when processing a loop body and its entry point is reached, propagate to the
+  predecessors in the "caller"
+- also propagate to the end of this loop (for the previous iteratiom)
+
+I'm honestly not sure why the scan goes backwards.
+
+*** Ideas for additional analyses with same infrastructure
+
+The ability to compute ~any/all~ sets for arbitrary properties is potentially
+very useful. Here are some possibilities:
+
+**** Can Run Script
+
+Let's say we want to validate the MOZ_CAN_RUN_SCRIPT and
+MOZ_CAN_RUN_SCRIPT_BOUNDARY annotations. Specifically, we want to find the set
+of functions that can reach ~RunScript()~ without going through
+MOZ_CAN_RUN_SCRIPT_BOUNDARY. All such functions should be marked
+MOZ_CAN_RUN_SCRIPT or there is an error.
+
+A straightforward implementation:
+- Mark ~RunScript()~ with a ~PROP_CAN_RUN_SCRIPT~ bit (property).
+- Mark any function annotated with ~MOZ_CAN_RUN_SCRIPT_BOUNDARY~ with a ~PROP_BEHIND_BOUNDARY~ bit.
+- Recursively propagate the above bits through the *caller* graph, rooted at ~RunScript()~.
+- All functions that are in ~any(PROP_CAN_RUN_SCRIPT)~ but not in
+  ~all(PROP_BEHIND_BOUNDARY)~ should be annotated with ~MOZ_CAN_RUN_SCRIPT~, or
+  we report an error.
+
+Note that the roots really matter when propagating bits through the caller
+graph. If we start at a single function with the ~PROP_CAN_RUN_SCRIPT~ property
+bit set, then ~any~ and ~all~ will be the same sets.
+
+There should probably be different names for ~any/all~ depending on whether
+they are propagated through the callee graph vs the caller graph.
+
+- ~callee-any(PROP)~ : a given function is reachable when property PROP is true.
+- ~callee-all(PROP)~ : a given function is only called when property PROP is true.
+- ~caller-any(PROP)~ : a given function can reach a spot where property PROP is true.
+- ~caller-all(PROP)~ rooted at set ~roots~ where ~PROP~ is true for all roots :
+  a given function can reach all functions in ~roots~.
+
+The ~canGC~ set *could* be computed as ~caller-any(PROP_CAN_GC)~ minus
+~callee-all(PROP_CANNOT_GC)~ (assuming the GC entry points were annotated with
+~PROP_CAN_GC~) using all leaves or just the GC entry points as the roots.
+Sadly, it seems like ~caller-all~ is useless when using all leaves as the
+roots. (Any small little leaf would clear the ~caller-all~ property for
+anything that can reach it.
+
+Note that this analysis is horribly unsound : if a function calls through a
+function pointer that could end up running script, then the analysis will miss
+it. To be conservative, we would have to add all function pointers to the root
+set as well.
+
+**** Iterator invalidation
+
+Let's say we want to identify mutations to a data structure while an iterator
+over that data structure is still active. We could make a ~PROP_LIVE_ITERATOR~
+property that is set on any function called with the iterator live, then
+propagate that through the callee graph. When analyzing a function in
+~callee-any(PROP_LIVE_ITERATOR)~, we can report an iterator invalidation error
+when the data structure is mutated.
+
+Note that errors must also be reported on mutations in the parts of a function
+that themselves have an iterator active. This wouldn't use the property above.
+
+**** Temporary Register Allocation
+
+If we have RAII controls over temporary register use in the JIT, then we can
+verify that you don't attempt to grab the register while it's already in use. A
+dynamic check would probably be just as good, though. (If the error is in a
+rare codepath, then it's probably handling an error, in which case there's a
+good chance the outer temporary usage is going to get aborted anyway. The
+dynamic analysis would probably have fewer missed errors than the static
+analysis would have false alarms.)
+
+**** Deadlock Detection
+
+This feels like it would probably need either a custom check, or a dynamic
+number of properties (one per lock). But if we ignore that and look at one
+lock: set a ~PROP_LOCK~ property in the scope of the lock, and error out if we
+attempt to take the lock in any function in ~callee-any(PROP_LOCK)~. Though
+there are probably temporary unlock regions at times, so this would actually
+require a ~PROP_UNLOCK~ property too with rules for combining the bits during
+the graph traversal.
+
+Come to think of it, the temporary register checker above would almost
+certainly need the same sort of functionality. Each property would need
+multiple possible states: unknown, always true, always false, sometimes true,
+(sometimes false? sometimes false would be good for detecting unlocked access
+to guarded data. But there are already custom analyses for these sorts of
+things).
+
+** XDB files
+
+: _ZN2js17NativeGetPropertyEP9JSContextN2JS6HandleIPNS_12NativeObjectEEENS3_INS2_11PropertyKeyEEENS2_13MutableHandleINS2_5ValueEEE$uint8 js::NativeGetProperty(JSContext*, JS::Handle<js::NativeObject*>, JS::Handle<JS::PropertyKey>, JS::MutableHandle<JS::Value>)

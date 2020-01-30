@@ -1,0 +1,1221 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+<!-- 2020-01-27 Mon 04:45 -->
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>&lrm;</title>
+<meta name="generator" content="Org mode" />
+<meta name="author" content="Steve Fink" />
+<style type="text/css">
+ <!--/*--><![CDATA[/*><!--*/
+  .title  { text-align: center;
+             margin-bottom: .2em; }
+  .subtitle { text-align: center;
+              font-size: medium;
+              font-weight: bold;
+              margin-top:0; }
+  .todo   { font-family: monospace; color: red; }
+  .done   { font-family: monospace; color: green; }
+  .priority { font-family: monospace; color: orange; }
+  .tag    { background-color: #eee; font-family: monospace;
+            padding: 2px; font-size: 80%; font-weight: normal; }
+  .timestamp { color: #bebebe; }
+  .timestamp-kwd { color: #5f9ea0; }
+  .org-right  { margin-left: auto; margin-right: 0px;  text-align: right; }
+  .org-left   { margin-left: 0px;  margin-right: auto; text-align: left; }
+  .org-center { margin-left: auto; margin-right: auto; text-align: center; }
+  .underline { text-decoration: underline; }
+  #postamble p, #preamble p { font-size: 90%; margin: .2em; }
+  p.verse { margin-left: 3%; }
+  pre {
+    border: 1px solid #ccc;
+    box-shadow: 3px 3px 3px #eee;
+    padding: 8pt;
+    font-family: monospace;
+    overflow: auto;
+    margin: 1.2em;
+  }
+  pre.src {
+    position: relative;
+    overflow: visible;
+    padding-top: 1.2em;
+  }
+  pre.src:before {
+    display: none;
+    position: absolute;
+    background-color: white;
+    top: -10px;
+    right: 10px;
+    padding: 3px;
+    border: 1px solid black;
+  }
+  pre.src:hover:before { display: inline;}
+  /* Languages per Org manual */
+  pre.src-asymptote:before { content: 'Asymptote'; }
+  pre.src-awk:before { content: 'Awk'; }
+  pre.src-C:before { content: 'C'; }
+  /* pre.src-C++ doesn't work in CSS */
+  pre.src-clojure:before { content: 'Clojure'; }
+  pre.src-css:before { content: 'CSS'; }
+  pre.src-D:before { content: 'D'; }
+  pre.src-ditaa:before { content: 'ditaa'; }
+  pre.src-dot:before { content: 'Graphviz'; }
+  pre.src-calc:before { content: 'Emacs Calc'; }
+  pre.src-emacs-lisp:before { content: 'Emacs Lisp'; }
+  pre.src-fortran:before { content: 'Fortran'; }
+  pre.src-gnuplot:before { content: 'gnuplot'; }
+  pre.src-haskell:before { content: 'Haskell'; }
+  pre.src-hledger:before { content: 'hledger'; }
+  pre.src-java:before { content: 'Java'; }
+  pre.src-js:before { content: 'Javascript'; }
+  pre.src-latex:before { content: 'LaTeX'; }
+  pre.src-ledger:before { content: 'Ledger'; }
+  pre.src-lisp:before { content: 'Lisp'; }
+  pre.src-lilypond:before { content: 'Lilypond'; }
+  pre.src-lua:before { content: 'Lua'; }
+  pre.src-matlab:before { content: 'MATLAB'; }
+  pre.src-mscgen:before { content: 'Mscgen'; }
+  pre.src-ocaml:before { content: 'Objective Caml'; }
+  pre.src-octave:before { content: 'Octave'; }
+  pre.src-org:before { content: 'Org mode'; }
+  pre.src-oz:before { content: 'OZ'; }
+  pre.src-plantuml:before { content: 'Plantuml'; }
+  pre.src-processing:before { content: 'Processing.js'; }
+  pre.src-python:before { content: 'Python'; }
+  pre.src-R:before { content: 'R'; }
+  pre.src-ruby:before { content: 'Ruby'; }
+  pre.src-sass:before { content: 'Sass'; }
+  pre.src-scheme:before { content: 'Scheme'; }
+  pre.src-screen:before { content: 'Gnu Screen'; }
+  pre.src-sed:before { content: 'Sed'; }
+  pre.src-sh:before { content: 'shell'; }
+  pre.src-sql:before { content: 'SQL'; }
+  pre.src-sqlite:before { content: 'SQLite'; }
+  /* additional languages in org.el's org-babel-load-languages alist */
+  pre.src-forth:before { content: 'Forth'; }
+  pre.src-io:before { content: 'IO'; }
+  pre.src-J:before { content: 'J'; }
+  pre.src-makefile:before { content: 'Makefile'; }
+  pre.src-maxima:before { content: 'Maxima'; }
+  pre.src-perl:before { content: 'Perl'; }
+  pre.src-picolisp:before { content: 'Pico Lisp'; }
+  pre.src-scala:before { content: 'Scala'; }
+  pre.src-shell:before { content: 'Shell Script'; }
+  pre.src-ebnf2ps:before { content: 'ebfn2ps'; }
+  /* additional language identifiers per "defun org-babel-execute"
+       in ob-*.el */
+  pre.src-cpp:before  { content: 'C++'; }
+  pre.src-abc:before  { content: 'ABC'; }
+  pre.src-coq:before  { content: 'Coq'; }
+  pre.src-groovy:before  { content: 'Groovy'; }
+  /* additional language identifiers from org-babel-shell-names in
+     ob-shell.el: ob-shell is the only babel language using a lambda to put
+     the execution function name together. */
+  pre.src-bash:before  { content: 'bash'; }
+  pre.src-csh:before  { content: 'csh'; }
+  pre.src-ash:before  { content: 'ash'; }
+  pre.src-dash:before  { content: 'dash'; }
+  pre.src-ksh:before  { content: 'ksh'; }
+  pre.src-mksh:before  { content: 'mksh'; }
+  pre.src-posh:before  { content: 'posh'; }
+  /* Additional Emacs modes also supported by the LaTeX listings package */
+  pre.src-ada:before { content: 'Ada'; }
+  pre.src-asm:before { content: 'Assembler'; }
+  pre.src-caml:before { content: 'Caml'; }
+  pre.src-delphi:before { content: 'Delphi'; }
+  pre.src-html:before { content: 'HTML'; }
+  pre.src-idl:before { content: 'IDL'; }
+  pre.src-mercury:before { content: 'Mercury'; }
+  pre.src-metapost:before { content: 'MetaPost'; }
+  pre.src-modula-2:before { content: 'Modula-2'; }
+  pre.src-pascal:before { content: 'Pascal'; }
+  pre.src-ps:before { content: 'PostScript'; }
+  pre.src-prolog:before { content: 'Prolog'; }
+  pre.src-simula:before { content: 'Simula'; }
+  pre.src-tcl:before { content: 'tcl'; }
+  pre.src-tex:before { content: 'TeX'; }
+  pre.src-plain-tex:before { content: 'Plain TeX'; }
+  pre.src-verilog:before { content: 'Verilog'; }
+  pre.src-vhdl:before { content: 'VHDL'; }
+  pre.src-xml:before { content: 'XML'; }
+  pre.src-nxml:before { content: 'XML'; }
+  /* add a generic configuration mode; LaTeX export needs an additional
+     (add-to-list 'org-latex-listings-langs '(conf " ")) in .emacs */
+  pre.src-conf:before { content: 'Configuration File'; }
+
+  table { border-collapse:collapse; }
+  caption.t-above { caption-side: top; }
+  caption.t-bottom { caption-side: bottom; }
+  td, th { vertical-align:top;  }
+  th.org-right  { text-align: center;  }
+  th.org-left   { text-align: center;   }
+  th.org-center { text-align: center; }
+  td.org-right  { text-align: right;  }
+  td.org-left   { text-align: left;   }
+  td.org-center { text-align: center; }
+  dt { font-weight: bold; }
+  .footpara { display: inline; }
+  .footdef  { margin-bottom: 1em; }
+  .figure { padding: 1em; }
+  .figure p { text-align: center; }
+  .inlinetask {
+    padding: 10px;
+    border: 2px solid gray;
+    margin: 10px;
+    background: #ffffcc;
+  }
+  #org-div-home-and-up
+   { text-align: right; font-size: 70%; white-space: nowrap; }
+  textarea { overflow-x: auto; }
+  .linenr { font-size: smaller }
+  .code-highlighted { background-color: #ffff00; }
+  .org-info-js_info-navigation { border-style: none; }
+  #org-info-js_console-label
+    { font-size: 10px; font-weight: bold; white-space: nowrap; }
+  .org-info-js_search-highlight
+    { background-color: #ffff00; color: #000000; font-weight: bold; }
+  .org-svg { width: 90%; }
+  /*]]>*/-->
+</style>
+<script type="text/javascript">
+/*
+@licstart  The following is the entire license notice for the
+JavaScript code in this tag.
+
+Copyright (C) 2012-2018 Free Software Foundation, Inc.
+
+The JavaScript code in this tag is free software: you can
+redistribute it and/or modify it under the terms of the GNU
+General Public License (GNU GPL) as published by the Free Software
+Foundation, either version 3 of the License, or (at your option)
+any later version.  The code is distributed WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the GNU GPL for more details.
+
+As additional permission under GNU GPL version 3 section 7, you
+may distribute non-source (e.g., minimized or compacted) forms of
+that code without the copy of the GNU GPL normally required by
+section 4, provided you include this license notice and a URL
+through which recipients can access the Corresponding Source.
+
+
+@licend  The above is the entire license notice
+for the JavaScript code in this tag.
+*/
+<!--/*--><![CDATA[/*><!--*/
+ function CodeHighlightOn(elem, id)
+ {
+   var target = document.getElementById(id);
+   if(null != target) {
+     elem.cacheClassElem = elem.className;
+     elem.cacheClassTarget = target.className;
+     target.className = "code-highlighted";
+     elem.className   = "code-highlighted";
+   }
+ }
+ function CodeHighlightOff(elem, id)
+ {
+   var target = document.getElementById(id);
+   if(elem.cacheClassElem)
+     elem.className = elem.cacheClassElem;
+   if(elem.cacheClassTarget)
+     target.className = elem.cacheClassTarget;
+ }
+/*]]>*///-->
+</script>
+</head>
+<body>
+<div id="content">
+<div id="table-of-contents">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents">
+<ul>
+<li><a href="#orgce30137">1. Problem definition</a>
+<ul>
+<li><a href="#orgecd3164">1.1. Most basic hazard</a></li>
+<li><a href="#org7c08bcf">1.2. The rule: Thou Shalt Not Hold a GC Pointer Live Across a (Potential) GC</a></li>
+<li><a href="#org89033b9">1.3. Tricky hazard 1</a></li>
+<li><a href="#org99e2316">1.4. Rooting</a></li>
+<li><a href="#orgfd545d8">1.5. Tricky hazard 2</a></li>
+<li><a href="#org847336a">1.6. Easy fix (that doesn't work)</a></li>
+</ul>
+</li>
+<li><a href="#org3d70ab5">2. Hazard analysis</a>
+<ul>
+<li><a href="#orga5f8221">2.1. Overview</a>
+<ul>
+<li><a href="#orgf35c7d1">2.1.1. Global analysis</a></li>
+<li><a href="#org7bb7a5d">2.1.2. Static</a></li>
+<li><a href="#org7be43cb">2.1.3. Conservative</a></li>
+<li><a href="#orge2ba2ca">2.1.4. Unsound</a></li>
+<li><a href="#org2ccadce">2.1.5. Incomplete</a></li>
+<li><a href="#orgf09226b">2.1.6. Buggy</a></li>
+</ul>
+</li>
+<li><a href="#org6c2a58f">2.2. How do you run the blasted thing?</a></li>
+<li><a href="#org02a5d94">2.3. Operational Overview</a></li>
+<li><a href="#org156d59f">2.4. Data structures</a>
+<ul>
+<li><a href="#org9c0ec03">2.4.1. gcc data structure</a></li>
+<li><a href="#org7458516">2.4.2. sixgill data structures</a></li>
+</ul>
+</li>
+<li><a href="#org90f51a2">2.5. Compilation</a>
+<ul>
+<li><a href="#org0a95269">2.5.1. Annotations</a></li>
+</ul>
+</li>
+<li><a href="#org040362f">2.6. Processing of generated data structures</a>
+<ul>
+<li><a href="#org7f6290d">2.6.1. Compute the global callgraph</a></li>
+<li><a href="#org2b0f75f">2.6.2. Compute the set of GC types and GC pointers</a></li>
+<li><a href="#orgfa72887">2.6.3. Compute the set of functions that can GC.</a></li>
+<li><a href="#org9f5a5d5">2.6.4. Analyze every function in the code base</a></li>
+<li><a href="#org1d2d565">2.6.5. In-depth look at main analysis function</a></li>
+<li><a href="#orgb7a3dc9">2.6.6. Ideas for additional analyses with same infrastructure</a></li>
+</ul>
+</li>
+<li><a href="#orgc0c8e3a">2.7. XDB files</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-orgce30137" class="outline-2">
+<h2 id="orgce30137"><span class="section-number-2">1</span> Problem definition</h2>
+<div class="outline-text-2" id="text-1">
+</div>
+<div id="outline-container-orgecd3164" class="outline-3">
+<h3 id="orgecd3164"><span class="section-number-3">1.1</span> Most basic hazard</h3>
+<div class="outline-text-3" id="text-1-1">
+<pre class="example">
+void helium() {
+  JSObject* obj = getObject();
+  doSomethingThatMightGC();
+  use(obj);
+}
+</pre>
+
+<p>
+obj is a valid GC pointer. doSomethingThatMightGC() runs, triggers GC, and the
+GC moves obj somewhere else. The GC has no way of updating obj (it might be on
+the stack, or in a register), so it continues pointing to the old location.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org7c08bcf" class="outline-3">
+<h3 id="org7c08bcf"><span class="section-number-3">1.2</span> The rule: Thou Shalt Not Hold a GC Pointer Live Across a (Potential) GC</h3>
+<div class="outline-text-3" id="text-1-2">
+<p>
+A simple non-hazard:
+</p>
+
+<pre class="example">
+void hydrogen() {
+  JSObject* obj = getObject();
+  doSomethingThatMightGC();
+}
+</pre>
+
+<p>
+Whatever holds obj will be invalidated, but it doesn't matter, since it isn't
+used afterwards.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org89033b9" class="outline-3">
+<h3 id="org89033b9"><span class="section-number-3">1.3</span> Tricky hazard 1</h3>
+<div class="outline-text-3" id="text-1-3">
+<pre class="example">
+void lithium(JSObject* obj) {
+  MarkUsed raii(obj);
+  doSomethingThatMightGC();
+}
+</pre>
+
+<pre class="example">
+class MarkUsed {
+  JSObject* mObj;
+
+public:
+
+  MarkUsed(JSObject* obj) : mObj(obj) { JS::SetProperty(mObj, "used", true); }
+  ~SetUnused() { JS::SetProperty(mObj, "used", false); }
+};
+</pre>
+
+<p>
+<code>obj</code> is used in the destructor at the end of scope, so <code>obj</code> is live across
+doSomethingThatMightGC().
+</p>
+</div>
+</div>
+
+<div id="outline-container-org99e2316" class="outline-3">
+<h3 id="org99e2316"><span class="section-number-3">1.4</span> Rooting</h3>
+<div class="outline-text-3" id="text-1-4">
+<p>
+Not a hazard:
+</p>
+
+<pre class="example">
+void beryllium(JSContext* cx) {
+  Rooted&lt;JSObject*&gt; obj(cx, JS::NewObject());
+  doSomethingThatMightGC();
+  use(obj);
+}
+</pre>
+</div>
+</div>
+
+<div id="outline-container-orgfd545d8" class="outline-3">
+<h3 id="orgfd545d8"><span class="section-number-3">1.5</span> Tricky hazard 2</h3>
+<div class="outline-text-3" id="text-1-5">
+<pre class="example">
+class Cleanup {
+public:
+  Cleanup() {}
+  ~Cleanup() { doSomethingThatMightGC(); }
+};
+
+JSObject* boron(JSContext* cx) {
+  Cleanup cleanup;
+  Rooted&lt;JSObject*&gt; obj(cx, JS::NewObject());
+  doSomethingThatMightGC();
+  return obj;
+}
+</pre>
+</div>
+</div>
+
+<div id="outline-container-org847336a" class="outline-3">
+<h3 id="org847336a"><span class="section-number-3">1.6</span> Easy fix (that doesn't work)</h3>
+<div class="outline-text-3" id="text-1-6">
+<pre class="example">
+class Cleanup {
+  public:
+    Cleanup() {}
+    ~Cleanup() { doSomethingThatMightGC(); }
+};
+
+JSObject* boron(JSContext* cx) {
+  Rooted&lt;JSObject*&gt; obj(cx, JS::NewObject());
+  Cleanup cleanup; // &lt;-- Look! ~Cleanup() happens while obj is still rooted!
+  doSomethingThatMightGC();
+  return obj;
+}
+</pre>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org3d70ab5" class="outline-2">
+<h2 id="org3d70ab5"><span class="section-number-2">2</span> Hazard analysis</h2>
+<div class="outline-text-2" id="text-2">
+</div>
+<div id="outline-container-orga5f8221" class="outline-3">
+<h3 id="orga5f8221"><span class="section-number-3">2.1</span> Overview</h3>
+<div class="outline-text-3" id="text-2-1">
+</div>
+<div id="outline-container-orgf35c7d1" class="outline-4">
+<h4 id="orgf35c7d1"><span class="section-number-4">2.1.1</span> Global analysis</h4>
+<div class="outline-text-4" id="text-2-1-1">
+<p>
+The rooting hazard analysis is a global (whole-program) analysis as opposed to
+the function-local analysis like the current clang-based static analyses that
+we're using.
+</p>
+
+<ul class="org-ul">
+<li><i>local</i>: look at one function at a time in isolation</li>
+<li><i>global</i>: use information gathered from the entire source tree
+<ul class="org-ul">
+<li>even if the main processing looks at a function at a time</li>
+</ul></li>
+</ul>
+
+<p>
+There has been talk about implementating a global analysis infrastructure on
+top of the clang plugin based analysis setup, but no concrete plans as yet.
+(Such things have been implemented, eg PhaSAR, but I haven't looked at them.)
+</p>
+</div>
+</div>
+
+<div id="outline-container-org7bb7a5d" class="outline-4">
+<h4 id="org7bb7a5d"><span class="section-number-4">2.1.2</span> Static</h4>
+<div class="outline-text-4" id="text-2-1-2">
+<p>
+Some code paths may never be invoked in practice, but the analysis will assume
+that they might be.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org7be43cb" class="outline-4">
+<h4 id="org7be43cb"><span class="section-number-4">2.1.3</span> Conservative</h4>
+<div class="outline-text-4" id="text-2-1-3">
+<ul class="org-ul">
+<li>Any function pointer will be assumed to call something that can GC, unless
+annotated otherwise.</li>
+<li>Some paths leading to a GC can never be taken.</li>
+<li>Some GC pointer variables will never store a GC pointer (eg JS::Value that
+only holds undefined or numeric values in practice)</li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-orge2ba2ca" class="outline-4">
+<h4 id="orge2ba2ca"><span class="section-number-4">2.1.4</span> Unsound</h4>
+<div class="outline-text-4" id="text-2-1-4">
+<ul class="org-ul">
+<li>Analysis relies on the C++ type system
+<ul class="org-ul">
+<li>if you cast to void* or uintptr_t, the analysis can't see it.</li>
+<li>Container types (eg hashtables) need to be specifically annotated for the
+analysis to know that the overall array requires rooting.
+<ul class="org-ul">
+<li>eg HashMap&lt;T&gt; needs rooting iff T needs rooting</li>
+</ul></li>
+</ul></li>
+<li>If you take the address of a GC pointer, the analysis loses track of it.
+<ul class="org-ul">
+<li>It will not complain if you hold a pointer to a pointer live across a GC.
+<ul class="org-ul">
+<li>If that pointer is rooted or traced, this is ok.</li>
+<li>But at the point of the GC, we don't know if it is or not.</li>
+</ul></li>
+</ul></li>
+<li>Some interior pointers (eg the pointer to the characters in a string) are
+not considered to be invalidatable GC pointers.
+<ul class="org-ul">
+<li>We have classes for managing these more safely, as well as (dynamically
+enforced) IPromiseIWillNotGC tokens.
+<ul class="org-ul">
+<li>AutoSuppressGCAnalysis, AutoCheckCannotGC</li>
+<li><b>not</b> AutoAssertNoGC (which is a dynamic check that does not disable the
+static checking)</li>
+</ul></li>
+</ul></li>
+<li>Some hard-to-handle cases are annotated away.</li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-org2ccadce" class="outline-4">
+<h4 id="org2ccadce"><span class="section-number-4">2.1.5</span> Incomplete</h4>
+<div class="outline-text-4" id="text-2-1-5">
+<ul class="org-ul">
+<li>To be fully conservatively correct, callgraph should include an edge through
+any function pointer invocation to every other function in the program.
+<ul class="org-ul">
+<li>Executing JS source <b>is</b> assumed to call any native JS function in existence.</li>
+</ul></li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-orgf09226b" class="outline-4">
+<h4 id="orgf09226b"><span class="section-number-4">2.1.6</span> Buggy</h4>
+<div class="outline-text-4" id="text-2-1-6">
+<ul class="org-ul">
+<li>The conversion from C++ to the Sixgill data structures is not perfect.</li>
+<li>gcc lies occasionally</li>
+<li>some rare constructs are not handled and result in that function body being
+discarded
+<ul class="org-ul">
+<li>I keep track of how many of these there are</li>
+</ul></li>
+<li>some correctness fixes find too many false alarms (work is ongoing)
+<ul class="org-ul">
+<li>Big one: virtual method resolution is incorrect.</li>
+</ul></li>
+<li>sfink writes buggy code</li>
+</ul>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org6c2a58f" class="outline-3">
+<h3 id="org6c2a58f"><span class="section-number-3">2.2</span> How do you run the blasted thing?</h3>
+<div class="outline-text-3" id="text-2-2">
+<ul class="org-ul">
+<li>Easiest way: push to try.</li>
+<li>If you want to hack on the analysis:
+<ul class="org-ul">
+<li>push to try with <code>--upload-xdbs</code></li>
+<li>use <code>js/src/devtools/rootAnalysis/analyze.py --first rawcalls</code></li>
+</ul></li>
+<li>If you are very brave, try to follow the instructions in
+<code>js/src/devtools/rootAnalysis/README.md</code></li>
+<li>I am working on making it entirely runnable from <code>mach</code>.</li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-org02a5d94" class="outline-3">
+<h3 id="org02a5d94"><span class="section-number-3">2.3</span> Operational Overview</h3>
+<div class="outline-text-3" id="text-2-3">
+<ol class="org-ol">
+<li>Start up a server to gather the results of compilation</li>
+<li>Compile the entire source tree, with a plugin that sends the control flow
+graph over to the server.</li>
+<li>Compile a JS shell (optimized, no debug, &#x2013;enable-ctypes)</li>
+<li>Run the shell on some JS scripts that load in the compilation results and
+analyzes them.</li>
+</ol>
+
+<p>
+(More details later)
+</p>
+</div>
+</div>
+
+<div id="outline-container-org156d59f" class="outline-3">
+<h3 id="org156d59f"><span class="section-number-3">2.4</span> Data structures</h3>
+<div class="outline-text-3" id="text-2-4">
+</div>
+<div id="outline-container-org9c0ec03" class="outline-4">
+<h4 id="org9c0ec03"><span class="section-number-4">2.4.1</span> gcc data structure</h4>
+<div class="outline-text-4" id="text-2-4-1">
+<ul class="org-ul">
+<li>nasty awful opaque 'tree' type with unions of structs of unions of unions&#x2026;</li>
+<li>accessed via macros, some of which typecheck</li>
+<li>newer features reuse old fields and accessors</li>
+<li>it all feels pretty random</li>
+</ul>
+
+<pre class="example">
+bool XIL_IsBaseField(tree field, bool *offset_zero)
+{
+  if (c_dialect_cxx() &amp;&amp; DECL_NAME(field) == NULL) {
+    tree type = TREE_TYPE(field);
+    tree idnode = TYPE_NAME(type);
+    if (TREE_CODE(type) == RECORD_TYPE &amp;&amp; idnode &amp;&amp;
+        TREE_CODE(idnode) == TYPE_DECL &amp;&amp; !XIL_IsAnonymousCxx(idnode)) {
+      // figure out if this field is at offset zero.
+      tree offset = DECL_FIELD_OFFSET(field);
+      tree bit_offset = DECL_FIELD_BIT_OFFSET(field);
+      int byte_offset = TREE_UINT(offset) + (TREE_UINT(bit_offset) / 8);
+
+      if (offset_zero)
+        *offset_zero = (byte_offset == 0);
+      return true;
+    }
+  }
+
+  return false;
+}
+</pre>
+</div>
+</div>
+
+<div id="outline-container-org7458516" class="outline-4">
+<h4 id="org7458516"><span class="section-number-4">2.4.2</span> sixgill data structures</h4>
+<div class="outline-text-4" id="text-2-4-2">
+</div>
+<ol class="org-ol">
+<li><a id="org8f047f9"></a>Sample C++ source<br />
+<div class="outline-text-5" id="text-2-4-2-1">
+<pre class="example">
+static void DeleteOffThreadJob(JSContext* cx, OffThreadJob* job) {
+  ShellContext* sc = GetShellContext(cx);
+  for (size_t i = 0; i &lt; sc-&gt;offThreadJobs.length(); i++) {
+    if (sc-&gt;offThreadJobs[i] == job) {
+      sc-&gt;offThreadJobs.erase(&amp;sc-&gt;offThreadJobs[i]);
+      js_delete(job);
+      return;
+    }
+  }
+
+  MOZ_CRASH("Off-thread job not found");
+}
+</pre>
+</div>
+</li>
+
+<li><a id="org5688ca7"></a>Portion of sixgill output<br />
+<div class="outline-text-5" id="text-2-4-2-2">
+<pre class="example">
+block: _ZL1...$js.cpp:void DeleteOffThreadJob...:loop#0
+pentry: 1
+pexit:  6
+Call(1,2, __temp_1 := sc*.offThreadJobs.length())
+Assume(2,3, (i* &lt; __temp_1*), true)
+Call(3,4, __temp_2 := sc*.offThreadJobs.operator[](i*))
+Assume(4,5, (__temp_2** ==p{js::shell::OffThreadJob} job*), false)
+Assign(5,6, i := (i* + 1))
+
+block: _ZL1...$js.cpp:void DeleteOffThreadJob...
+pentry: 1
+pexit:  15
+Call(1,2, sc := GetShellContext(cx*))
+Assign(2,3, i := 0)
+Loop(3,4, loop#0)
+Call(4,5, __temp_1 := sc*.offThreadJobs.length())
+Assume(5,6, (i* &lt; __temp_1*), true)
+Assume(5,11, (i* &lt; __temp_1*), false)
+Call(6,7, __temp_2 := sc*.offThreadJobs.operator[](i*))
+Assume(7,8, (__temp_2** ==p{js::shell::OffThreadJob} job*), true)
+Call(8,9, __temp_3 := sc*.offThreadJobs.operator[](i*))
+Call(9,10, sc*.offThreadJobs.erase(__temp_3*))
+Call(10,15, js_delete(job*))
+Call(11,12, MOZ_ReportCrash("Off-thread job not found","/builds/worker/checkouts/gecko/js/src/shell/js.cpp",390))
+Call(12,13, AnnotateMozCrashReason("MOZ_CRASH(Off-thread job not found)"))
+Assign(13,14, 0 := 390)
+Call(14,15, abort())
+</pre>
+
+<p>
+QUESTION: In that loop body, why isn't there an edge from 2 -&gt; 6?? (through an Assume)
+</p>
+</div>
+</li>
+
+<li><a id="org6b8932a"></a>Basic data structure setup<br />
+<div class="outline-text-5" id="text-2-4-2-3">
+<ul class="org-ul">
+<li>Each function gets translated into a <code>Block</code>.</li>
+<li>A <code>Block</code> has declarations and things, then one or more ~Body~s
+<ul class="org-ul">
+<li>One <code>Body</code> for the overall function body</li>
+<li>One <code>Body</code> for each loop within the function</li>
+</ul></li>
+<li>A <code>Body</code> is a list of edges (type <code>PEdge</code>)</li>
+<li>This is the control flow graph</li>
+<li>Edges connect <code>PPoints</code>. All computation happens on the edges.</li>
+<li><code>PEdge</code> has a field <code>Index</code> that gives the src and dst ~PPoint~s</li>
+<li>Edges can be one of a small number of types:
+<ul class="org-ul">
+<li><code>Assign</code>: assignment, lhs := rhs</li>
+<li><code>Call</code>: function invocation. May also include an assignment of the returned value.</li>
+<li><code>Assume</code>: branch of a conditional</li>
+<li><code>Loop</code>: entry to a loop, represented by another <code>Body</code></li>
+<li><code>Assembly</code>: inline assembly code</li>
+</ul></li>
+<li><code>PEdges</code> contain values, which may be expressions
+<ul class="org-ul">
+<li>but no calls embedded within values; if that happens, the call will happen first and the return
+value assigned to a temporary that is then used within the value</li>
+</ul></li>
+<li>~Body~s have a single entry point and a single exit point</li>
+</ul>
+</div>
+</li>
+
+<li><a id="orga217a73"></a>Simplified example fragment<br />
+<div class="outline-text-5" id="text-2-4-2-4">
+<ul class="org-ul">
+<li>Block "foo()"
+<ul class="org-ul">
+<li>pentry (ID of starting point)</li>
+<li>pexit (ID of ending point)</li>
+<li>PEdge
+<ul class="org-ul">
+<li>0
+<ul class="org-ul">
+<li>Index: 1, 2 (this is the 1 -&gt; 2 edge)</li>
+<li>Kind: Assign</li>
+<li>Type
+<ul class="org-ul">
+<li>Kind: Int</li>
+</ul></li>
+<li>Exp
+<ul class="org-ul">
+<li>0 (aka lhs)
+<ul class="org-ul">
+<li>Kind: Var</li>
+<li>Variable
+<ul class="org-ul">
+<li>Kind: Local</li>
+<li>Name: someLocalVariable</li>
+</ul></li>
+</ul></li>
+<li>1 (aka rhs)
+<ul class="org-ul">
+<li>Kind: Binop</li>
+<li>OpCode: Plus</li>
+<li>Exp
+<ul class="org-ul">
+<li>0
+<ul class="org-ul">
+<li>Kind: Drf</li>
+<li>&#x2026;more&#x2026;</li>
+</ul></li>
+<li>1
+<ul class="org-ul">
+<li>&#x2026;more&#x2026;</li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul></li>
+</ul>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+
+<div id="outline-container-org90f51a2" class="outline-3">
+<h3 id="org90f51a2"><span class="section-number-3">2.5</span> Compilation</h3>
+<div class="outline-text-3" id="text-2-5">
+<p>
+Only including what I think might be relevant to this audience.
+</p>
+</div>
+
+<div id="outline-container-org0a95269" class="outline-4">
+<h4 id="org0a95269"><span class="section-number-4">2.5.1</span> Annotations</h4>
+<div class="outline-text-4" id="text-2-5-1">
+<p>
+Currently expands to <code>__attribute__((annotate("stuff")))</code>.
+</p>
+
+<p>
+My apologies for the names. Surprisingly enough, I was <b>not</b> intentionally
+going for the "I can haz cheezburger" vibe.
+</p>
+
+<ul class="org-ul">
+<li>JS_HAZ_GC_POINTER : this type holds a GC pointer, possibly encoded.</li>
+<li>JS_HAZ_ROOTED : this type roots its contained GC pointer.</li>
+<li>JS_HAZ_GC_INVALIDATED : this type contains something that is invalidated during a GC.</li>
+<li>JS_HAZ_ROOTED_BASE : all subclasses will be considered rooted
+<ul class="org-ul">
+<li>JS_HAZ_ROOTED type subclasses don't get this treatment. Most can't really
+be subclasses usefully in the first place, and they might add unrooted
+fields if they were.</li>
+</ul></li>
+<li>MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS : shared with the clang-based
+static analyses, indicates that eg HashMap&lt;T,U&gt; is a GC pointer (well,
+invalidated by GC) iff T or U are GC pointers.</li>
+</ul>
+
+<pre class="example">
+
+namespace JS {
+class JS_HAZ_GC_POINTER Value { ... };
+
+class JS_HAZ_ROOTED Rooted { ... };
+
+class AutoCheckCannotGC : public AutoAssertNoGC {
+  ...
+} JS_HAZ_GC_INVALIDATED;
+
+class JS_HAZ_ROOTED_BASE AutoRooter { ... }
+
+} /* namespace JS */
+
+class MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS HashMap { ... };
+
+</pre>
+</div>
+</div>
+</div>
+
+<div id="outline-container-org040362f" class="outline-3">
+<h3 id="org040362f"><span class="section-number-3">2.6</span> Processing of generated data structures</h3>
+<div class="outline-text-3" id="text-2-6">
+</div>
+<div id="outline-container-org7f6290d" class="outline-4">
+<h4 id="org7f6290d"><span class="section-number-4">2.6.1</span> Compute the global callgraph</h4>
+<div class="outline-text-4" id="text-2-6-1">
+<ul class="org-ul">
+<li>Resolves virtual method edges to all implementations of that method (based
+on the static type).</li>
+<li>Assume that we see all relevant source code; no binary extensions allowed.</li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-org2b0f75f" class="outline-4">
+<h4 id="org2b0f75f"><span class="section-number-4">2.6.2</span> Compute the set of GC types and GC pointers</h4>
+<div class="outline-text-4" id="text-2-6-2">
+<ul class="org-ul">
+<li>Start from the annotations, and trace through inheritance tree.</li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-orgfa72887" class="outline-4">
+<h4 id="orgfa72887"><span class="section-number-4">2.6.3</span> Compute the set of functions that can GC.</h4>
+<div class="outline-text-4" id="text-2-6-3">
+<ul class="org-ul">
+<li>The core is a simple reachability analysis in the global callgraph.</li>
+<li>But also handle cases where GC is suppressed within an RAII scope.
+<ul class="org-ul">
+<li>Function can reach GC but is always called with GC suppressed?</li>
+</ul></li>
+<li>Nasty case that doesn't matter much: recursive roots
+<ul class="org-ul">
+<li>A() &lt;&#x2013;&gt; B(), nothing calls either one, one or the other calls other stuff</li>
+</ul></li>
+<li>Generic callee any/all properties (any/all paths to F are within the scope where
+some property holds)
+<ul class="org-ul">
+<li>TODO: same for <b>caller</b> any/all properties (relative to a root or set of roots)</li>
+<li>This will be further explained a little later.</li>
+</ul></li>
+<li>So set <code>canGC</code> to the set of functions that can reach a GC invocation, but
+are not in <code>all(LIMIT_CANNOT_GC)</code>.</li>
+</ul>
+
+<p>
+<i>Gory details of eliminating suppressed-GC functions from <code>canGC</code></i>
+</p>
+
+<p>
+Consider:
+</p>
+
+<pre class="example">
+void foo() {
+    doSomethingThatMightGC();
+}
+
+void indirectGCExceptNot() {
+    AutoSuppressGC nogc;
+    foo();
+}
+</pre>
+
+<p>
+Assuming no other calls to <code>indirectGCExceptNot()</code>, <code>indirectGCExceptNot</code> is
+<i>not</i> in <code>canGC</code> because GC is always suppressed when it is called. This is
+important when locally analyzing a function that calls <code>indirectGCExceptNot</code>
+with a GC pointer held live, because locally it very much looks like a hazard.
+(If the suppression is in the same function, then it's easy and it wouldn't
+matter whether the callee is in <code>canGC</code> or not. But if it's in the caller,
+local analysis can't see it.)
+</p>
+</div>
+</div>
+
+<div id="outline-container-org9f5a5d5" class="outline-4">
+<h4 id="org9f5a5d5"><span class="section-number-4">2.6.4</span> Analyze every function in the code base</h4>
+<div class="outline-text-4" id="text-2-6-4">
+<p>
+Iterate over functions and look for unrooted GC pointers held live across a
+potential GC. Reiterating:
+</p>
+
+<ul class="org-ul">
+<li>Unrooted: If a pointer is stored in a Rooted and extracted when needed, then
+the copy in the Rooted is safe. If a value is extracted, GC happens, and then
+the value is used again, this is problematic because the extracted value is
+unrooted.</li>
+<li>GC pointer: it must be a pointer to a GC cell. A pointer to a pointer to a GC
+cell will not be invalidated. (The pointed-to cell should either be rooted or
+traced so that it gets updated.)</li>
+<li>held live: an invalidated GC pointer is harmless unless it is used again
+after the GC.</li>
+<li>live across a potential GC: in static analysis terms, the value is considered
+to be "live" from the pointer where it was generated to the last time it is
+used. We are looking for a potential GC within that range.</li>
+</ul>
+
+<pre class="example">
+
+void foo() {
+    doSomethingThatMightGC();
+}
+
+void indirectGCExceptNot() {
+    AutoSuppressGC nogc;
+    foo();
+}
+
+void carbon() {
+    JSObject* obj = JS::NewObject();
+    indirectGCExceptNot();
+    use(obj);
+}
+
+void main() {
+    bar();
+    foo();
+}
+</pre>
+
+<p>
+Can <code>foo()</code> GC? Yes, but only in the call from <code>main()</code>. So it will be in
+<code>canGC</code>. <code>indirectGCExceptNot</code> will not be in the set.
+</p>
+
+<p>
+When analyzing <code>carbon()</code>, <code>obj</code> is live across <code>indirectGCExceptNot()</code>, which
+is fine because it is not in <code>canGC</code>.
+</p>
+
+<p>
+Now consider:
+</p>
+
+<pre class="example">
+void obvious_hazard() {
+    JSObject* obj = JS::NewObject();
+    doSomethingThatMightGC();
+}
+
+void bar2() {
+    AutoSuppressGC nogc;
+    obvious_hazard();
+}
+</pre>
+
+<p>
+Assume there are no other calls to <code>obvious_hazard()</code> in the program. Should
+this report a hazard? No! The whole point of <code>AutoSuppressGC</code> is to be able to
+do stuff without worrying about a GC happening and messing everything up. If
+there aren't hazards within its scope, either directly or in called functions,
+then why is <code>AutoSuppressGC</code> there in the first place?
+</p>
+
+<p>
+From the analysis's point of view, <code>any(LIMIT_CANNOT_GC)</code> contains both <code>foo</code>
+and <code>obvious_hazard</code>, while <code>all(LIMIT_CANNOT_GC)</code> contains only
+<code>obvious_hazard</code>. (<code>any(LIMIT_CANNOT_GC)</code> is never used; it's a currently
+useless byproduct. Though it ought to be used to suppress warnings of excessive
+rooting.)
+</p>
+
+<p>
+The full set of functions that can GC is all functions that can reach a GC
+invocation through the callee graph, but are not in the <code>all(LIMIT_CANNOT_GC)</code>
+set. This is the <code>canGC</code> set.
+</p>
+
+<p>
+Note that when analyzing <code>bar2</code>, we don't need to consider
+<code>all(LIMIT_CANNOT_GC)</code> or <code>canGC</code> at all &#x2013; even if <code>obvious_hazard</code> were in
+<code>canGC</code>, we only call it within <code>AutoSuppressGC</code> so it wouldn't produce a
+hazard anyway. <code>all(LIMIT_CANNOT_GC)</code> is for the benefit of the local analysis
+of called functions, not callers, a fact that I repeatedly forget.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org1d2d565" class="outline-4">
+<h4 id="org1d2d565"><span class="section-number-4">2.6.5</span> In-depth look at main analysis function</h4>
+<div class="outline-text-4" id="text-2-6-5">
+<ul class="org-ul">
+<li>Look at a single function (<code>processBodies()</code>)</li>
+<li>Loop over all variables in the function (parameters, locals, <code>this</code>, return
+value)
+<ul class="org-ul">
+<li>If the variable is unrooted, look at every edge in every body (<code>variableLiveAcrossGC()</code>)
+<ul class="org-ul">
+<li>if the edge is just clobbering a previous value, ignore the edge</li>
+<li>if the edge uses the variable's value, look for a GC before the use (<code>findGCBeforeValueUse()</code>)</li>
+</ul></li>
+</ul></li>
+</ul>
+
+<p>
+<code>findGCBeforeValueUse(start_point)</code>:
+</p>
+
+<ul class="org-ul">
+<li>start a backwards DFS through the body, starting at <code>start_point</code></li>
+<li>record whether or not a GC was seen yet at every point in the traversal
+<ul class="org-ul">
+<li>or rather, a function in <code>canGC</code></li>
+</ul></li>
+<li>if an edge "kills" the variable's value (in reverse search order, so it's
+really generating the value that is live across the GC), stop the search
+<ul class="org-ul">
+<li>examples:
+<ul class="org-ul">
+<li><code>obj = foo()</code></li>
+<li><code>obj = aObj</code></li>
+<li><code>MyClass c(...)</code></li>
+</ul></li>
+<li>this is the beginning of the variable's live range</li>
+<li>report the hazard if we've found a GC by now</li>
+</ul></li>
+<li>if an edge uses the variable's value, same as above but don't terminate the
+search if a GC hasn't been found
+<ul class="org-ul">
+<li>dump traversal of the sixigll ~Exp~ression datatype to find references to
+the variable</li>
+<li>as a usability hack, don't terminate the search even if a GC <i>has</i> been
+found; continue backwards until a "better" use is encountered.
+<ul class="org-ul">
+<li><code>obj = foo(); use1(obj); GC(); use2(obj);</code></li>
+</ul></li>
+</ul></li>
+<li>funky special case: some edges can "invalidate" a variable, which means
+"whoops you thought it was live but it really wasn't"
+<ul class="org-ul">
+<li>examples:
+<ul class="org-ul">
+<li><code>UniquePtr.reset()</code></li>
+<li><code>obj = nullptr</code></li>
+<li><code>foo(std::move(obj))</code></li>
+</ul></li>
+</ul></li>
+<li>if a loop is encountered, propagate into it (to the exit point of the loop)</li>
+<li>if we revisit a point, terminate the search if the earlier visitor in the
+backwards scan already found a GC call by this point</li>
+<li>when processing a loop body and its entry point is reached, propagate to the
+predecessors in the "caller"</li>
+<li>also propagate to the end of this loop (for the previous iteratiom)</li>
+</ul>
+</div>
+</div>
+
+<div id="outline-container-orgb7a3dc9" class="outline-4">
+<h4 id="orgb7a3dc9"><span class="section-number-4">2.6.6</span> Ideas for additional analyses with same infrastructure</h4>
+<div class="outline-text-4" id="text-2-6-6">
+<p>
+The ability to compute <code>any/all</code> sets for arbitrary properties is potentially
+very useful. Here are some possibilities:
+</p>
+</div>
+
+<ol class="org-ol">
+<li><a id="org6417c43"></a>Can Run Script<br />
+<div class="outline-text-5" id="text-2-6-6-1">
+<p>
+Let's say we want to validate the MOZ_CAN_RUN_SCRIPT and
+MOZ_CAN_RUN_SCRIPT_BOUNDARY annotations. Specifically, we want to find the set
+of functions that can reach <code>RunScript()</code> without going through
+MOZ_CAN_RUN_SCRIPT_BOUNDARY. All such functions should be marked
+MOZ_CAN_RUN_SCRIPT or there is an error.
+</p>
+
+<p>
+A straightforward implementation:
+</p>
+<ul class="org-ul">
+<li>Mark <code>RunScript()</code> with a <code>PROP_CAN_RUN_SCRIPT</code> bit (property).</li>
+<li>Mark any function annotated with <code>MOZ_CAN_RUN_SCRIPT_BOUNDARY</code> with a <code>PROP_BEHIND_BOUNDARY</code> bit.</li>
+<li>Recursively propagate the above bits through the <b>caller</b> graph, rooted at <code>RunScript()</code>.</li>
+<li>All functions that are in <code>any(PROP_CAN_RUN_SCRIPT)</code> but not in
+<code>all(PROP_BEHIND_BOUNDARY)</code> should be annotated with <code>MOZ_CAN_RUN_SCRIPT</code>, or
+we report an error.</li>
+</ul>
+
+<p>
+Note that the roots really matter when propagating bits through the caller
+graph. If we start at a single function with the <code>PROP_CAN_RUN_SCRIPT</code> property
+bit set, then <code>any</code> and <code>all</code> will be the same sets.
+</p>
+
+<p>
+There should probably be different names for <code>any/all</code> depending on whether
+they are propagated through the callee graph vs the caller graph.
+</p>
+
+<ul class="org-ul">
+<li><code>callee-any(PROP)</code> : a given function is reachable when property PROP is true.</li>
+<li><code>callee-all(PROP)</code> : a given function is only called when property PROP is true.</li>
+<li><code>caller-any(PROP)</code> : a given function can reach a spot where property PROP is true.</li>
+<li><code>caller-all(PROP)</code> rooted at set <code>roots</code> where <code>PROP</code> is true for all roots :
+a given function can reach all functions in <code>roots</code>.</li>
+</ul>
+
+<p>
+The <code>canGC</code> set <b>could</b> be computed as <code>caller-any(PROP_CAN_GC)</code> minus
+<code>callee-all(PROP_CANNOT_GC)</code> (assuming the GC entry points were annotated with
+<code>PROP_CAN_GC</code>) using all leaves or just the GC entry points as the roots.
+Sadly, it seems like <code>caller-all</code> is useless when using all leaves as the
+roots. (Any small little leaf would clear the <code>caller-all</code> property for
+anything that can reach it.
+</p>
+
+<p>
+Note that this analysis is horribly unsound : if a function calls through a
+function pointer that could end up running script, then the analysis will miss
+it. To be conservative, we would have to add all function pointers to the root
+set as well.
+</p>
+</div>
+</li>
+
+<li><a id="org30df2c4"></a>Iterator invalidation<br />
+<div class="outline-text-5" id="text-2-6-6-2">
+<p>
+Let's say we want to identify mutations to a data structure while an iterator
+over that data structure is still active. We could make a <code>PROP_LIVE_ITERATOR</code>
+property that is set on any function called with the iterator live, then
+propagate that through the callee graph. When analyzing a function in
+<code>callee-any(PROP_LIVE_ITERATOR)</code>, we can report an iterator invalidation error
+when the data structure is mutated.
+</p>
+
+<p>
+Note that errors must also be reported on mutations in the parts of a function
+that themselves have an iterator active. This wouldn't use the property above.
+</p>
+</div>
+</li>
+
+<li><a id="org4c25991"></a>Temporary Register Allocation<br />
+<div class="outline-text-5" id="text-2-6-6-3">
+<p>
+If we have RAII controls over temporary register use in the JIT, then we can
+verify that you don't attempt to grab the register while it's already in use. A
+dynamic check would probably be just as good, though. (If the error is in a
+rare codepath, then it's probably handling an error, in which case there's a
+good chance the outer temporary usage is going to get aborted anyway. The
+dynamic analysis would probably have fewer missed errors than the static
+analysis would have false alarms.)
+</p>
+</div>
+</li>
+
+<li><a id="org0d1d57a"></a>Deadlock Detection<br />
+<div class="outline-text-5" id="text-2-6-6-4">
+<p>
+This feels like it would probably need either a custom check, or a dynamic
+number of properties (one per lock). But if we ignore that and look at one
+lock: set a <code>PROP_LOCK</code> property in the scope of the lock, and error out if we
+attempt to take the lock in any function in <code>callee-any(PROP_LOCK)</code>. Though
+there are probably temporary unlock regions at times, so this would actually
+require a <code>PROP_UNLOCK</code> property too with rules for combining the bits during
+the graph traversal.
+</p>
+
+<p>
+Come to think of it, the temporary register checker above would almost
+certainly need the same sort of functionality. Each property would need
+multiple possible states: unknown, always true, always false, sometimes true,
+(sometimes false? sometimes false would be good for detecting unlocked access
+to guarded data. But there are already custom analyses for these sorts of
+things).
+</p>
+</div>
+</li>
+</ol>
+</div>
+</div>
+
+<div id="outline-container-orgc0c8e3a" class="outline-3">
+<h3 id="orgc0c8e3a"><span class="section-number-3">2.7</span> XDB files</h3>
+<div class="outline-text-3" id="text-2-7">
+<pre class="example">
+_ZN2js17NativeGetPropertyEP9JSContextN2JS6HandleIPNS_12NativeObjectEEENS3_INS2_11PropertyKeyEEENS2_13MutableHandleINS2_5ValueEEE$uint8 js::NativeGetProperty(JSContext*, JS::Handle&lt;js::NativeObject*&gt;, JS::Handle&lt;JS::PropertyKey&gt;, JS::MutableHandle&lt;JS::Value&gt;)
+
+</pre>
+</div>
+</div>
+</div>
+</div>
+<div id="postamble" class="status">
+<p class="author">Author: Steve Fink</p>
+<p class="date">Created: 2020-01-27 Mon 04:45</p>
+<p class="validation"><a href="http://validator.w3.org/check?uri=referer">Validate</a></p>
+</div>
+</body>
+</html>
