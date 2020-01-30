@@ -64,7 +64,7 @@ journal =
 
 # Nonstandard additional commands
 #qbackout = ~/lib/version-control-tools/hgext/qbackout/
-mqext = ~/lib/version-control-tools/hgext/mqext
+#mqext = ~/lib/version-control-tools/hgext/mqext
 evolve = ~/lib/hg/evolve/hgext3rd/evolve
 topic = ~/lib/hg/evolve/hgext3rd/topic
 #hgsubversion = ~/lib/hg/hgsubversion/hgsubversion
@@ -77,10 +77,10 @@ topic = ~/lib/hg/evolve/hgext3rd/topic
 # Mozilla/bugzilla/tryserver integration
 #qimportbz = ~/.mozbuild/version-control-tools/hgext/qimportbz
 qimportbz = ~/lib/version-control-tools/hgext/qimportbz
-bzexport = ~/lib/hg/bzexport/
 trychooser = ~/lib/hg/trychooser/
 mozext = ~/lib/version-control-tools/hgext/mozext/
-# reviewboard = ~/lib/version-control-tools/hgext/reviewboard/client.py
+# Note: uses mozautomation from v-c-t, so after mozext
+bzexport = ~/lib/hg/bzexport/
 phabsend-moz = ~/.mozbuild/phabsend-moz/phabricator.py
 
 # Note: if I use the .mozbuild version, it seems to get confused between
@@ -97,7 +97,7 @@ cmdconvert = ~/lib/hg/cmdconvert
 ##################### aliases I actually use #####################
 
 ts = treestatus
-view = qshow
+view = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -p -r "$r"
 s = qseries -v
 
 ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(not public() and ::$r)" --template list
