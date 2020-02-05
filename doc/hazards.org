@@ -1,20 +1,7 @@
+#+TITLE: Static GC Rooting Hazard Analysis
 #+OPTIONS: ^:nil
 
 * Problem definition
-
-** Most basic hazard
-
-#+BEGIN_SRC
-    void helium() {
-      JSObject* obj = getObject();
-      doSomethingThatMightGC();
-      use(obj);
-    }
-#+END_SRC
-
-obj is a valid GC pointer. doSomethingThatMightGC() runs, triggers GC, and the
-GC moves obj somewhere else. The GC has no way of updating obj (it might be on
-the stack, or in a register), so it continues pointing to the old location.
 
 ** The rule: Thou Shalt Not Hold a GC Pointer Live Across a (Potential) GC
 
@@ -29,6 +16,20 @@ A simple non-hazard:
 
 Whatever holds obj will be invalidated, but it doesn't matter, since it isn't
 used afterwards.
+
+** Most basic hazard
+
+#+BEGIN_SRC
+    void helium() {
+      JSObject* obj = getObject();
+      doSomethingThatMightGC();
+      use(obj);
+    }
+#+END_SRC
+
+obj is a valid GC pointer. doSomethingThatMightGC() runs, triggers GC, and the
+GC moves obj somewhere else. The GC has no way of updating obj (it might be on
+the stack, or in a register), so it continues pointing to the old location.
 
 ** Tricky hazard 1
 

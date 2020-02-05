@@ -3,10 +3,10 @@
 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
 <head>
-<!-- 2020-01-27 Mon 04:45 -->
+<!-- 2020-02-02 Sun 20:13 -->
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>&lrm;</title>
+<title>Static GC Rooting Hazard Analysis</title>
 <meta name="generator" content="Org mode" />
 <meta name="author" content="Steve Fink" />
 <style type="text/css">
@@ -229,88 +229,70 @@ for the JavaScript code in this tag.
 </head>
 <body>
 <div id="content">
+<h1 class="title">Static GC Rooting Hazard Analysis</h1>
 <div id="table-of-contents">
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents">
 <ul>
-<li><a href="#orgce30137">1. Problem definition</a>
+<li><a href="#org1463627">1. Problem definition</a>
 <ul>
-<li><a href="#orgecd3164">1.1. Most basic hazard</a></li>
-<li><a href="#org7c08bcf">1.2. The rule: Thou Shalt Not Hold a GC Pointer Live Across a (Potential) GC</a></li>
-<li><a href="#org89033b9">1.3. Tricky hazard 1</a></li>
-<li><a href="#org99e2316">1.4. Rooting</a></li>
-<li><a href="#orgfd545d8">1.5. Tricky hazard 2</a></li>
-<li><a href="#org847336a">1.6. Easy fix (that doesn't work)</a></li>
+<li><a href="#org42d301f">1.1. The rule: Thou Shalt Not Hold a GC Pointer Live Across a (Potential) GC</a></li>
+<li><a href="#org9e56453">1.2. Most basic hazard</a></li>
+<li><a href="#org5e0e3b5">1.3. Tricky hazard 1</a></li>
+<li><a href="#orge165dab">1.4. Rooting</a></li>
+<li><a href="#orged2fac6">1.5. Tricky hazard 2</a></li>
+<li><a href="#org1a93de1">1.6. Easy fix (that doesn't work)</a></li>
 </ul>
 </li>
-<li><a href="#org3d70ab5">2. Hazard analysis</a>
+<li><a href="#org6efd6b8">2. Hazard analysis</a>
 <ul>
-<li><a href="#orga5f8221">2.1. Overview</a>
+<li><a href="#orgd959475">2.1. Overview</a>
 <ul>
-<li><a href="#orgf35c7d1">2.1.1. Global analysis</a></li>
-<li><a href="#org7bb7a5d">2.1.2. Static</a></li>
-<li><a href="#org7be43cb">2.1.3. Conservative</a></li>
-<li><a href="#orge2ba2ca">2.1.4. Unsound</a></li>
-<li><a href="#org2ccadce">2.1.5. Incomplete</a></li>
-<li><a href="#orgf09226b">2.1.6. Buggy</a></li>
+<li><a href="#orgfc4ef92">2.1.1. Global analysis</a></li>
+<li><a href="#org76fa4e7">2.1.2. Static</a></li>
+<li><a href="#orgb1eb57c">2.1.3. Conservative</a></li>
+<li><a href="#org271eeb4">2.1.4. Unsound</a></li>
+<li><a href="#org0eb1192">2.1.5. Incomplete</a></li>
+<li><a href="#org3048cb7">2.1.6. Buggy</a></li>
 </ul>
 </li>
-<li><a href="#org6c2a58f">2.2. How do you run the blasted thing?</a></li>
-<li><a href="#org02a5d94">2.3. Operational Overview</a></li>
-<li><a href="#org156d59f">2.4. Data structures</a>
+<li><a href="#org58c3f3d">2.2. How do you run the blasted thing?</a></li>
+<li><a href="#org3f99ad8">2.3. Operational Overview</a></li>
+<li><a href="#orgdf8847b">2.4. Data structures</a>
 <ul>
-<li><a href="#org9c0ec03">2.4.1. gcc data structure</a></li>
-<li><a href="#org7458516">2.4.2. sixgill data structures</a></li>
+<li><a href="#org20246b2">2.4.1. gcc data structure</a></li>
+<li><a href="#org43fc24e">2.4.2. sixgill data structures</a></li>
 </ul>
 </li>
-<li><a href="#org90f51a2">2.5. Compilation</a>
+<li><a href="#org03c6b81">2.5. Compilation</a>
 <ul>
-<li><a href="#org0a95269">2.5.1. Annotations</a></li>
+<li><a href="#org8e037b7">2.5.1. Annotations</a></li>
 </ul>
 </li>
-<li><a href="#org040362f">2.6. Processing of generated data structures</a>
+<li><a href="#orgbcd4bc3">2.6. Processing of generated data structures</a>
 <ul>
-<li><a href="#org7f6290d">2.6.1. Compute the global callgraph</a></li>
-<li><a href="#org2b0f75f">2.6.2. Compute the set of GC types and GC pointers</a></li>
-<li><a href="#orgfa72887">2.6.3. Compute the set of functions that can GC.</a></li>
-<li><a href="#org9f5a5d5">2.6.4. Analyze every function in the code base</a></li>
-<li><a href="#org1d2d565">2.6.5. In-depth look at main analysis function</a></li>
-<li><a href="#orgb7a3dc9">2.6.6. Ideas for additional analyses with same infrastructure</a></li>
+<li><a href="#org1a7e914">2.6.1. Compute the global callgraph</a></li>
+<li><a href="#org4785a52">2.6.2. Compute the set of GC types and GC pointers</a></li>
+<li><a href="#orgf66e36f">2.6.3. Compute the set of functions that can GC.</a></li>
+<li><a href="#org19833fc">2.6.4. Analyze every function in the code base</a></li>
+<li><a href="#org47baf7d">2.6.5. In-depth look at main analysis function</a></li>
+<li><a href="#org427c8d5">2.6.6. Ideas for additional analyses with same infrastructure</a></li>
 </ul>
 </li>
-<li><a href="#orgc0c8e3a">2.7. XDB files</a></li>
+<li><a href="#orgba699e1">2.7. XDB files</a></li>
 </ul>
 </li>
 </ul>
 </div>
 </div>
 
-<div id="outline-container-orgce30137" class="outline-2">
-<h2 id="orgce30137"><span class="section-number-2">1</span> Problem definition</h2>
+<div id="outline-container-org1463627" class="outline-2">
+<h2 id="org1463627"><span class="section-number-2">1</span> Problem definition</h2>
 <div class="outline-text-2" id="text-1">
 </div>
-<div id="outline-container-orgecd3164" class="outline-3">
-<h3 id="orgecd3164"><span class="section-number-3">1.1</span> Most basic hazard</h3>
+<div id="outline-container-org42d301f" class="outline-3">
+<h3 id="org42d301f"><span class="section-number-3">1.1</span> The rule: Thou Shalt Not Hold a GC Pointer Live Across a (Potential) GC</h3>
 <div class="outline-text-3" id="text-1-1">
-<pre class="example">
-void helium() {
-  JSObject* obj = getObject();
-  doSomethingThatMightGC();
-  use(obj);
-}
-</pre>
-
-<p>
-obj is a valid GC pointer. doSomethingThatMightGC() runs, triggers GC, and the
-GC moves obj somewhere else. The GC has no way of updating obj (it might be on
-the stack, or in a register), so it continues pointing to the old location.
-</p>
-</div>
-</div>
-
-<div id="outline-container-org7c08bcf" class="outline-3">
-<h3 id="org7c08bcf"><span class="section-number-3">1.2</span> The rule: Thou Shalt Not Hold a GC Pointer Live Across a (Potential) GC</h3>
-<div class="outline-text-3" id="text-1-2">
 <p>
 A simple non-hazard:
 </p>
@@ -329,8 +311,27 @@ used afterwards.
 </div>
 </div>
 
-<div id="outline-container-org89033b9" class="outline-3">
-<h3 id="org89033b9"><span class="section-number-3">1.3</span> Tricky hazard 1</h3>
+<div id="outline-container-org9e56453" class="outline-3">
+<h3 id="org9e56453"><span class="section-number-3">1.2</span> Most basic hazard</h3>
+<div class="outline-text-3" id="text-1-2">
+<pre class="example">
+void helium() {
+  JSObject* obj = getObject();
+  doSomethingThatMightGC();
+  use(obj);
+}
+</pre>
+
+<p>
+obj is a valid GC pointer. doSomethingThatMightGC() runs, triggers GC, and the
+GC moves obj somewhere else. The GC has no way of updating obj (it might be on
+the stack, or in a register), so it continues pointing to the old location.
+</p>
+</div>
+</div>
+
+<div id="outline-container-org5e0e3b5" class="outline-3">
+<h3 id="org5e0e3b5"><span class="section-number-3">1.3</span> Tricky hazard 1</h3>
 <div class="outline-text-3" id="text-1-3">
 <pre class="example">
 void lithium(JSObject* obj) {
@@ -357,8 +358,8 @@ doSomethingThatMightGC().
 </div>
 </div>
 
-<div id="outline-container-org99e2316" class="outline-3">
-<h3 id="org99e2316"><span class="section-number-3">1.4</span> Rooting</h3>
+<div id="outline-container-orge165dab" class="outline-3">
+<h3 id="orge165dab"><span class="section-number-3">1.4</span> Rooting</h3>
 <div class="outline-text-3" id="text-1-4">
 <p>
 Not a hazard:
@@ -374,8 +375,8 @@ void beryllium(JSContext* cx) {
 </div>
 </div>
 
-<div id="outline-container-orgfd545d8" class="outline-3">
-<h3 id="orgfd545d8"><span class="section-number-3">1.5</span> Tricky hazard 2</h3>
+<div id="outline-container-orged2fac6" class="outline-3">
+<h3 id="orged2fac6"><span class="section-number-3">1.5</span> Tricky hazard 2</h3>
 <div class="outline-text-3" id="text-1-5">
 <pre class="example">
 class Cleanup {
@@ -394,8 +395,8 @@ JSObject* boron(JSContext* cx) {
 </div>
 </div>
 
-<div id="outline-container-org847336a" class="outline-3">
-<h3 id="org847336a"><span class="section-number-3">1.6</span> Easy fix (that doesn't work)</h3>
+<div id="outline-container-org1a93de1" class="outline-3">
+<h3 id="org1a93de1"><span class="section-number-3">1.6</span> Easy fix (that doesn't work)</h3>
 <div class="outline-text-3" id="text-1-6">
 <pre class="example">
 class Cleanup {
@@ -415,16 +416,16 @@ JSObject* boron(JSContext* cx) {
 </div>
 </div>
 
-<div id="outline-container-org3d70ab5" class="outline-2">
-<h2 id="org3d70ab5"><span class="section-number-2">2</span> Hazard analysis</h2>
+<div id="outline-container-org6efd6b8" class="outline-2">
+<h2 id="org6efd6b8"><span class="section-number-2">2</span> Hazard analysis</h2>
 <div class="outline-text-2" id="text-2">
 </div>
-<div id="outline-container-orga5f8221" class="outline-3">
-<h3 id="orga5f8221"><span class="section-number-3">2.1</span> Overview</h3>
+<div id="outline-container-orgd959475" class="outline-3">
+<h3 id="orgd959475"><span class="section-number-3">2.1</span> Overview</h3>
 <div class="outline-text-3" id="text-2-1">
 </div>
-<div id="outline-container-orgf35c7d1" class="outline-4">
-<h4 id="orgf35c7d1"><span class="section-number-4">2.1.1</span> Global analysis</h4>
+<div id="outline-container-orgfc4ef92" class="outline-4">
+<h4 id="orgfc4ef92"><span class="section-number-4">2.1.1</span> Global analysis</h4>
 <div class="outline-text-4" id="text-2-1-1">
 <p>
 The rooting hazard analysis is a global (whole-program) analysis as opposed to
@@ -443,13 +444,13 @@ we're using.
 <p>
 There has been talk about implementating a global analysis infrastructure on
 top of the clang plugin based analysis setup, but no concrete plans as yet.
-(Such things have been implemented, eg PhaSAR, but I haven't looked at them.)
+(Such things have been implemented, eg PhASAR, but I haven't looked at them.)
 </p>
 </div>
 </div>
 
-<div id="outline-container-org7bb7a5d" class="outline-4">
-<h4 id="org7bb7a5d"><span class="section-number-4">2.1.2</span> Static</h4>
+<div id="outline-container-org76fa4e7" class="outline-4">
+<h4 id="org76fa4e7"><span class="section-number-4">2.1.2</span> Static</h4>
 <div class="outline-text-4" id="text-2-1-2">
 <p>
 Some code paths may never be invoked in practice, but the analysis will assume
@@ -458,8 +459,8 @@ that they might be.
 </div>
 </div>
 
-<div id="outline-container-org7be43cb" class="outline-4">
-<h4 id="org7be43cb"><span class="section-number-4">2.1.3</span> Conservative</h4>
+<div id="outline-container-orgb1eb57c" class="outline-4">
+<h4 id="orgb1eb57c"><span class="section-number-4">2.1.3</span> Conservative</h4>
 <div class="outline-text-4" id="text-2-1-3">
 <ul class="org-ul">
 <li>Any function pointer will be assumed to call something that can GC, unless
@@ -471,8 +472,8 @@ only holds undefined or numeric values in practice)</li>
 </div>
 </div>
 
-<div id="outline-container-orge2ba2ca" class="outline-4">
-<h4 id="orge2ba2ca"><span class="section-number-4">2.1.4</span> Unsound</h4>
+<div id="outline-container-org271eeb4" class="outline-4">
+<h4 id="org271eeb4"><span class="section-number-4">2.1.4</span> Unsound</h4>
 <div class="outline-text-4" id="text-2-1-4">
 <ul class="org-ul">
 <li>Analysis relies on the C++ type system
@@ -508,8 +509,8 @@ static checking)</li>
 </div>
 </div>
 
-<div id="outline-container-org2ccadce" class="outline-4">
-<h4 id="org2ccadce"><span class="section-number-4">2.1.5</span> Incomplete</h4>
+<div id="outline-container-org0eb1192" class="outline-4">
+<h4 id="org0eb1192"><span class="section-number-4">2.1.5</span> Incomplete</h4>
 <div class="outline-text-4" id="text-2-1-5">
 <ul class="org-ul">
 <li>To be fully conservatively correct, callgraph should include an edge through
@@ -521,8 +522,8 @@ any function pointer invocation to every other function in the program.
 </div>
 </div>
 
-<div id="outline-container-orgf09226b" class="outline-4">
-<h4 id="orgf09226b"><span class="section-number-4">2.1.6</span> Buggy</h4>
+<div id="outline-container-org3048cb7" class="outline-4">
+<h4 id="org3048cb7"><span class="section-number-4">2.1.6</span> Buggy</h4>
 <div class="outline-text-4" id="text-2-1-6">
 <ul class="org-ul">
 <li>The conversion from C++ to the Sixgill data structures is not perfect.</li>
@@ -542,8 +543,8 @@ discarded
 </div>
 </div>
 
-<div id="outline-container-org6c2a58f" class="outline-3">
-<h3 id="org6c2a58f"><span class="section-number-3">2.2</span> How do you run the blasted thing?</h3>
+<div id="outline-container-org58c3f3d" class="outline-3">
+<h3 id="org58c3f3d"><span class="section-number-3">2.2</span> How do you run the blasted thing?</h3>
 <div class="outline-text-3" id="text-2-2">
 <ul class="org-ul">
 <li>Easiest way: push to try.</li>
@@ -556,11 +557,25 @@ discarded
 <code>js/src/devtools/rootAnalysis/README.md</code></li>
 <li>I am working on making it entirely runnable from <code>mach</code>.</li>
 </ul>
+
+<pre class="example">
+# Install sixgill, matching gcc
+mach hazards bootstrap
+
+# Build a shell to run the analysis with
+mach hazards build-shell
+
+# Compile the tree and gather analysis info
+mach hazards gather
+
+# Analyze the gathered data and report on hazards
+mach hazards analyze
+</pre>
 </div>
 </div>
 
-<div id="outline-container-org02a5d94" class="outline-3">
-<h3 id="org02a5d94"><span class="section-number-3">2.3</span> Operational Overview</h3>
+<div id="outline-container-org3f99ad8" class="outline-3">
+<h3 id="org3f99ad8"><span class="section-number-3">2.3</span> Operational Overview</h3>
 <div class="outline-text-3" id="text-2-3">
 <ol class="org-ol">
 <li>Start up a server to gather the results of compilation</li>
@@ -577,12 +592,12 @@ analyzes them.</li>
 </div>
 </div>
 
-<div id="outline-container-org156d59f" class="outline-3">
-<h3 id="org156d59f"><span class="section-number-3">2.4</span> Data structures</h3>
+<div id="outline-container-orgdf8847b" class="outline-3">
+<h3 id="orgdf8847b"><span class="section-number-3">2.4</span> Data structures</h3>
 <div class="outline-text-3" id="text-2-4">
 </div>
-<div id="outline-container-org9c0ec03" class="outline-4">
-<h4 id="org9c0ec03"><span class="section-number-4">2.4.1</span> gcc data structure</h4>
+<div id="outline-container-org20246b2" class="outline-4">
+<h4 id="org20246b2"><span class="section-number-4">2.4.1</span> gcc data structure</h4>
 <div class="outline-text-4" id="text-2-4-1">
 <ul class="org-ul">
 <li>nasty awful opaque 'tree' type with unions of structs of unions of unions&#x2026;</li>
@@ -616,12 +631,12 @@ bool XIL_IsBaseField(tree field, bool *offset_zero)
 </div>
 </div>
 
-<div id="outline-container-org7458516" class="outline-4">
-<h4 id="org7458516"><span class="section-number-4">2.4.2</span> sixgill data structures</h4>
+<div id="outline-container-org43fc24e" class="outline-4">
+<h4 id="org43fc24e"><span class="section-number-4">2.4.2</span> sixgill data structures</h4>
 <div class="outline-text-4" id="text-2-4-2">
 </div>
 <ol class="org-ol">
-<li><a id="org8f047f9"></a>Sample C++ source<br />
+<li><a id="org0c1e079"></a>Sample C++ source<br />
 <div class="outline-text-5" id="text-2-4-2-1">
 <pre class="example">
 static void DeleteOffThreadJob(JSContext* cx, OffThreadJob* job) {
@@ -640,7 +655,7 @@ static void DeleteOffThreadJob(JSContext* cx, OffThreadJob* job) {
 </div>
 </li>
 
-<li><a id="org5688ca7"></a>Portion of sixgill output<br />
+<li><a id="org80bbb96"></a>Portion of sixgill output<br />
 <div class="outline-text-5" id="text-2-4-2-2">
 <pre class="example">
 block: _ZL1...$js.cpp:void DeleteOffThreadJob...:loop#0
@@ -678,7 +693,7 @@ QUESTION: In that loop body, why isn't there an edge from 2 -&gt; 6?? (through a
 </div>
 </li>
 
-<li><a id="org6b8932a"></a>Basic data structure setup<br />
+<li><a id="org89336be"></a>Basic data structure setup<br />
 <div class="outline-text-5" id="text-2-4-2-3">
 <ul class="org-ul">
 <li>Each function gets translated into a <code>Block</code>.</li>
@@ -709,7 +724,7 @@ value assigned to a temporary that is then used within the value</li>
 </div>
 </li>
 
-<li><a id="orga217a73"></a>Simplified example fragment<br />
+<li><a id="org10cbaeb"></a>Simplified example fragment<br />
 <div class="outline-text-5" id="text-2-4-2-4">
 <ul class="org-ul">
 <li>Block "foo()"
@@ -766,16 +781,16 @@ value assigned to a temporary that is then used within the value</li>
 </div>
 
 
-<div id="outline-container-org90f51a2" class="outline-3">
-<h3 id="org90f51a2"><span class="section-number-3">2.5</span> Compilation</h3>
+<div id="outline-container-org03c6b81" class="outline-3">
+<h3 id="org03c6b81"><span class="section-number-3">2.5</span> Compilation</h3>
 <div class="outline-text-3" id="text-2-5">
 <p>
 Only including what I think might be relevant to this audience.
 </p>
 </div>
 
-<div id="outline-container-org0a95269" class="outline-4">
-<h4 id="org0a95269"><span class="section-number-4">2.5.1</span> Annotations</h4>
+<div id="outline-container-org8e037b7" class="outline-4">
+<h4 id="org8e037b7"><span class="section-number-4">2.5.1</span> Annotations</h4>
 <div class="outline-text-4" id="text-2-5-1">
 <p>
 Currently expands to <code>__attribute__((annotate("stuff")))</code>.
@@ -823,12 +838,12 @@ class MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS HashMap { ... };
 </div>
 </div>
 
-<div id="outline-container-org040362f" class="outline-3">
-<h3 id="org040362f"><span class="section-number-3">2.6</span> Processing of generated data structures</h3>
+<div id="outline-container-orgbcd4bc3" class="outline-3">
+<h3 id="orgbcd4bc3"><span class="section-number-3">2.6</span> Processing of generated data structures</h3>
 <div class="outline-text-3" id="text-2-6">
 </div>
-<div id="outline-container-org7f6290d" class="outline-4">
-<h4 id="org7f6290d"><span class="section-number-4">2.6.1</span> Compute the global callgraph</h4>
+<div id="outline-container-org1a7e914" class="outline-4">
+<h4 id="org1a7e914"><span class="section-number-4">2.6.1</span> Compute the global callgraph</h4>
 <div class="outline-text-4" id="text-2-6-1">
 <ul class="org-ul">
 <li>Resolves virtual method edges to all implementations of that method (based
@@ -838,8 +853,8 @@ on the static type).</li>
 </div>
 </div>
 
-<div id="outline-container-org2b0f75f" class="outline-4">
-<h4 id="org2b0f75f"><span class="section-number-4">2.6.2</span> Compute the set of GC types and GC pointers</h4>
+<div id="outline-container-org4785a52" class="outline-4">
+<h4 id="org4785a52"><span class="section-number-4">2.6.2</span> Compute the set of GC types and GC pointers</h4>
 <div class="outline-text-4" id="text-2-6-2">
 <ul class="org-ul">
 <li>Start from the annotations, and trace through inheritance tree.</li>
@@ -847,8 +862,8 @@ on the static type).</li>
 </div>
 </div>
 
-<div id="outline-container-orgfa72887" class="outline-4">
-<h4 id="orgfa72887"><span class="section-number-4">2.6.3</span> Compute the set of functions that can GC.</h4>
+<div id="outline-container-orgf66e36f" class="outline-4">
+<h4 id="orgf66e36f"><span class="section-number-4">2.6.3</span> Compute the set of functions that can GC.</h4>
 <div class="outline-text-4" id="text-2-6-3">
 <ul class="org-ul">
 <li>The core is a simple reachability analysis in the global callgraph.</li>
@@ -901,8 +916,8 @@ local analysis can't see it.)
 </div>
 </div>
 
-<div id="outline-container-org9f5a5d5" class="outline-4">
-<h4 id="org9f5a5d5"><span class="section-number-4">2.6.4</span> Analyze every function in the code base</h4>
+<div id="outline-container-org19833fc" class="outline-4">
+<h4 id="org19833fc"><span class="section-number-4">2.6.4</span> Analyze every function in the code base</h4>
 <div class="outline-text-4" id="text-2-6-4">
 <p>
 Iterate over functions and look for unrooted GC pointers held live across a
@@ -1005,8 +1020,8 @@ of called functions, not callers, a fact that I repeatedly forget.
 </div>
 </div>
 
-<div id="outline-container-org1d2d565" class="outline-4">
-<h4 id="org1d2d565"><span class="section-number-4">2.6.5</span> In-depth look at main analysis function</h4>
+<div id="outline-container-org47baf7d" class="outline-4">
+<h4 id="org47baf7d"><span class="section-number-4">2.6.5</span> In-depth look at main analysis function</h4>
 <div class="outline-text-4" id="text-2-6-5">
 <ul class="org-ul">
 <li>Look at a single function (<code>processBodies()</code>)</li>
@@ -1071,11 +1086,15 @@ backwards scan already found a GC call by this point</li>
 predecessors in the "caller"</li>
 <li>also propagate to the end of this loop (for the previous iteratiom)</li>
 </ul>
+
+<p>
+I'm honestly not sure why the scan goes backwards.
+</p>
 </div>
 </div>
 
-<div id="outline-container-orgb7a3dc9" class="outline-4">
-<h4 id="orgb7a3dc9"><span class="section-number-4">2.6.6</span> Ideas for additional analyses with same infrastructure</h4>
+<div id="outline-container-org427c8d5" class="outline-4">
+<h4 id="org427c8d5"><span class="section-number-4">2.6.6</span> Ideas for additional analyses with same infrastructure</h4>
 <div class="outline-text-4" id="text-2-6-6">
 <p>
 The ability to compute <code>any/all</code> sets for arbitrary properties is potentially
@@ -1084,7 +1103,7 @@ very useful. Here are some possibilities:
 </div>
 
 <ol class="org-ol">
-<li><a id="org6417c43"></a>Can Run Script<br />
+<li><a id="orgc0cb201"></a>Can Run Script<br />
 <div class="outline-text-5" id="text-2-6-6-1">
 <p>
 Let's say we want to validate the MOZ_CAN_RUN_SCRIPT and
@@ -1143,7 +1162,7 @@ set as well.
 </div>
 </li>
 
-<li><a id="org30df2c4"></a>Iterator invalidation<br />
+<li><a id="orgfed7f25"></a>Iterator invalidation<br />
 <div class="outline-text-5" id="text-2-6-6-2">
 <p>
 Let's say we want to identify mutations to a data structure while an iterator
@@ -1161,7 +1180,7 @@ that themselves have an iterator active. This wouldn't use the property above.
 </div>
 </li>
 
-<li><a id="org4c25991"></a>Temporary Register Allocation<br />
+<li><a id="org29df91b"></a>Temporary Register Allocation<br />
 <div class="outline-text-5" id="text-2-6-6-3">
 <p>
 If we have RAII controls over temporary register use in the JIT, then we can
@@ -1175,7 +1194,7 @@ analysis would have false alarms.)
 </div>
 </li>
 
-<li><a id="org0d1d57a"></a>Deadlock Detection<br />
+<li><a id="orgb288e5a"></a>Deadlock Detection<br />
 <div class="outline-text-5" id="text-2-6-6-4">
 <p>
 This feels like it would probably need either a custom check, or a dynamic
@@ -1201,8 +1220,8 @@ things).
 </div>
 </div>
 
-<div id="outline-container-orgc0c8e3a" class="outline-3">
-<h3 id="orgc0c8e3a"><span class="section-number-3">2.7</span> XDB files</h3>
+<div id="outline-container-orgba699e1" class="outline-3">
+<h3 id="orgba699e1"><span class="section-number-3">2.7</span> XDB files</h3>
 <div class="outline-text-3" id="text-2-7">
 <pre class="example">
 _ZN2js17NativeGetPropertyEP9JSContextN2JS6HandleIPNS_12NativeObjectEEENS3_INS2_11PropertyKeyEEENS2_13MutableHandleINS2_5ValueEEE$uint8 js::NativeGetProperty(JSContext*, JS::Handle&lt;js::NativeObject*&gt;, JS::Handle&lt;JS::PropertyKey&gt;, JS::MutableHandle&lt;JS::Value&gt;)
@@ -1214,7 +1233,7 @@ _ZN2js17NativeGetPropertyEP9JSContextN2JS6HandleIPNS_12NativeObjectEEENS3_INS2_1
 </div>
 <div id="postamble" class="status">
 <p class="author">Author: Steve Fink</p>
-<p class="date">Created: 2020-01-27 Mon 04:45</p>
+<p class="date">Created: 2020-02-02 Sun 20:13</p>
 <p class="validation"><a href="http://validator.w3.org/check?uri=referer">Validate</a></p>
 </div>
 </body>
