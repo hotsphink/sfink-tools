@@ -65,3 +65,9 @@ def realloc
   set $precode_ = (long)aPtr + $offset_
   watch *(void**)$precode_
 end
+
+def tcellzone
+  set $addr=(uintptr_t)$arg0
+  set $arena=(js::gc::Arena*)($addr & ~js::gc::ArenaMask)
+  set $zone=$arena->zone
+end
