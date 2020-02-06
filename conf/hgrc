@@ -41,7 +41,7 @@ progress =
 
 # Standard additional commands
 patchbomb =
-mq =
+#mq =
 record =
 rebase =
 relink =
@@ -76,8 +76,8 @@ topic = ~/lib/hg/evolve/hgext3rd/topic
 
 # Mozilla/bugzilla/tryserver integration
 #qimportbz = ~/.mozbuild/version-control-tools/hgext/qimportbz
-qimportbz = ~/lib/version-control-tools/hgext/qimportbz
-trychooser = ~/lib/hg/trychooser/
+#qimportbz = ~/lib/version-control-tools/hgext/qimportbz
+#trychooser = ~/lib/hg/trychooser/
 mozext = ~/lib/version-control-tools/hgext/mozext/
 # Note: uses mozautomation from v-c-t, so after mozext
 bzexport = ~/lib/hg/bzexport/
