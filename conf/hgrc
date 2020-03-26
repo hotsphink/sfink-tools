@@ -305,10 +305,18 @@ pager = LESS='RF' less
 [hostsecurity]
 hg.mozilla.org:fingerprints = sha256:17:38:aa:92:0b:84:3e:aa:8e:52:52:e9:4c:2f:98:a9:0e:bf:6c:3e:e9:15:ff:0a:29:80:f7:06:02:5b:e8:48
 
+[templatealias]
+l_normal(s) = label('tags.normal', s)
+
 [templates]
 wip = '{label("wip.branch", if(branches,"{branches} "))}{label(ifeq(graphnode,"x","wip.obsolete","wip.{phase}"),"{rev}:{node|short}")}{label("wip.user", " {author|user}")}{label("wip.tags", if(tags," {tags}"))}{label("wip.tags", if(fxheads," {fxheads}"))}{if(bookmarks," ")}{label("wip.bookmarks", if(bookmarks,bookmarks))}{label(ifcontains(rev, revset("parents()"), "wip.here"), " {desc|firstline}")}'
 
-list = "{label('changeset.{phase}', '{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline} {label('tags.normal', topic)} {label('tags.normal', bookmarks)}\n"
+topic_str = "{ifeq(topic, '', '', '[{topic}]')}"
+bookmarks_str = "{join(bookmarks % 'B({bookmark})', ' ')}"
+tags_str = "{join(tags % '{ifeq(tag, 'tip', '', 't({tag})')}', ' ')}"
+node_str = "{ifeq(topicidx, '', '', 's{topicidx} ')}{node|short}"
+
+list = "{label('changeset.{phase}', node_str)} {l_normal(topic_str)} {desc|firstline} {l_normal(tags_str)} {l_normal(bookmarks_str)} {instabilities}\n"
 
 fulldesc = "{desc}\n"
 
