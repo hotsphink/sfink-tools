@@ -41,7 +41,7 @@ progress =
 
 # Standard additional commands
 patchbomb =
-mq =
+#mq =
 record =
 rebase =
 relink =
@@ -76,8 +76,8 @@ topic = ~/lib/hg/evolve/hgext3rd/topic
 
 # Mozilla/bugzilla/tryserver integration
 #qimportbz = ~/.mozbuild/version-control-tools/hgext/qimportbz
-qimportbz = ~/lib/version-control-tools/hgext/qimportbz
-trychooser = ~/lib/hg/trychooser/
+#qimportbz = ~/lib/version-control-tools/hgext/qimportbz
+#trychooser = ~/lib/hg/trychooser/
 mozext = ~/lib/version-control-tools/hgext/mozext/
 # Note: uses mozautomation from v-c-t, so after mozext
 bzexport = ~/lib/hg/bzexport/
@@ -162,17 +162,6 @@ series = qseries -v
 goto = qgoto
 touched = qtouched
 shortlog = log --template='{node|short}: {desc|firstline}\n'
-qlog = log --stat -r qtip:qbase
-qcat = !cd $(hg root)/.hg/$(hg qqueue --active) && hg cat -r 'file("$1")$2' $1
-qrev = !if [ -n "$1" ]; then hg qref -m "$(hg qheader | perl -lpe 's/$/, r=$1/ if 1..1')"; else echo "reviewer required" >&2; fi; hg qh
-
-list = log --template "{label('changeset.{phase}', '{rev}:{node|short}')} {label('tags.normal', ifeq(tags, '', '', ifeq(tags, 'tip', '', '{tags}\n    ')))}  {desc|firstline}\n"
-
-msg = log -r . --template '{desc}\n'
-
-spew = !$HG export -r 'not public()' | perl -lne '$$r ||= "none"; $$r = $$1 if /^# Node ID (.{12})/; print "$$r $$_"'
-
-# wip = log --graph --rev=wip --template=wip
 
 # Usage: hg enbug <desc> # desc should be oneword
 #
