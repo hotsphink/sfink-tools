@@ -1,3 +1,7 @@
+# Seems a little unsafe; this is a gdb performance tweak. See
+# https://robert.ocallahan.org/2020/03/debugging-gdb-using-rr-ptrace-emulation.html
+maint set catch-demangler-crashes off
+
 add-auto-load-safe-path ~/src
 
 def pretty
