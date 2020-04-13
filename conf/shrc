@@ -1,0 +1,27 @@
+# `mc <suffix>`: Set MOZCONFIG to the current hg root's mozconfig.<suffix>
+# file. If the file does not exist, will ask if you want to use the most
+# recently edited one from a sibling directory.
+#
+function mc () {
+    local mozconfig
+    mozconfig="$(hg root)/mozconfig.$1"
+    if ! [ -f "$mozconfig" ]; then
+        echo "Warning: $mozconfig does not exist" >&2
+        local tmp
+        tmp=$(ls -tr "$(dirname "$(hg root)")"/*/mozconfig.$1 | tail -1)
+        if [ -z "$tmp" ]; then
+            echo "No mozconfig.$1 found" >&2
+            return
+        fi
+        echo -n "Use $tmp? (y/n) " >&2
+        read REPLY
+        if [[ "${REPLY#y}" == "$REPLY" ]]; then
+            return
+        fi
+        echo "Copying $tmp to "$(hg root)""
+        cp "$tmp" "$(hg root)"
+        mozconfig="$(hg root)/mozconfig.$1"
+    fi
+    export MOZCONFIG="$mozconfig"
+    echo "MOZCONFIG now $MOZCONFIG"
+}
