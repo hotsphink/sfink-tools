@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 
 # This is a snapshot of http://people.mozilla.com/~tschneidereit/wig
 # Please get the latest version from there. The old 'wig' is at
@@ -14,9 +14,9 @@ from glob import glob
 from subprocess import check_output
 
 parser = argparse.ArgumentParser(description="""
-Uses 'wiggle' to apply the reject files left by conflicts during 
-mercurial merges to your source tree run it from anywhere underneath 
-the hg root; the main point of this script is to figure out the 
+Uses 'wiggle' to apply the reject files left by conflicts during
+mercurial merges to your source tree run it from anywhere underneath
+the hg root; the main point of this script is to figure out the
 right path and call wiggle with the correct magic options.
 
 Example:
@@ -44,7 +44,7 @@ The reject arguments can be either *.rej files, the names of files
 rejects are to be wiggled into, or directories containing rejects.
 
 If given directories, wig recurses into the sub-directories to
-find as many rejects as possible. This can be changed using the 
+find as many rejects as possible. This can be changed using the
 -s/--shallow option.
 
 For successful wiggles, wig deletes the *.porig and *.rej files.
@@ -111,7 +111,7 @@ for target in targets:
 
 
 
-# Note: I'm 100% convinced this is a very long-winded implementation. 
+# Note: I'm 100% convinced this is a very long-winded implementation.
 # Consider the roughly equivalent, if less flexible, bash version:
 # dir=$(pwd)
 # unset a i
