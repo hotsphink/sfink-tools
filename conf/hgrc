@@ -53,7 +53,7 @@ purge =
 share =
 histedit =
 shelve =
-hggit = ~/lib/hg/hg-git/hggit
+# hggit = ~/lib/hg/hg-git/hggit
 show =
 absorb =
 
