@@ -19,7 +19,7 @@ my $MQROOTDIR;
 
 my @final_args;
 my $magic = 0;
-my $revision = '.';
+my $revision;
 
 my $verbose;
 if (@ARGV && ($ARGV[0] eq '-v' || $ARGV[0] eq '--verbose')) {
@@ -63,9 +63,9 @@ ARG: for my $arg (@ARGV) {
                 $arg = "$ROOTDIR/$arg";
             } else {
                 chomp(my $path = qx(hg files "relglob:$arg"));
-                if (-r $path) {
+                if ($path ne '' && -r $path) {
                     $arg = $path;
-                } else {
+                } elsif ($arg =~ /^[\da-f]{1,40}$/) {
                     $revision = $arg;
                     next;
                 }
@@ -107,13 +107,19 @@ ARG: for my $arg (@ARGV) {
 if (@final_args == 0) {
     chomp($ROOTDIR = $TOPROOTDIR ||= qx(hg root));
 
-    print "Looking for changes in working directory...\n"
-        if $verbose;
     my @files;
-    chomp(@files = qx(hg diff | diffstat -l -p1));
+
+    # If no revision was given, check working directory.
+    if (! defined $revision) {
+        print "Looking for changes in working directory...\n"
+            if $verbose;
+        chomp(@files = qx(hg diff | diffstat -l -p1));
+    }
+
     if (@files) {
         push @final_args, map { "$ROOTDIR/$_" } @files;
     } else {
+        $revision //= '.';
         print "Using changes from $revision\n"
             if $verbose;
         open(my $diff, "hg export --hidden $revision |");
