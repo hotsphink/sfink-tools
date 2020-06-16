@@ -1,8 +1,24 @@
+# This file is normally loaded via `source ~/path/to/sfink-tools/conf/shrc`
+# from .zshrc/.bashrc/whatever.
+
 # `mc <suffix>`: Set MOZCONFIG to the current hg root's mozconfig.<suffix>
 # file. If the file does not exist, will ask if you want to use the most
 # recently edited one from a sibling directory.
 #
 function mc () {
+    if [ $# = 0 ]; then
+        echo "MOZCONFIG is ${MOZCONFIG:-unset}"
+        if [ -z "$MOZCONFIG" ]; then
+            echo "available:"
+            for f in "$(hg root)/mozconfig."*; do
+                if [ -n "${f#*~}" ]; then
+                    echo "  ${f#*mozconfig.}"
+                fi
+            done
+        fi
+        return
+    fi
+
     local mozconfig
     mozconfig="$(hg root)/mozconfig.$1"
     if ! [ -f "$mozconfig" ]; then
