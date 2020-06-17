@@ -9,12 +9,14 @@ function mc () {
     if [ $# = 0 ]; then
         echo "MOZCONFIG is ${MOZCONFIG:-unset}"
         if [ -z "$MOZCONFIG" ]; then
-            echo "available:"
-            for f in "$(hg root)/mozconfig."*; do
-                if [ -n "${f#*~}" ]; then
-                    echo "  ${f#*mozconfig.}"
-                fi
+            local n
+            n=0
+            for f in $(ls "$(hg root)" | fgrep mozconfig. | fgrep -v '~'); do
+                [ $n -eq 0 ] && echo "available:"
+                n=$(( $n + 1 ))
+                echo "  ${f#*mozconfig.}"
             done
+            [ $n -eq 0 ] && echo "no mozconfig.* files available in $(hg root)"
         fi
         return
     fi
