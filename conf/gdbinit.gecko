@@ -1,14 +1,14 @@
 # .gdbinit file for debugging Mozilla code (Gecko, SpiderMonkey)
 
-def pmethod
+define pmethod
         p/a *(void**)(*((PRUint64*)mCallee) + 8 * mVTableIndex)
 end
 
-def showstring
+define showstring
   x/($1.Length())s $1.BeginReading()
 end
 
-def watchmark
+define watchmark
   # First arg is the gc cell address
   # Second arg is the color
   #
@@ -20,7 +20,7 @@ def watchmark
   watch -l *$word
 end
 
-def manualmark
+define manualmark
   # Same args as watchmark
   set $addr=(uintptr_t)$arg0
   set $bit=($addr & js::gc::ChunkMask) / js::gc::CellBytesPerMarkBit + $arg1
@@ -29,30 +29,30 @@ def manualmark
   set $word=&$bitmap[$bit / 64]
 end
 
-def getheap
+define getheap
   p *(js::gc::ChunkLocation*)(((uint64_t)$arg0) & ~js::gc::ChunkMask | js::gc::ChunkLocationOffset)
 end
 
-def markinfo
+define markinfo
   p js::debug::GetMarkInfo((js::gc::Cell*)$arg0)
 end
 
-def proxyhandler
+define proxyhandler
   p ((js::detail::ProxyDataLayout)((void**)$arg0)[2]).handler
 end
 
-def ccwtarget
+define ccwtarget
   p js::UncheckedUnwrapWithoutExpose((JSObject*)$arg0)
 end
 
 # Set of functions for tracking JIT code back to its creator.
 
-def codeloc
+define codeloc
   set $code_=$arg0
   watch *(void**)$code_
 end
 
-def eccopy
+define eccopy
   set $offset_=(long)$code_ - (long)dst
   echo offset=
   p/x $offset
@@ -61,12 +61,12 @@ def eccopy
   watch *(void**)$precode_
 end
 
-def realloc
+define realloc
   set $precode_ = (long)aPtr + $offset_
   watch *(void**)$precode_
 end
 
-def tcellzone
+define tcellzone
   set $addr=(uintptr_t)$arg0
   set $arena=(js::gc::Arena*)($addr & ~js::gc::ArenaMask)
   set $zone=$arena->zone
