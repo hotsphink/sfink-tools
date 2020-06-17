@@ -1,3 +1,3 @@
-def rfin
+define rfin
   reverse-finish
 end

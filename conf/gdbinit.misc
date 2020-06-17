@@ -1,6 +1,6 @@
 # Various miscellaneous gdb helper functions
 
-def watchofs
+define watchofs
   # Usage: watchofs <ptr> <offset>
   watch -l *(void**)((char*)$arg0 + (size_t)$arg1)
 end
@@ -9,7 +9,7 @@ end
 #  python reload($arg0)
 #end
 
-def loudstep
+define loudstep
   disp/i $pc
   set $i = 0
   while ($i < $arg0)
@@ -25,6 +25,6 @@ end
 #  p (nsCString*)malloc(sizeof(nsCString))
 #  p $->nsTString()
 #
-def construct
+define construct
   p $obj = ($arg0 *) operator new(sizeof($arg0), malloc(sizeof($arg0)))
 end
