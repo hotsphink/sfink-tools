@@ -284,6 +284,24 @@ Call(14,15, abort())
 #+END_EXAMPLE
 
 QUESTION: In that loop body, why isn't there an edge from 2 -> 6?? (through an Assume)
+ - Ok, this example is too complex. I could have also asked, why no edge 4->6?
+ - or rather, a true Assume that went 4->6.
+ - but that's because the optimizer has rewritten the code to be more like
+
+#+BEGIN_SRC
+static void DeleteOffThreadJob(JSContext* cx, OffThreadJob* job) {
+  ShellContext* sc = GetShellContext(cx);
+  for (size_t i = 0; i < sc->offThreadJobs.length(); i++) {
+    if (sc->offThreadJobs[i] == job) {
+      sc->offThreadJobs.erase(&sc->offThreadJobs[i]);
+      js_delete(job);
+      return;
+    }
+  }
+
+  MOZ_CRASH("Off-thread job not found");
+}
+#+END_SRC
 
 **** Basic data structure setup
 
