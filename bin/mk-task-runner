@@ -1,32 +1,62 @@
 #!/usr/bin/python3
 
+import argparse
 import json
 import os
 import requests
 import shlex
 import sys
 
-task_url = 'https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/{}'.format(sys.argv[1])
+parser = argparse.ArgumentParser(description='generate a shell script to run a taskcluster job')
+parser.add_argument('--root-url', '-u', default='https://firefox-ci-tc.services.mozilla.com',
+                    help='taskcluster root URL')
+parser.add_argument('task', help='ID of task to replicate')
+
+# FIXME!!!
+parser.add_argument('--source', '-s', default='/home/sfink/src/mozilla2',
+                    help='source directory')
+parser.add_argument('--sourcename', default='source2',
+                    help='source directory in container')
+
+opts = parser.parse_args()
+
+task_url = 'https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/{}'.format(opts.task)
 payload = requests.get(task_url).json()["payload"]
-payload["env"]["TASKCLUSTER_ROOT_URL"] = 'https://firefox-ci-tc.services.mozilla.com'
+payload["env"]["TASKCLUSTER_ROOT_URL"] = opts.root_url
+HOME = payload["env"].setdefault("HOME", "/builds/worker")
 # payload["env"]["GECKO_PATH"] = '/builds/worker/source'
+SRC = os.path.join(HOME, opts.sourcename)
 
 with open("run-task.sh", "w") as fh:
     print('#!/bin/bash -x', file=fh)
+
+    print('''\
+if [ -z "$container" ]; then
+  echo "Running outside of a container."
+  if [ $# -ne 1 ]; then
+    echo "container name must be given on command line" >&2
+    exit 1
+  fi
+  #exec sudo podman exec -ti "$1" -w {HOME} -u worker bash
+  exec sudo podman exec -ti "$1" bash
+fi
+'''.format(HOME=HOME), file=fh)
 
     # Write out the environment settings.
     for k, v in payload["env"].items():
         print("export {}={}".format(shlex.quote(k), shlex.quote(v)), file=fh)
 
-    print('if [ -d /builds/worker/fetches/gcc ]; then unset MOZ_FETCHES; fi', file=fh)
+    print('cd {}'.format(HOME), file=fh)
+    print('mkdir $UPLOAD_DIR')
+    print('if [ -d {}/{}/gcc ]; then unset MOZ_FETCHES; fi'.format(HOME, payload["env"]["MOZ_FETCHES_DIR"]), file=fh)
 
     # Write out the command to execute.
     command = []
     for i, cmd in enumerate(payload["command"]):
         if i == 0:
-            command.append('/builds/worker/source/taskcluster/scripts/run-task')
+            command.append(SRC + '/taskcluster/scripts/run-task')
             command.append('--keep')
-            command.append('--existing-gecko-checkout=/builds/worker/source')
+            command.append('--existing-gecko-checkout=' + SRC)
         else:
             command.append(cmd)
 
@@ -39,12 +69,13 @@ if [ "$1" = "--shell" ]; then
   echo "Would have run:"
   echo -- {command}
 else
+  rm -rf {HOME}/workspace/*
   {command} >&1 | tee build.log
   echo "Running post-job shell"
 fi
 export PS1='task \h:\w\$ '
 exec bash
-'''.format(command=command_str), file=fh)
+'''.format(command=command_str, HOME=HOME), file=fh)
 
 os.chmod("run-task.sh", 0o777)
 print("Wrote run-task.sh")
