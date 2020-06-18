@@ -81,7 +81,9 @@ topic = ~/lib/hg/evolve/hgext3rd/topic
 mozext = ~/lib/version-control-tools/hgext/mozext/
 # Note: uses mozautomation from v-c-t, so after mozext
 bzexport = ~/lib/hg/bzexport/
-phabsend-moz = ~/.mozbuild/phabsend-moz/phabricator.py
+#phabsend-moz = ~/.mozbuild/phabsend-moz/phabricator.py
+phabsend-moz = ~/.mozbuild/phabsend-moz/mozphabricator.py
+#phabricator =
 
 # Note: if I use the .mozbuild version, it seems to get confused between
 #mozhg/util.py versions from ~/lib and ~/.mozbuild.
@@ -91,6 +93,7 @@ firefoxtree = ~/.mozbuild/version-control-tools/hgext/firefoxtree
 push-to-try = ~/.mozbuild/version-control-tools/hgext/push-to-try
 #clang-format = ~/.mozbuild/version-control-tools/hgext/clang-format
 
+# Commented out because if it is not in use, I am getting TypeError: Template.append: cmd must be a string
 cmdconvert = ~/lib/hg/cmdconvert
 
 [alias]
@@ -125,6 +128,8 @@ phsend = phabsend
 phupdate = phabupdate
 phread = phabread
 phquery = phabqquery
+
+yeet = phexport
 
 ######### aliases I would use if I remembered they existed #######
 
@@ -213,6 +218,7 @@ ignored_changesets = desc("ignore-this-changeset") or extdata(get_ignored_change
 
 # Intended for rebasing a new ministack on top of where it was inserted.
 sibling($1) = children(p1($1)) - $1
+siblingo($1) = children(p1($1)) + children(allpredecessors($1)) - $1
 
 cousin($1) = last(not public() and (children(ancestors($1)) - ancestors($1)))
 
@@ -379,6 +385,7 @@ clang-format:fileext = .cpp, .c, .h
 
 [phabsend]
 setbaseparent = true
+basepolicy = samebug
 amend = true
 
 # Personal configuration is in ~/.config/hg/hgrc

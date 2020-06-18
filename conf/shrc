@@ -8,6 +8,8 @@
 function mc () {
     if [ $# = 0 ]; then
         echo "MOZCONFIG is ${MOZCONFIG:-unset}"
+    fi
+    if [ $# = 0 ] || [[ $1 = "-l" ]]; then
         if [ -z "$MOZCONFIG" ]; then
             local n
             n=0
