@@ -1,0 +1,194 @@
+* Purpose(s)
+
+- Be able to investigate kernels of GC scheduling and performance issues from
+  the JS shell, by mimicking browser behavior.
+- Validate improvements
+- Compare different JS engines' behavior to look for outliers and low-hanging
+  fruit
+- (inherited) Visually display GC behavior to use ʜᴏᴏ-ᴍᴀɴ pattern matching
+
+* Architecture
+
+So far, I have really only been considering animation cases, where we are
+trying to maintain a decent frame rate. The whole architecture is based on
+frames: during a frame, you will do some amount of work ("mutator" or
+"allocation load"). You then may decide to wait some amount of time before the
+next frame.
+
+** Mutators/Allocation Loads
+
+This is meant to be microbenchmark suite so we can focus on specific types of
+allocations (foreground-finalized vs background-finalizable, WeakMaps, etc.)
+
+A directory ~benchmarks/~ contains the 18 mutators I have defined so far. Not
+all of them run in the shell; eg, there are mutators that just allocate text
+nodes in the DOM.
+
+Each mutator is expected to do some amount of allocation (configured by the
+rest of the system), then return. That is the ~garbagePerFrame~ value.
+
+But if you simply allocated some garbage on every frame, you'd mostly be
+testing the nursery (for nursery-allocatable types). So all of the allocated
+data gets thrown into a pile, and you keep some number of piles around all the
+time (creating a new one and expiring the oldest on every frame.)
+
+** Host objects
+
+Access to host-specific functionality: how to suspend, what data collection
+mechanisms are available. How to imitate a turn [or whatever the correct
+phrasing is], so that `Promises` and `WeakRefs` can work.
+
+Note that this is a source of differences between engines, because I don't know
+how to do those things in v8. When it starts to matter, I'll pester shu.
+
+** Scheduler: when to run frame code
+
+Mimics my naive view of how the browser schedules things.
+
+Try to maintain 60fps. Do some work, check whether there's still time left
+until the next frame. If so, wait.
+
+- SpiderMonkey has a test function ~sleep()~
+- For V8, I use ~Atomics.wait~ on a ~SharedArrayBuffer~
+
+The wait allows any background threads to continue running.
+
+There is another scheduler you can choose that waits until the next 60fps
+frame, even if you overran the previous. Selected on the command line with
+~--sched=vsync~
+
+** Sequencers: orchestrating multiple trials
+
+Each mutator must run for long enough to observe its longer-term performance.
+For the simplest test, you would just specify a set of mutators and it would
+run each one for ~D~ seconds and gather performance metrics.
+
+The sequencer is the object that manages beginning a new mutator, letting it do
+its per-frame processing, then stopping it and moving onto the next.
+
+Sequencers can be placed inside of other sequencers. For example, the basic
+"run these mutators" scenario involves populating a ~ChainSequencer~ with a
+series of ~SingleMutatorSequencer~. In the code, this is called a "trial".
+
+You could have a ~ChainSequencer~ of ~ChainSequencer~, except there's no reason
+to so you can't get there from the command line. This flexibility is utilized
+by the more sophisticated sequencers.
+
+*** Find50Sequencer
+
+A more advanced case is the ~Find50Sequencer~, which tries to find a value of
+~garbagePerFrame~ that results in 50% of frames being dropped. (Yes, it might
+make more sense to be looking for 2% frame drop if you're asking "how much can
+this handle and not look like laggy crap?" But 50% is nice for seeing how
+things fall apart.)
+
+~Find50Sequencer~ runs a trial with one value of the ~garbagePerFrame~ setting,
+measures the frame drop rate, and then either increases or decreases
+~garbagePerFrame~ and tries again.
+
+Currently, it does a simple-minded binary search: if you drop fewer than 50%
+frames, pile on more load. This is sensitive to getting lucky or unlucky on a
+trial, but in practice in SpiderMonkey it's been remarkably stable even with
+short trial durations. V8 is a very different story -- some things are fairly
+stable, but many things vary widely.
+
+I intend to replace or augment it with a linear regression.
+
+** PerfTracker
+
+This measures how long the mutator runs, how much time we waited, how many
+minor and major GCs have happened, etc. At the end of a trial, it computes
+frame droppage and feeds the result back into eg ~Find50Sequencer~.
+
+In the Web UI, there is also a ~FrameHistory~ that gathers a histogram of the
+inter-frame pause times during a trial. I haven't done anything with this in
+the shell yet.
+
+** Output
+
+Currently, there is some output to stdout to show the parameter settings it is
+trying and the basic result, in addition to verbose JSON output written to a
+file intended for consumption by some future tool.
+
+It is also useful to run perf on simple runs to gather performance counters.
+There is no integration that would allow you to separate out the perfcounter
+events by trial, though.
+
+** Web UI
+
+Originally, this was all intended to be purely a visual tool. That's still the
+most fun way to run this.
+
+It uses ~requestAnimationFrame~ to schedule the mutator work.
+
+It runs in both Chrome and Firefox, with Firefox displaying additional data in
+the chart:
+ - When major and minor GCs happened
+ - memory usage, including (stale) thresholds
+
+Much of the functionality is shared between the Web and shell front-ends, but
+each has quite a bit unique to it still.
+
+
+* Sample Results (do not trust)
+
+#+BEGIN_EXAMPLE
+
+deepWeakMap                   : SM/V8=1000/44000 = 44.0x worse
+globalArrayArrayLiteral       : SM/V8=1000000/2500000 = 2.5x worse
+globalArrayBuffer             : SM/V8=4000000/2000 = 2000.0x better
+globalArrayFgFinalized        : SM/V8=48000/14000 = 3.4x better
+globalArrayLargeArray         : SM/V8=3000000/800000 = 3.8x better
+globalArrayNewObject          : SM/V8=128000/2700000 = 21.1x worse
+globalArrayObjectLiteral      : SM/V8=384000/1300000 = 3.4x worse
+largeArrayPropertyAndElements : SM/V8=48000/68000 = 1.4x worse
+pairCyclicWeakMap             : SM/V8=10000/34000 = 3.4x worse
+propertyTreeSplitting         : SM/V8=8000/36000 = 4.5x worse
+selfCyclicWeakMap             : SM/V8=10000/26000 = 2.6x worse
+
+#+END_EXAMPLE
+
+* Future
+
+** Known Issues
+
+- Too much variance to be useful on many v8 runs.
+- Effects of one trial can bleed into the next (eg garbage is built up). Should
+  GC between trials, but I'll need to be sure to do that in v8 as well.
+
+** Future Work
+
+- For short runs, force a GC to be included in the timing
+- On SpiderMonkey, get an exact measurement of time spent GCing.
+  - using a stats mailbox approach
+- On SpiderMonkey, figure out what was happening when a frame deadline was
+  missed.
+- on SpiderMonkey and V8 (if I can figure out how), ensure that a trial has
+  seen a nontrivial amount of GC action so I'm not just benchmarking the
+  mutators.
+- Add in JSC, Node, ...?
+- Mainly: I need to use it to explore actual examples, and figure out what else
+  is needed from that.
+
+* Usage
+** Current shell help
+
+Usage: JS shell microbenchmark runner
+  --help          display this help message
+  --duration, -d  how long to run mutators for (in seconds) (default '8')
+  --sched         frame scheduler (one of 'keepup', 'vsync') (default 'keepup')
+  --sequencer     mutator sequencer (one of 'cycle', 'find50') (default 'cycle')
+** Web UI
+
+You need to load it via a server, because dynamic import doesn't work with
+file:/// urls.
+
+From the ~js/src/devtools/gc-ubench~ directory, run either
+
+    ~python3 -mhttp.server~
+
+or
+
+    ~python2 -mSimpleHTTPServer~
+
+and load ~http://localhost:8000/~.
