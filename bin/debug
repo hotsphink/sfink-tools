@@ -199,12 +199,19 @@ sub choose_pid_for_rr {
     die "rr ps format changed!" if shift(@info)->[2] ne 'EXIT';
 
     if (defined $pattern) {
+        my @relevant;
         foreach (@info) {
             my @cmd = split(/ /, $_->[3]);
-            return $_->[0] if basename($cmd[0]) eq $pattern;
-            return $_->[0] if @cmd > 1 && basename($cmd[1]) eq $pattern;
+            push @relevant, $_ if basename($cmd[0]) eq $pattern;
         }
-        return;
+        if (@relevant == 0) {
+            foreach (@info) {
+                my @cmd = split(/ /, $_->[3]);
+                push @relevant, $_ if @cmd > 1 && basename($cmd[1]) eq $pattern;
+            }
+        }
+        return if @relevant == 0;
+        @info = @relevant;
     }
 
     my $first_error_pid;
