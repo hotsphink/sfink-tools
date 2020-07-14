@@ -4,15 +4,23 @@ maint set catch-demangler-crashes off
 
 add-auto-load-safe-path ~/src
 
+define empretty
+  python import mozilla.autoload
+  python mozilla.autoload.register(gdb.current_objfile())
+end
 define pretty
-  source /home/sfink/src/mozilla/obj-debug/dist/bin/js-gdb.py
+  python sys.path.insert(0, '/home/sfink/src/mozilla/js/src/gdb')
+  empretty
 end
 define pretty2
-  source /home/sfink/src/mozilla2/obj-debug/dist/bin/js-gdb.py
+  python sys.path.insert(0, '/home/sfink/src/mozilla2/js/src/gdb')
+  empretty
 end
 define pretty3
-  source /home/sfink/src/mozilla3/obj-debug/dist/bin/js-gdb.py
+  python sys.path.insert(0, '/home/sfink/src/mozilla3/js/src/gdb')
+  empretty
 end
 define pretty4
-  source /home/sfink/src/mozilla4/obj-js-debug/dist/bin/js-gdb.py
+  python sys.path.insert(0, '/home/sfink/src/mozilla4/js/src/gdb')
+  empretty
 end
