@@ -272,16 +272,32 @@ class LabelCmd(gdb.Command):
 
     def set_label(self, name, value):
         if re.fullmatch(r'0x[0-9a-fA-F]+', value) or value.lstrip('-').isdecimal():
-            labels[value] = (name, 'void*')
-            return
+            if int(value) != 0:
+                labels[value] = (name, 'void*')
+                return
 
         v = gdb.parse_and_eval(value)
-        # FIXME! If there is a pretty printer for v, then we will fail to see the hex values we need. Want to skip it.
-        m = re.search(r'0x[0-9a-fA-F]+', str(v))
+
+        # FIXME! If there is a pretty printer for v that displays a different
+        # hex value than its address, then we will label using that instead.
+        # (Example: Symbol displays its desc address, though in the 0x0 case we
+        # will now skip that..)
+
+        # First, attempt to cast to void*.
+        valstr = None
+        try:
+            # Cannot cache the type lookup; cast fails, and type does not compare equal??
+            valstr = str(v.cast(gdb.lookup_type('void').pointer()))
+        except Exception as e:
+            # Fall back on the (possibly prettyprinted) output.
+            #print("Failed to cast: " + str(e))
+            valstr = str(v)
+
+        m = re.search(r'0x[0-9a-fA-F]+', valstr)
         if not m:
-            m = re.search(r'-?[0-9]{4,20}', str(v))
-        if not m:
-            gdb.write("No labelable value found in " + str(v) + "\n")
+            m = re.search(r'-?[0-9]{4,20}', valstr)
+        if not m or m.group(0) == '0' or m.group(0) == '0x0':
+            gdb.write("No labelable value found in " + valstr + "\n")
             return
 
         # gdb.write("gots %s, setting labels[%s] = %s\n" % (str(v), m.group(0), value))
