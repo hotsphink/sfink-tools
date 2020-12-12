@@ -1,0 +1,131 @@
+#!/usr/bin/python3
+
+# Two funcitons:
+# 1. Find the most recent public changesets for a given set of local draft changesets.
+# 2. Given two sets of changesets (one public, one draft), hg prune --pair the appropriate ones.
+
+# Implementing #2 first.
+
+import argparse
+import re
+import sys
+
+from collections import namedtuple
+from subprocess import check_output
+
+Node = namedtuple("Node", ["rev", "phase", "bug", "num", "reviewers", "desc"])
+
+p = argparse.ArgumentParser(
+    usage='obsolete [options]', description='''\
+For now, take two sets of revisions and prune blah blah'''
+)
+
+p.add_argument("--landed", "--public", "--new",
+               help="The revset for the new revisions that landed")
+p.add_argument("--draft", "--old", "--local",
+               help="The revset for the revisions to prune")
+
+p.add_argument("--new-from",
+               help="Parse this file to extract the landed revisions")
+
+args = p.parse_args()
+
+
+def gather_revisions(revset, query=None):
+    revs = {}
+
+    for line in check_output([
+            "hg", "log",
+            "-r", revset,
+            "-T", "{phase} {rev}:{node|short} {desc|firstline}\n"
+    ], text=True).splitlines():
+        m = re.match(r"(\w+) (\w+):(\w+) (.*)", line)
+        if not m:
+            raise Exception("invalid format: '{}'".format(line))
+        phase, num, rev, desc = m.groups()
+
+        if m := re.match(r"[bB]ug (\d+)\W*(.*)", desc):
+            bug = m.group(1)
+            desc = m.group(2)
+        else:
+            bug = None
+
+        if m := re.match(r"(.*?)\s*r[?=]([\w., ]+)$", desc):
+            desc = m.group(1)
+            reviewers = m.group(2)
+        else:
+            reviewers = None
+
+        revs[rev] = Node(rev, phase, bug, num, reviewers, desc)
+        # revs[rev] = {
+        #     "rev": rev,
+        #     "phase": phase,
+        #     "bug": bug,
+        #     "num": num,
+        #     "reviewers": reviewers,
+        #     "desc": desc
+        # }
+
+    return revs
+
+
+old = gather_revisions(args.draft)
+
+if args.new_from:
+    pieces = []
+    with open(args.new_from, "rt") as fh:
+        for line in fh:
+            # a revision url, as if it were cut & paste from an automated bug comment
+            if m := re.search(r'/rev/(\w+)', line):
+                pieces.append(m.group(1))
+            # a short hash
+            else:
+                if m := re.match(r'^([a-f0-9]{12})$', line):
+                    pieces.append(m.group(1))
+                else:
+                    print(f"Ignoring: {line}")
+        new = gather_revisions("+".join(pieces))
+elsif args.landed:
+    new = gather_revisions(args.landed)
+elsif args.user:
+    print("Scanning mozilla-central for matching ancestor revisions...")
+    new = gather_revisions(f"ancestors(central) and user('{args.user}')",
+                           query=old)
+else:
+    print("Must specify some way to identify landed revisions")
+    sys.exit(1)
+
+print(f"old = {old.keys()}\n")
+print(f"new = {new.keys()}\n")
+
+if len(old) != len(new):
+    print(f"Cannot replace {len(old)} revs with {len(new)} revs")
+    sys.exit(1)
+
+if any(n.phase == 'public' for n in old.values()):
+    print("This command is only for obsoleting draft revs")
+    sys.exit(1)
+
+if any(n.phase != 'public' for n in new.values()):
+    print("Cannot obsolete public revs")
+    sys.exit(1)
+
+oldv = sorted(old.values(), key=lambda n: n.num)
+newv = sorted(old.values(), key=lambda n: n.num)
+
+failed = False
+for i in range(len(oldv)):
+    old = oldv[i]
+    new = newv[i]
+    print(f"{old.rev} -> {new.rev} {new.desc}")
+    if old.desc != new.desc:
+        print(f"For now, cowardly refusing to obsolete\n  {old['desc']}\nwith\n  {new['desc']}")
+        failed = True
+
+if failed:
+    sys.exit(1)
+
+oldrevset = '+'.join(n.rev for n in oldv)
+newrevset = '+'.join(n.rev for n in oldv)
+print()
+print(f"hg prune --pair -r {oldrevset} --succ {newrevset}")
