@@ -579,12 +579,21 @@ END
   # combine-and-quote-strings. Basically, 'foo bar' -> '\"foo bar\"'.
   @args = map { / / ? "\\\"$_\\\"" : $_ } @args;
 
+  # ARGH! Nothing simpler to get into the right directory works, because gud
+  # cds back to something based on the jorendb.js path and setting
+  # gud-chdir-before-run in normal ways fails.
   my $eval = <<"END";
-(let ((default-directory "$cwd")
-      (gud-chdir-before-run nil))
- (cd "$cwd")
- (gud-gdb "$COMMAND @args"))
+(custom-set-variables '(gud-chdir-before-run nil))
+(gud-gdb "$COMMAND @args")
 END
+#   my $eval = <<"END";
+# (let ((default-directory "$cwd")
+#       (gud-chdir-before-run nil))
+#  (custom-set-variables '(gud-chdir-before-run nil))
+#  (cd "$cwd")
+#  (setq gud-chdir-before-run nil)
+#  (gud-gdb "$COMMAND @args"))
+# END
   $eval =~ s/\n/ /g;
 
   exec(@EMACS, "--eval", "(progn $eval)") or die;
