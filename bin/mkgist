@@ -42,10 +42,11 @@ if args.token is None:
 
 if len(args.data) == 1 and exists(args.data[0]):
     print("This script takes the data on the command line or stdin. You passed a filename. Don't do that. I'll let it go this time.")
-    with open(args.data[0], "r") as fh:
+    filename = args.data[0]
+    with open(filename, "r") as fh:
         args.data = [ fh.read() ]
     if args.filename == 'text.txt':
-        args.filename = args.data[0]
+        args.filename = os.path.basename(filename)
 
 if not args.data:
     print("Reading data from stdin")
