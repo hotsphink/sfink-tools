@@ -677,7 +677,7 @@ if ($debugger eq 'rr') {
 } elsif ($debugger eq 'record') {
     print "Running " . join(" ", 'rr', 'record', @rr_args, $COMMAND, @args) . "\n";
     system('rr', 'record', @rr_args, $COMMAND, @args);
-    exec($0);
+    exec($0, grep { !/--record/ } @local_args);
 } else {
     exec(@EMACS, "--eval", "(progn (gud-gdb \"$gdb --fullname $COMMAND\") $init_eval)");
 }
