@@ -57,6 +57,7 @@ my $debugger;
 my $jorendb;
 my $rrpid;
 my $rr_args = '';
+my $rr_at;
 my $verbose;
 
 # Ugh... custom arg handling because this script is supposed to be a
@@ -85,10 +86,18 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
     $rrpid = shift(@ARGV);
   } elsif ($_ =~ /--rrpid=(.*)/) {
     $rrpid = $1;
-  } elsif ($_ eq '--rrargs' || $_ eq '--rr') {
+  } elsif ($_ eq '--rrargs' || $_ eq '--rr' || $_ eq '--rr-args') {
     $rr_args = shift(@ARGV);
-  } elsif ($_ =~ /--rr(?:args)?=(.*)/) {
+    $debugger = 'rr';
+  } elsif ($_ =~ /--rr(?:-?args)?=(.*)/) {
     $rr_args = $1;
+    $debugger = 'rr';
+  } elsif ($_ eq '--rrat' || $_ eq '--rr-at') {
+    $rr_at = shift(@ARGV);
+    $debugger = 'rr';
+  } elsif ($_ =~ /--rr(?:-?at)?=(.*)/) {
+    $rr_at = $1;
+    $debugger = 'rr';
   } elsif ($_ eq '--js' || $_ eq '-j') {
     die if $debugger;
     $debugger = 'jorendb';
@@ -114,6 +123,14 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
 }
 
 my @rr_args = split(/\s+/, $rr_args);
+
+if (defined $rr_at) {
+  if ($rr_at =~ /^\[rr (\d+) (\d+)\]$/) {
+    push @rr_args, "-t$1", "-g$2";
+  } else {
+    die "invalid syntax for --rr-at option. Must be '[rr MMMM NNNN]'.\n";
+  }
+}
 
 sub usage {
   my ($msg) = @_;
@@ -220,7 +237,6 @@ sub choose_pid_for_rr {
         return if @relevant == 0;
         @info = @relevant;
     }
-
     my $first_error_pid;
     my %status;
     my %children;
