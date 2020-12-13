@@ -74,6 +74,12 @@ obj = r.json()
 with open("/tmp/mkgist.raw", "w") as fh:
     fh.write(r.text)
 
+if 'errors' in obj:
+    print('Error: {}'.format(obj['message']), file=sys.stderr)
+    for error in obj['errors']:
+        print('  {}'.format(json.dumps(error)))
+    sys.exit(1)
+
 raw_url = obj['files'][args.filename]['raw_url']
 short_raw = join(dirname(dirname(raw_url)), basename(raw_url))
 
