@@ -22,18 +22,25 @@ my $magic = 0;
 my $revision;
 
 my $verbose;
-if (@ARGV && ($ARGV[0] eq '-v' || $ARGV[0] eq '--verbose')) {
-    $verbose = 1;
-    shift(@ARGV);
-}
-
 my $use_client;
-if (@ARGV && ($ARGV[0] eq '-c' || $ARGV[0] eq '--client')) {
-    $use_client = 1;
-    shift(@ARGV);
+
+my @args;
+my $i = 0;
+while ($i < @ARGV) {
+    if ($ARGV[$i] eq '-v' || $ARGV[$i] eq '--verbose') {
+        $verbose = 1;
+    } elsif ($ARGV[$i] eq '-c' || $ARGV[$i] eq '--client') {
+        $use_client = 1;
+    } elsif ($ARGV[$i] eq '-r' || $ARGV[$i] eq '--revision') {
+        $revision = $ARGV[++$i] or die "missing revision\n";
+    } else {
+        push @args, $ARGV[$i];
+    }
+} continue {
+    ++$i;
 }
 
-ARG: for my $arg (@ARGV) {
+ARG: for my $arg (@args) {
     if ($arg =~ /^[-+]/) {
         push @final_args, $arg;
         next;
