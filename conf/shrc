@@ -7,7 +7,7 @@
 #
 function mc () {
     if [ $# = 0 ]; then
-        echo "MOZCONFIG is ${MOZCONFIG:-unset}"
+        { echo -n "MOZCONFIG is " >&2; echo "${MOZCONFIG:-unset}" }
     fi
     if [ $# = 0 ] || [[ $1 = "-l" ]]; then
         if [ -z "$MOZCONFIG" ]; then
@@ -43,5 +43,5 @@ function mc () {
         mozconfig="$(hg root)/mozconfig.$1"
     fi
     export MOZCONFIG="$mozconfig"
-    echo "MOZCONFIG now $MOZCONFIG"
+    { echo -n "MOZCONFIG is now " >&2; echo "$MOZCONFIG" }
 }
