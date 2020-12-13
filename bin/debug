@@ -269,7 +269,11 @@ sub choose_pid_for_rr {
         print "scanning pid $first_error_pid\n"
             if $verbose;
         for my $kid (@{ $children{$first_error_pid} }) {
-            if ($status{$kid}) {
+            # I'm not sure when the 'none' status appears in general, but it
+            # happens in sanitizer runs for the `llvm-symbolizer` child
+            # process, and we generally do not want to debug that. So for now,
+            # treat it as a successful exit here.
+            if ($status{$kid} && $status{$kid} ne 'none') {
                 $first_error_pid = $kid;
                 next FIND_DESCENDANT;
             }
