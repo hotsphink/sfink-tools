@@ -496,6 +496,7 @@ $debugger //= ($COMMAND ? 'gdb' : 'rr');
 if ($debugger eq 'rr') {
     $debugger = 'rr';
     $rrpid = choose_pid_for_rr($rrpid);
+    die "no matching process found\n" if ! defined $rrpid;
     $COMMAND = '';
     $opt{interactive} = 1;
 }
