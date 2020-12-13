@@ -190,11 +190,18 @@ sub choose_pid_for_rr {
     # pick the first erroring process, pick the first one of its children that
     # errored (if any; if none did, use the erroring parent). Recursively.
     #
-    open(my $fh, "rr ps $rr_args |");
+    my @plain_rr_args = grep !/^-/, split(/ /, $rr_args);
+    open(my $fh, "rr ps @plain_rr_args |");
     my @info;
     while(<$fh>) {
         chomp;
-        push @info, [ split(/\t/) ];
+        # Continuation lines end with \.
+        if (@info && $info[-1][-1] =~ /\\$/) {
+            chop($info[-1][-1]);
+            $info[-1][-1] .= "\n" . $_;
+        } else {
+            push @info, [ split(/\t/, $_, 4) ];
+        }
     }
     die "rr ps format changed!" if shift(@info)->[2] ne 'EXIT';
 
