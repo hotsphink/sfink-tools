@@ -15,10 +15,10 @@ from collections import namedtuple
 Node = namedtuple("Node", ["rev", "phase", "bug", "num", "reviewers", "desc"])
 
 p = argparse.ArgumentParser(
-    usage='obsolete [options]', description='''\
+    usage='succeed [options]', description='''\
 Take a set of draft revisions and find their landed equivalents, then output a command that prunes the given revisions, setting the landed equivalents as their successors.
 
-Example: obsolete -r .^^^::. --user=sfink --branch=autoland'''
+Example: succeed -r .^^^::. --user=sfink --branch=autoland'''
 )
 
 g = p.add_argument_group('specifying revisions')
