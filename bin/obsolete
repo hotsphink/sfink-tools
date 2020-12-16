@@ -23,6 +23,7 @@ Example: obsolete -r .^^^::. --user=sfink --branch=autoland'''
 
 g = p.add_argument_group('specifying revisions')
 g.add_argument("--deadmeat", "--draft", "--local", "--revisions", "-r",
+               default='not public() and ancestors(.)',
                help="The revset for the revisions to prune")
 g.add_argument("--landed", "--public", "--successors", "-s",
                help="The revset for the successor revisions that have landed")
@@ -43,6 +44,8 @@ p.add_argument("--debug", "-D", action="store_true",
 g = p.add_argument_group('output syntax')
 g.add_argument("--numeric", "-n", action="store_true",
                help="Use local numeric changeset numbers instead of hashes")
+g.add_argument("--exec", action="store_true",
+               help="Run the command instead of just printing it out")
 
 args = p.parse_args()
 
@@ -203,4 +206,9 @@ oldrevset = vec2revset(oldv)
 newrevset = vec2revset(newv)
 
 print()
-print(f"hg prune --pair -r {oldrevset} --succ {newrevset}")
+cmd = ["hg", "prune", "--pair", "-r", oldrevset, "--succ", newrevset]
+print(" ".join(cmd))
+if args.exec:
+    subprocess.check_call(cmd)
+else:
+    print("(Copy & paste the above command, or rerun with --exec)")
