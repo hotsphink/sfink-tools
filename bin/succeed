@@ -5,6 +5,7 @@
 # 2. Given two sets of changesets (one public, one draft), hg prune --pair the appropriate ones.
 
 import argparse
+import json
 import re
 import shlex
 import subprocess
@@ -12,7 +13,7 @@ import sys
 
 from collections import namedtuple
 
-Node = namedtuple("Node", ["rev", "phase", "bug", "num", "reviewers", "desc"])
+Node = namedtuple("Node", ["rev", "phase", "bug", "num", "reviewers", "key", "desc"])
 
 p = argparse.ArgumentParser(
     usage='succeed [options]', description='''\
@@ -25,6 +26,8 @@ g = p.add_argument_group('specifying revisions')
 g.add_argument("--deadmeat", "--draft", "--local", "--revisions", "-r",
                default='not public() and ancestors(.)',
                help="The revset for the revisions to prune")
+g.add_argument("--partial", action="store_true",
+               help="Only obsolete those revisions for which we find a match")
 g.add_argument("--landed", "--public", "--successors", "-s",
                help="The revset for the successor revisions that have landed")
 g.add_argument("--user",
@@ -50,36 +53,61 @@ g.add_argument("--exec", action="store_true",
 args = p.parse_args()
 
 
+def gen_revisions(lineiter):
+    stanza = None
+    for line in lineiter:
+        if stanza is None:
+            assert(line.strip() == "[")
+            stanza = ''
+        elif line.strip() == "]":
+            break
+        else:
+            stanza += line
+            if line.strip("\n") in (" },", " }"):
+                try:
+                    yield json.loads(stanza.rstrip("\n,"))
+                except Exception as e:
+                    print("Invalid JSON output from hg log: " + str(e),
+                          file=sys.stderr)
+                    print(stanza)
+                    raise e
+                stanza = ''
+
+
 def gather_revisions(revset, query=None):
     revs = {}
     lookup = {}
     if query:
-        lookup = {n.desc: n for n in query.values()}
+        lookup = {n.key: n for n in query.values()}
 
     cmd = [
         "hg", "log",
         "-r", revset,
-        "-T", "{phase} {rev}:{node|short} {desc|firstline}\\n"
+        "-T", "json"
     ]
     if args.limit:
         cmd.extend(["-l", str(args.limit)])
     if args.debug:
         print(f"Running {shlex.join(cmd)}")
 
+    report_interval = 100 if args.user else 10000
     n = 0
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
-    for line in iter(process.stdout.readline, ''):
+    for info in gen_revisions(iter(process.stdout.readline, '')):
         n += 1
-        if n % 1000 == 0:
+        if n % report_interval == 0:
             if query:
                 print(f"..found {len(revs)}/{len(query)} after processing {n} revisions..")
             else:
                 print(f"..found {len(revs)} after processing {n} revisions..")
 
-        m = re.match(r"(\w+) (\w+):(\w+) (.*)", line)
+        desc = info["desc"]
+        m = re.match(r"(.*)[\w\W]*?(?:Differential Revision: .*(D\d+))?$", desc)
         if not m:
-            raise Exception("invalid format: '{}'".format(line))
-        phase, num, rev, desc = m.groups()
+            raise Exception("invalid format: '{}'".format(desc))
+        phabrev = None
+        if len(m.groups()) > 1:
+            phabrev = m.group(2)
 
         if m := re.match(r"[bB]ug (\d+)\W*(.*)", desc):
             bug = m.group(1)
@@ -93,13 +121,17 @@ def gather_revisions(revset, query=None):
         else:
             reviewers = None
 
-        node = Node(rev, phase, bug, num, reviewers, desc)
+        key = phabrev or desc
+        rev = info["node"][:12]
+        node = Node(rev,
+                    info["phase"], bug, info["rev"], reviewers,
+                    key, desc)
 
         if lookup:
-            if desc not in lookup:
+            if key not in lookup:
                 continue
 
-            deadmeat = lookup.pop(desc)
+            deadmeat = lookup.pop(key)
             if deadmeat.bug != node.bug:
                 print(f"Warning: landed {node.rev} as bug {node.bug}, draft rev is bug {deadmeat.bug}")
                 print("  - " + desc)
@@ -114,9 +146,29 @@ def gather_revisions(revset, query=None):
     if lookup:
         print("Failed to find:")
         for node in lookup.values():
-            print(f'  {node.rev} ("{node.desc}")')
+            print(f'  {node.rev} ("{node.key}")')
 
     return revs
+
+
+def correlate_revisions(deadmeat, landed):
+    '''Find the matching subsets of the two input dicts, joined on their
+    descriptions. Discard any nonmatching elements, and return them as a pair
+    of value vectors, ordered by the .num field of the `deadmeat`'s values.
+    '''
+
+    # I could just sort by changeset number, but this is not robust in
+    # situations where earlier patches in a stack were backed out and re-landed
+    # while later ones were not. Join them up by description, using the
+    # ordering of the revisions to prune.
+    oldv = sorted(deadmeat.values(), key=lambda n: n.num)
+    bykey = {n.key: n for n in oldv}
+    newv = [n for n in landed.values() if n.key in bykey]
+    newv.sort(key=lambda n: bykey[n.key].num)
+    old_used = set(bykey[n.key] for n in newv)
+    oldv = [n for n in oldv if n in old_used]
+    return oldv, newv
+
 
 if args.verbose:
     print("Gathering revisions to prune...")
@@ -127,7 +179,8 @@ if args.landed_from:
     pieces = []
     with open(args.landed_from, "rt") as fh:
         for line in fh:
-            # a revision url, as if it were cut & paste from an automated bug comment
+            # a revision url, as if it were cut & paste from an automated bug
+            # comment
             if m := re.search(r'/rev/(\w+)', line):
                 pieces.append(m.group(1))
                 # a short hash
@@ -142,32 +195,29 @@ elif args.landed:
     landed = gather_revisions(args.landed)
 else:
     print(f"Scanning {args.branch} for matching ancestor revisions...")
+    revspec = f"reverse(ancestors({args.branch})) and public()"
     if args.user:
-        landed = gather_revisions(f"reverse(ancestors({args.branch})) and public() and user('{args.user}')",
-                               query=deadmeat)
-    else:
-        landed = gather_revisions(f"reverse(ancestors({args.branch})) and public()",
-                               query=deadmeat)
+        revspec += f" and user('{args.user}')"
+    landed = gather_revisions(revspec, query=deadmeat)
     print(f"Found {len(landed)}/{len(deadmeat)} successor revisions")
 
 if args.debug:
     print(f"old = {deadmeat.keys()}\n")
     print(f"new = {landed.keys()}\n")
 
-if len(deadmeat) != len(landed):
+if len(deadmeat) != len(landed) and not args.partial:
     print(f"Cannot replace {len(deadmeat)} revs with {len(landed)} revs")
     sys.exit(1)
 
-if any(n.phase == 'public' for n in deadmeat.values()):
+oldv, newv = correlate_revisions(deadmeat, landed)
+
+if any(n.phase == 'public' for n in oldv):
     print("This command is only for obsoleting draft revs")
     sys.exit(1)
 
-if any(n.phase != 'public' for n in landed.values()):
+if any(n.phase != 'public' for n in newv):
     print("Cannot obsolete public revs")
     sys.exit(1)
-
-oldv = sorted(deadmeat.values(), key=lambda n: n.num)
-newv = sorted(landed.values(), key=lambda n: n.num)
 
 failed = False
 for i in range(len(oldv)):
