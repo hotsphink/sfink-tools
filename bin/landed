@@ -22,17 +22,20 @@ Take a set of draft revisions and find their landed equivalents, then output a c
 Example: succeed -r .^^^::. --user=sfink --branch=autoland'''
 )
 
+DEFAULT_REVSET = "not public() and ancestors(.)"
+
 g = p.add_argument_group('specifying revisions')
 g.add_argument("--deadmeat", "--draft", "--local", "--revisions", "-r",
-               default='not public() and ancestors(.)',
+               default=DEFAULT_REVSET,
                help="The revset for the revisions to prune")
-g.add_argument("--partial", action="store_true",
-               help="Only obsolete those revisions for which we find a match")
+g.add_argument("--topic", "-t",
+               default=None,
+               help="Attempt to prune all revisions in TOPIC")
 g.add_argument("--landed", "--public", "--successors", "-s",
                help="The revset for the successor revisions that have landed")
 g.add_argument("--user",
                help="A userid to scan to find landed revs")
-g.add_argument("--branch", default='central',
+g.add_argument("--branch", "-b", default='central',
                help="Label of a branch to scan for landed revisions")
 g.add_argument("--landed-from",
                help="Parse this file to extract the landed revisions")
@@ -47,10 +50,18 @@ p.add_argument("--debug", "-D", action="store_true",
 g = p.add_argument_group('output syntax')
 g.add_argument("--numeric", "-n", action="store_true",
                help="Use local numeric changeset numbers instead of hashes")
-g.add_argument("--exec", action="store_true",
+g.add_argument("--exec", action="store_true", default=None,
                help="Run the command instead of just printing it out")
+g.add_argument("--noexec", dest="exec", action="store_false",
+               help="Print the command, do not prompt to execute it")
 
 args = p.parse_args()
+
+if args.deadmeat != DEFAULT_REVSET and args.topic:
+    raise Exception("-r and -t are mutually exclusive")
+
+if args.topic:
+    args.deadmeat = f"topic('{args.topic}')"
 
 
 def gen_revisions(lineiter):
@@ -93,60 +104,64 @@ def gather_revisions(revset, query=None):
     report_interval = 100 if args.user else 10000
     n = 0
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
-    for info in gen_revisions(iter(process.stdout.readline, '')):
-        n += 1
-        if n % report_interval == 0:
-            if query:
-                print(f"..found {len(revs)}/{len(query)} after processing {n} revisions..")
+    try:
+        for info in gen_revisions(iter(process.stdout.readline, '')):
+            n += 1
+            if n % report_interval == 0:
+                if query:
+                    print(f"..found {len(revs)}/{len(query)} after processing {n} revisions..")
+                else:
+                    print(f"..found {len(revs)} after processing {n} revisions..")
+
+            desc = info["desc"]
+            m = re.match(r"(.*)[\w\W]*?(?:Differential Revision: .*(D\d+))?$", desc)
+            if not m:
+                raise Exception(f"invalid format: '{desc}'")
+            phabrev = None
+            if len(m.groups()) > 1:
+                phabrev = m.group(2)
+
+            if m := re.match(r"[bB]ug (\d+)\W*(.*)", desc):
+                bug = m.group(1)
+                desc = m.group(2)
             else:
-                print(f"..found {len(revs)} after processing {n} revisions..")
+                bug = None
 
-        desc = info["desc"]
-        m = re.match(r"(.*)[\w\W]*?(?:Differential Revision: .*(D\d+))?$", desc)
-        if not m:
-            raise Exception("invalid format: '{}'".format(desc))
-        phabrev = None
-        if len(m.groups()) > 1:
-            phabrev = m.group(2)
+            if m := re.match(r"(.*?)\s*r[?=]([\w., ]+)$", desc):
+                desc = m.group(1)
+                reviewers = m.group(2)
+            else:
+                reviewers = None
 
-        if m := re.match(r"[bB]ug (\d+)\W*(.*)", desc):
-            bug = m.group(1)
-            desc = m.group(2)
-        else:
-            bug = None
+            key = phabrev or desc
+            rev = info["node"][:12]
+            node = Node(rev,
+                        info["phase"], bug, info["rev"], reviewers,
+                        key, desc)
 
-        if m := re.match(r"(.*?)\s*r[?=]([\w., ]+)$", desc):
-            desc = m.group(1)
-            reviewers = m.group(2)
-        else:
-            reviewers = None
+            if lookup:
+                if key not in lookup:
+                    continue
 
-        key = phabrev or desc
-        rev = info["node"][:12]
-        node = Node(rev,
-                    info["phase"], bug, info["rev"], reviewers,
-                    key, desc)
+                deadmeat = lookup.pop(key)
+                if deadmeat.bug != node.bug:
+                    print(f"Warning: landed {node.rev} as bug {node.bug}, draft rev is bug {deadmeat.bug}")
+                    print("  - " + desc)
+                if args.verbose:
+                    print(f'found {node.rev} ("{desc}")')
 
-        if lookup:
-            if key not in lookup:
-                continue
+            revs[rev] = node
 
-            deadmeat = lookup.pop(key)
-            if deadmeat.bug != node.bug:
-                print(f"Warning: landed {node.rev} as bug {node.bug}, draft rev is bug {deadmeat.bug}")
-                print("  - " + desc)
-            if args.verbose:
-                print(f'found {node.rev} ("{desc}")')
-
-        revs[rev] = node
-
-        if query and not lookup:
-            break  # Stop early, found everything
+            if query and not lookup:
+                break  # Stop early, found everything
+    except KeyboardInterrupt:
+        print()  # Prevent ^C output from mixing with following text.
+        pass
 
     if lookup:
         print("Failed to find:")
         for node in lookup.values():
-            print(f'  {node.rev} ("{node.key}")')
+            print(f'  {node.rev} ("{node.desc}")')
 
     return revs
 
@@ -205,10 +220,6 @@ if args.debug:
     print(f"old = {deadmeat.keys()}\n")
     print(f"new = {landed.keys()}\n")
 
-if len(deadmeat) != len(landed) and not args.partial:
-    print(f"Cannot replace {len(deadmeat)} revs with {len(landed)} revs")
-    sys.exit(1)
-
 oldv, newv = correlate_revisions(deadmeat, landed)
 
 if any(n.phase == 'public' for n in oldv):
@@ -224,8 +235,10 @@ for i in range(len(oldv)):
     old = oldv[i]
     new = newv[i]
     print(f"{old.rev} -> {new.rev} {new.desc}")
-    if old.desc != new.desc:
-        print(f"For now, cowardly refusing to obsolete\n  {old['desc']}\nwith\n  {new['desc']}")
+    olddesc = re.sub(r' r=\S+', '', old.desc)
+    newdesc = re.sub(r' r=\S+', '', new.desc)
+    if olddesc != newdesc:
+        print(f"For now, cowardly refusing to obsolete\n  {old.desc}\nwith\n  {new.desc}")
         failed = True
 
 if failed:
@@ -257,7 +270,10 @@ newrevset = vec2revset(newv)
 
 print()
 cmd = ["hg", "prune", "--pair", "-r", oldrevset, "--succ", newrevset]
-print(" ".join(cmd))
+print("COMMAND: " + " ".join(cmd))
+if args.exec is None:
+    args.exec = input("Run the above command? (y/n) ") == "y"
+
 if args.exec:
     subprocess.check_call(cmd)
 else:
