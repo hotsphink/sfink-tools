@@ -5,18 +5,21 @@
 # 2. Given two sets of changesets (one public, one draft), hg prune --pair the appropriate ones.
 
 import argparse
+import datetime
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
+import textwrap
 
 from collections import namedtuple
 
 Node = namedtuple("Node", ["rev", "phase", "bug", "num", "reviewers", "key", "desc"])
 
 p = argparse.ArgumentParser(
-    usage='succeed [options]', description='''\
+    usage='landed [options]', description='''\
 Take a set of draft revisions and find their landed equivalents, then output a command that prunes the given revisions, setting the landed equivalents as their successors.
 
 Example: succeed -r .^^^::. --user=sfink --branch=autoland'''
@@ -41,6 +44,8 @@ g.add_argument("--landed-from",
                help="Parse this file to extract the landed revisions")
 g.add_argument("--limit", "-l", type=int,
                help="Do not look more than LIMIT revisions back")
+g.add_argument("--datelimit", type=int, default=365,
+               help="Do not look more than LIMIT days back, 0 to remove limit")
 
 p.add_argument("--verbose", "-v", action="store_true",
                help="Verbose output")
@@ -63,6 +68,8 @@ if args.deadmeat != DEFAULT_REVSET and args.topic:
 if args.topic:
     args.deadmeat = f"topic('{args.topic}')"
 
+wrapper = textwrap.TextWrapper(subsequent_indent='      ',
+                               width=int(os.getenv('COLUMNS', '80')) - 2)
 
 def gen_revisions(lineiter):
     stanza = None
@@ -85,6 +92,12 @@ def gen_revisions(lineiter):
                 stanza = ''
 
 
+def display(desc, headerlen):
+    # The first line must be shortened by `headerlen` chars.
+    header = '.' * headerlen
+    return wrapper.fill(header + desc)[headerlen:]
+
+
 def gather_revisions(revset, query=None):
     revs = {}
     lookup = {}
@@ -101,6 +114,9 @@ def gather_revisions(revset, query=None):
     if args.debug:
         print(f"Running {shlex.join(cmd)}")
 
+    earliest = None
+    if args.datelimit:
+        earliest = datetime.datetime.now() - datetime.timedelta(days=args.datelimit)
     report_interval = 100 if args.user else 10000
     n = 0
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
@@ -109,9 +125,9 @@ def gather_revisions(revset, query=None):
             n += 1
             if n % report_interval == 0:
                 if query:
-                    print(f"..found {len(revs)}/{len(query)} after processing {n} revisions..")
+                    print(f"..found {len(revs)}/{len(query)} after processing {n} revisions..", end="\r")
                 else:
-                    print(f"..found {len(revs)} after processing {n} revisions..")
+                    print(f"..found {len(revs)} after processing {n} revisions..", end="\r")
 
             desc = info["desc"]
             m = re.match(r"(.*)[\w\W]*?(?:Differential Revision: .*(D\d+))?$", desc)
@@ -121,11 +137,12 @@ def gather_revisions(revset, query=None):
             if len(m.groups()) > 1:
                 phabrev = m.group(2)
 
-            if m := re.match(r"[bB]ug (\d+)\W*(.*)", desc):
+            if m := re.match(r"[bB]ug (\d+)[^\w\[]*(.*)", desc):
                 bug = m.group(1)
-                desc = m.group(2)
             else:
                 bug = None
+
+            desc = desc.splitlines()[0]
 
             if m := re.match(r"(.*?)\s*r[?=]([\w., ]+)$", desc):
                 desc = m.group(1)
@@ -139,29 +156,37 @@ def gather_revisions(revset, query=None):
                         info["phase"], bug, info["rev"], reviewers,
                         key, desc)
 
-            if lookup:
-                if key not in lookup:
-                    continue
-
+            if lookup and key in lookup:
                 deadmeat = lookup.pop(key)
                 if deadmeat.bug != node.bug:
-                    print(f"Warning: landed {node.rev} as bug {node.bug}, draft rev is bug {deadmeat.bug}")
+                    print(f"\nWarning: landed {node.rev} as bug {node.bug}, draft rev is bug {deadmeat.bug}")
                     print("  - " + desc)
                 if args.verbose:
-                    print(f'found {node.rev} ("{desc}")')
+                    print(f'\nfound {node.rev} ("{display(desc, 19)}")')
+                revs[rev] = node
+            elif not lookup:
+                revs[rev] = node
 
-            revs[rev] = node
+            if earliest and datetime.datetime.fromtimestamp(info['date'][0]) < earliest:
+                print(f"Terminating search because the date limit was reached after {n} revisions")
+                break
 
             if query and not lookup:
-                break  # Stop early, found everything
+                # If we have a query, then lookup will have everything in the
+                # query minus what we have found so far. So here, stop early
+                # because we found everything.
+                break
     except KeyboardInterrupt:
         print()  # Prevent ^C output from mixing with following text.
         pass
 
+    # Probably have \r at end of previous line.
+    print()
+
     if lookup:
         print("Failed to find:")
         for node in lookup.values():
-            print(f'  {node.rev} ("{node.desc}")')
+            print(f'  {node.rev} "{display(node.desc, 15)}"')
 
     return revs
 
@@ -238,7 +263,7 @@ for i in range(len(oldv)):
     olddesc = re.sub(r' r=\S+', '', old.desc)
     newdesc = re.sub(r' r=\S+', '', new.desc)
     if olddesc != newdesc:
-        print(f"For now, cowardly refusing to obsolete\n  {old.desc}\nwith\n  {new.desc}")
+        print(f"For now, cowardly refusing to obsolete\n  {display(old.desc, 2)}\nwith\n  {display(new.desc, 2)}")
         failed = True
 
 if failed:
