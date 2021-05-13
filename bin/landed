@@ -240,6 +240,8 @@ else:
         revspec += f" and user('{args.user}')"
     landed = gather_revisions(revspec, query=deadmeat)
     print(f"Found {len(landed)}/{len(deadmeat)} successor revisions")
+    if not landed:
+        sys.exit(1)
 
 if args.debug:
     print(f"old = {deadmeat.keys()}\n")
