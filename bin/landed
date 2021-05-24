@@ -44,7 +44,7 @@ g.add_argument("--landed-from",
                help="Parse this file to extract the landed revisions")
 g.add_argument("--limit", "-l", type=int,
                help="Do not look more than LIMIT revisions back")
-g.add_argument("--datelimit", type=int, default=365,
+g.add_argument("--datelimit", type=int,
                help="Do not look more than LIMIT days back, 0 to remove limit")
 
 p.add_argument("--verbose", "-v", action="store_true",
@@ -67,6 +67,10 @@ if args.deadmeat != DEFAULT_REVSET and args.topic:
 
 if args.topic:
     args.deadmeat = f"topic('{args.topic}')"
+
+# If no other limit is requested, look back 1 year.
+if not args.limit and not args.datelimit:
+    args.datelimit = 365
 
 wrapper = textwrap.TextWrapper(subsequent_indent='      ',
                                width=int(os.getenv('COLUMNS', '80')) - 2)
@@ -98,7 +102,7 @@ def display(desc, headerlen):
     return wrapper.fill(header + desc)[headerlen:]
 
 
-def gather_revisions(revset, query=None):
+def gather_revisions(revset, limit, datelimit, query=None):
     revs = {}
     lookup = {}
     if query:
@@ -109,14 +113,14 @@ def gather_revisions(revset, query=None):
         "-r", revset,
         "-T", "json"
     ]
-    if args.limit:
-        cmd.extend(["-l", str(args.limit)])
+    if limit:
+        cmd.extend(["-l", str(limit)])
     if args.debug:
         print(f"Running {shlex.join(cmd)}")
 
     earliest = None
-    if args.datelimit:
-        earliest = datetime.datetime.now() - datetime.timedelta(days=args.datelimit)
+    if datelimit:
+        earliest = datetime.datetime.now() - datetime.timedelta(days=datelimit)
     report_interval = 100 if args.user else 10000
     n = 0
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
@@ -230,15 +234,15 @@ if args.landed_from:
                 else:
                     if args.debug:
                         print(f"Ignoring: {line}")
-                        landed = gather_revisions("+".join(pieces))
+                        landed = gather_revisions("+".join(pieces), args.limit, args.datelimit)
 elif args.landed:
-    landed = gather_revisions(args.landed)
+    landed = gather_revisions(args.landed, args.limit, args.datelimit)
 else:
     print(f"Scanning {args.branch} for matching ancestor revisions...")
     revspec = f"reverse(ancestors({args.branch})) and public()"
     if args.user:
         revspec += f" and user('{args.user}')"
-    landed = gather_revisions(revspec, query=deadmeat)
+    landed = gather_revisions(revspec, args.limit, args.datelimit, query=deadmeat)
     print(f"Found {len(landed)}/{len(deadmeat)} successor revisions")
     if not landed:
         sys.exit(1)
