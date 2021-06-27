@@ -137,19 +137,27 @@ class Labels(dict):
         # reset.)
         self.added = []
 
-    def label(self, token, name, typestr, gdbval=None):
-        self[token] = (name, typestr)
+        self.pending_labels = []
 
+    def label(self, token, name, typestr, gdbval=None):
         #print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
         if gdbval is None:
             try:
-                gdbval = gdb.parse_and_eval("({}) {}".format(typestr, token))
+                m = re.match(r'(.*?)(  *\**)$', typestr)
+                if m:
+                    t, ptrs = m.groups()
+                else:
+                    t, ptrs = (typestr, '')
+                gdbval = gdb.parse_and_eval("('{}'{}) {}".format(t, ptrs, token))
             except gdb.error as e:
                 # This can happen if we load in a set of labels before the type
-                # exists. TODO: queue up a setting for when the type shows up.
+                # exists.
                 gdb.write("unknown type: " + str(e) + "\n")
-                return
+                self.pending_labels.append((token, name, typestr))
+                return False
+        self[token] = (name, typestr)
         gdb.set_convenience_variable(name, gdbval)
+        return True
 
     def __setitem__(self, key, value):
         key = self.canon(key)
@@ -226,7 +234,23 @@ class Labels(dict):
             lambda m: self.get(m.group(0), None, verbose),
             text)
 
+    def on_objfile_load(self, event):
+        if self.pending_labels:
+            gdb.write("objfile load detected, reprocessing {} labels\n".format(len(self.pending_labels)))
+        pending = self.pending_labels
+        self.pending_labels = []
+        for (token, name, typestr) in pending:
+            # There really ought to be a better way to look up a type
+            # expression.
+            if self.label(token, name, typestr):
+                gdb.write("  succeeded in setting pending label {}\n".format(name))
+
 labels = Labels()
+
+def new_objfile_handler(event):
+    labels.on_objfile_load(event)
+
+gdb.events.new_objfile.connect(new_objfile_handler)
 
 def index_of_first(s, tokens, start=0):
     bestpos = None
@@ -346,8 +370,9 @@ class util:
     def evaluate(expr, replace=True, brieftype=True):
         try:
             v = gdb.parse_and_eval(expr)
-        except gdb.error:
-            raise
+        except gdb.error as e:
+            print("Invalid embedded expression «{}»".format(expr))
+            raise e
         s = str(v)
         t = v.type
         ts = str(t)
