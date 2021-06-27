@@ -242,8 +242,9 @@ sub choose_pid_for_rr {
     my %children;
     my @sigs;
     foreach (@info) {
-        my ($pid, $ppid, $status) = @$_;
+        my ($pid, $ppid, $status, $cmd) = @$_;
         $status = -11 if $status eq 11; # SIGSEGV gets translated to this sometimes??
+        $status = 0 if $cmd =~ /^\S+llvm-symbolizer\b/;
         print "pid $pid exited with status $status\n"
             if $verbose;
         push @sigs, $_ if $status ne 'none' && $status < 0; # Caught a signal
