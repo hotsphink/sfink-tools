@@ -19,6 +19,8 @@ parser.add_argument('--action', '--actions', default='create-md',
                     help='comma-separated actions to perform, from: ' + ' '.join(allowed_actions))
 parser.add_argument('--map', action='store_const', dest='action', const='create-mapping',
                     help='alias for --action=create-mapping')
+parser.add_argument('--vmdk', action='store_const', dest='action', const='create-vmdk',
+                    help='alias for --action=create-vmdk')
 parser.add_argument('--device', '-d', default='/dev/nvme0n1',
                     help='(whole) disk to create a view of')
 parser.add_argument('--basename', '-b', default=None,

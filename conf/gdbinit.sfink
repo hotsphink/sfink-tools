@@ -3,6 +3,7 @@
 maint set catch-demangler-crashes off
 
 add-auto-load-safe-path ~/src
+add-auto-load-safe-path ~/.rr/
 
 define empretty
   python import mozilla.autoload

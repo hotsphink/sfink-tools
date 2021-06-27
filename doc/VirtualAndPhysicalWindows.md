@@ -1,0 +1,76 @@
+- basic setup
+  - boot into Windows, set it up
+  - bring up cmd prompt
+  - shutdown /s /f /t 0
+- boot into Fedora 34 live CD
+- try and fail to check access to windows partition (optional!)
+  - sudo mount /dev/nvm0n1p3 /mnt
+    - will fail because of hiberfile
+  - sudo umount /mnt
+  - sudo ntfs-3g -o remove_hiberfile /dev/nvme0n1p3 /mnt
+  - ls /mnt
+  - sudo umount /mnt
+- resize the windows partition
+  - record the partition table
+    - turn on networking (right click top right to set up wifi)
+    - sfdisk -d /dev/nvme0n1p3 > ThreadRipper-partitions.txt
+    - scp ThreadRipper-partitions.txt you@yourhostip:
+  - first, shrink the FS more than desired, to avoid dangerous math:
+    - sudo ntfsresize -s 50G /dev/nvme0n1p3
+  - shrink the main Windows partition
+    - cp ThreadRipper-partitions.txt ThreadRipper-partitions-new.txt
+    - edit ThreadRipper-partitions-new.txt
+    - reduce the size of the largest partition (partition 3)
+      - I dropped mine to 200GB, base 10. (DO NOT GO BELOW THE 50GB USED ABOVE!)
+        - 200LL * 1000 * 1000 * 1000 / 512 = 390625000
+    - sudo sfdisk /dev/nvme0n1 < ThreadRipper-partitions-new.txt
+    - Note: once we add in new partitions, the partition table is going to
+      be out of order and tools may whine about this. It might be better to
+      allow it to reorder, but for now I'm leaving it out of order.
+  - re-expand the FS into the available space
+    - sudo ntfsresize -f /dev/nvme0n1p3
+  - reboot into Windows to allow it to clear the scary NEEDS CHECKING bits
+    - shutdown while holding the shift key, to avoid hibernation.
+    - the hibernation file will linger anyway, just to scare you (Linux won't
+      mount the partition without being told to erase the hiberfile).
+- install Linux into the space made available
+  - boot up the Linux live CD again
+  - install to hard drive
+    - I chose 'Automatic' for Storage Configuration, and checked 'Encrypt my data'
+  - finish the installation. It takes far less time than I expected.
+  - reboot, choose the Windows option from the boot menu to ensure it still works
+    - when rebooting from Windows, remember to hold down Shift
+- install VirtualBox
+  - reboot into Linux
+  - do whatever initial setup you want. I did `sudo dnf update`, at least.
+  - open Firefox, search for "install VirtualBox" or go to https://www.virtualbox.org/wiki/Linux_Downloads
+  - get it for your distribution
+  - get the extension pack, listed at https://www.virtualbox.org/wiki/Downloads
+- construct a virtual disk pointing to your actual disk
+  - get my `viewsetup` utility:
+    - hg clone https://hg.sr.ht/~sfink/sfink-tools
+    - get it from sfink-tools/bin/viewsetup
+  - viewsetup -d /dev/nvme0n1 --action create-mapping
+  - viewsetup -d /dev/nvme0n1 --action create-md
+  - viewsetup -d /dev/nvme0n1 --action create-vmdk
+- get VirtualBox working with Secure Boot
+  - Secure Boot requires signing the vbox kernel modules
+    - you could try to follow https://stackoverflow.com/questions/61248315/sign-virtual-box-modules-vboxdrv-vboxnetflt-vboxnetadp-vboxpci-centos-8
+    - but you'll need to re-sign on every update
+  - I gave up and disabled secure boot in the BIOS
+- create a Windows VM
+  - New
+  - expert mode or advanced mode or whatever it's called
+  - Name: whatever (I used "Local Windows", which is not the greatest name)
+  - Version: Windows 10 (64-bit)
+  - Use an existing virtual hard disk
+    - navigate to your folder's VMDK
+  - enable EFI
+  - use PIIX3 for Chipset (in System/Motherboard)
+  - use PIIX4 for storage controller (not NVMe for some reason...?)
+    - https://stackoverflow.com/questions/61248315/sign-virtual-box-modules-vboxdrv-vboxnetflt-vboxnetadp-vboxpci-centos-8
+      gives a potential fix, haven't tried it
+  - when you boot, it will require you to reset your PIN. :-(
+- Ongoing
+  - whenever you reboot, you'll need to recreate /dev/md0 with
+    - `viewsetup -d /dev/nvme0n1`
