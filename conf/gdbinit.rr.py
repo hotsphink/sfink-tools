@@ -216,7 +216,6 @@ class PythonLog(gdb.Command):
             #print("Checking changed: no log yet")
             return
 
-        #for k, (v, t) in labels.flush_added():
         added = labels.flush_added()
         #print("grabbing new labels: {}".format([v for k, (v, t) in added]))
         for k, (v, t) in added:
