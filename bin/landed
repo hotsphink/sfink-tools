@@ -102,7 +102,7 @@ def display(desc, headerlen):
     return wrapper.fill(header + desc)[headerlen:]
 
 
-def gather_revisions(revset, limit, datelimit, query=None):
+def gather_revisions(revset, limit=None, datelimit=None, query=None):
     revs = {}
     lookup = {}
     if query:
@@ -265,7 +265,7 @@ failed = False
 for i in range(len(oldv)):
     old = oldv[i]
     new = newv[i]
-    print(f"{old.rev} -> {new.rev} {new.desc}")
+    print(f"  {old.rev} -> {new.rev} {new.desc}")
     olddesc = re.sub(r' r=\S+', '', old.desc)
     newdesc = re.sub(r' r=\S+', '', new.desc)
     if olddesc != newdesc:
