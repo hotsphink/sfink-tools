@@ -50,9 +50,15 @@
   - get my `viewsetup` utility:
     - hg clone https://hg.sr.ht/~sfink/sfink-tools
     - get it from sfink-tools/bin/viewsetup
-  - viewsetup -d /dev/nvme0n1 --action create-mapping
-  - viewsetup -d /dev/nvme0n1 --action create-md
-  - viewsetup -d /dev/nvme0n1 --action create-vmdk
+  - go to an appropriate directory (mine is `~/VirtualBox VMs/`) and then:
+    - create a disk description that exposes the Windows partitions and masks off the live
+      Linux partition you're running from:
+      - viewsetup -d /dev/nvme0n1 --map
+    - create /dev/md0, a virtual block device that cobbles together the above "slices":
+      - viewsetup -d /dev/nvme0n1 --action create-md
+    - create a VirtualBox disk descriptor that uses it:
+      - viewsetup -d /dev/nvme0n1 --action create-vmdk
+    - these will create their files in a subdirectory `views/nvme0n1/`
 - get VirtualBox working with Secure Boot
   - Secure Boot requires signing the vbox kernel modules
     - you could try to follow https://stackoverflow.com/questions/61248315/sign-virtual-box-modules-vboxdrv-vboxnetflt-vboxnetadp-vboxpci-centos-8
@@ -64,7 +70,7 @@
   - Name: whatever (I used "Local Windows", which is not the greatest name)
   - Version: Windows 10 (64-bit)
   - Use an existing virtual hard disk
-    - navigate to your folder's VMDK
+    - navigate to the VMDK in the folder created by viewsetup above
   - enable EFI
   - use PIIX3 for Chipset (in System/Motherboard)
   - use PIIX4 for storage controller (not NVMe for some reason...?)
