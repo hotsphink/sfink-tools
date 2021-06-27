@@ -42,23 +42,21 @@ progress =
 # Standard additional commands
 patchbomb =
 #mq =
-record =
 rebase =
 relink =
 graphlog =
 convert =
-parentrevspec =
 transplant =
 purge =
 share =
 histedit =
 shelve =
-# hggit = ~/lib/hg/hg-git/hggit
+hggit = ~/lib/hg/hg-git/hggit
 show =
 absorb =
 
 # Additional functionality
-fsmonitor =
+# fsmonitor =
 blackbox =
 journal =
 
@@ -107,6 +105,11 @@ ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(not public() and 
 sl = ls
 
 lg = log --template list --graph
+lgt = lg -r 'topobranch(.)'
+lgtopic = !if [[ -n  "$1" ]]; then $HG lg -r "topic('$1')"; else $HG lg -r 'topic(.)'; fi
+lgtt = lgtopic
+#lgtt = lg -r 'topic(.)'
+#lgtt($1) = lg -r 'topic("$1")'
 
 lsb = log -r 'bookmark() and not public()' -T '{pad("{bookmarks}", 30)} {desc|firstline}\n'
 
@@ -193,6 +196,9 @@ npkw($1) = not public() and keyword($1)
 whichbook($1) = last(descendants($1))
 wip = (parents(not public()) or not public() or . or (head() and branch(default))) and (not obsolete() or orphan()^) and not closed() and not (fxheads() - date(-90))
 
+twig($1) = with_parents(descendants(first(not public() and ::$1)))
+.twig = twig(.)
+
 # Where did this come from?
 rbhead = heads(descendants((parents(ancestor(ancestors(.) and not public())))) and public())
 live = reverse(::. and not public()) + parents(::. and not public())
@@ -214,6 +220,7 @@ lineage(r) = ancestors(r) + descendants(r)
 allbook($1) = my(lineage(bookmark($1)))
 alltopic($1) = my(lineage(topic($1)))
 allbranch($1) = my(lineage($1))
+topobranch($1) = descendants(my(ancestors($1)))
 ignored_changesets = desc("ignore-this-changeset") or extdata(get_ignored_changesets)
 
 # Intended for rebasing a new ministack on top of where it was inserted.
@@ -386,6 +393,7 @@ clang-format:fileext = .cpp, .c, .h
 [phabsend]
 setbaseparent = true
 basepolicy = samebug
+#basepolicy = any
 amend = true
 
 # Personal configuration is in ~/.config/hg/hgrc
