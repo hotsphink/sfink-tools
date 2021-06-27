@@ -17,6 +17,8 @@ allowed_actions = ['create-mapping', 'create-md', 'create-vmdk', 'list', 'remove
 parser = argparse.ArgumentParser('setup a view of a disk')
 parser.add_argument('--action', '--actions', default='create-md',
                     help='comma-separated actions to perform, from: ' + ' '.join(allowed_actions))
+parser.add_argument('--map', action='store_const', dest='action', const='create-mapping',
+                    help='alias for --action=create-mapping')
 parser.add_argument('--device', '-d', default='/dev/nvme0n1',
                     help='(whole) disk to create a view of')
 parser.add_argument('--basename', '-b', default=None,
@@ -62,8 +64,6 @@ def read_partitions(device):
     mounts = read_mtab()
     info = defaultdict(dict)
     for line in subprocess.check_output(["sudo", "sfdisk", "-d", device], text=True).splitlines():
-        #if 'n1p5' in line:
-        #    import pdb; pdb.set_trace()
         if m := re.match(r'^last-lba: (\d+)', line):
             # This turned out NOT to be the total size after all.
             #info['end'] = int(m.group(1))
@@ -72,27 +72,24 @@ def read_partitions(device):
             info['unit'] = m.group(1)
         elif m := re.match(r'^sector-size: (.*)', line):
             info['sector-size'] = int(m.group(1))
-        elif m := re.match(r'^(/dev\S+) : start= *(\d+), size= *(\d+),.*?name="(.*?)"', line):
-            # Only the Microsoft partitions seem to have GPT partition
-            # names set.
-            partdev, start, size, gptname = m.groups()
-            info['partitions'][partdev] = {
-                'device': partdev,
-                'start': int(start),
-                'size': int(size),
-                'end': int(start) + int(size),
-                'gptname': gptname,
-            }
         elif m := re.match(r'^(/dev\S+) : start= *(\d+), size= *(\d+),', line):
             partdev, start, size = m.groups()
-            info['partitions'][partdev] = {
+            part = {
                 'device': partdev,
                 'start': int(start),
                 'size': int(size),
                 'end': int(start) + int(size),
                 'gptname': None,
+                'attrs': set(),
                 'mount': mounts.get(partdev),
             }
+            # Only the Microsoft partitions seem to have GPT partition
+            # names set.
+            if m := re.search(r', name="(.*?)"', line):
+                part['gptname'] = m.group(1)
+            if m := re.search(r', attrs="(.*?)"', line):
+                part['attrs'] = set(m.group(1).split(','))
+            info['partitions'][partdev] = part
     if info['unit'] != 'sectors':
         raise Exception(f"script only handles units of sectors, not {info['unit']}")
 
@@ -124,6 +121,14 @@ def copy_chunk(src, dst, offset, count, blocksize):
         'conv=sparse',
     ])
 
+def is_boring(part):
+    if part['gptname'] in boring_types:
+        return True
+    if part.get('gptname', '') == 'Basic data partition':
+        if 'RequiredPartition' in part.get('attrs', set()):
+            return True
+    return False
+
 def make_zeroes(dst, count, blocksize):
     check_new_file(dst)
     run([
@@ -149,9 +154,11 @@ if 'create-mapping' in actions or 'all' in actions:
     boring_end_sectors = 0
     for part in info['ordered-partitions']:
         partinfo = info['partitions'][part]
-        if partinfo['gptname'] not in boring_types:
+        if not is_boring(partinfo):
+            print(f"{part} is not boring: {partinfo['gptname']}")
             boring_end_sectors = partinfo['start']
             break
+        print(f"{part} is boring")
         boring_end_sectors = partinfo['end']
 
     # Check to be sure the boring portion is fairly small.
