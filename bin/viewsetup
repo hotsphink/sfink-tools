@@ -1,0 +1,350 @@
+#!/usr/bin/python
+
+import argparse
+import json
+import os
+import re
+import subprocess
+
+from collections import defaultdict
+
+KiB = 2 ** 10
+MiB = 2 ** 20
+GiB = 2 ** 30
+
+allowed_actions = ['create-mapping', 'create-md', 'create-vmdk', 'list', 'remove', 'all']
+
+parser = argparse.ArgumentParser('setup a view of a disk')
+parser.add_argument('--action', '--actions', default='create-md',
+                    help='comma-separated actions to perform, from: ' + ' '.join(allowed_actions))
+parser.add_argument('--device', '-d', default='/dev/nvme0n1',
+                    help='(whole) disk to create a view of')
+parser.add_argument('--basename', '-b', default=None,
+                    help='name to use in generated files, defaults to basename of device')
+parser.add_argument('--dir', '-o', default=None,
+                    help='directory storing view configuration files')
+parser.add_argument('--force', '-f', action='store_true', default=False,
+                    help='overwrite existing files')
+
+args = parser.parse_args()
+md = None
+
+actions = set(args.action.split(','))
+for action in actions:
+    if action not in set(allowed_actions):
+        raise Exception(f"invalid action '{action}'")
+
+if args.dir is None:
+    if args.basename is None:
+        args.basename = os.path.basename(args.device)
+    args.dir = f'views/{args.basename}'
+
+def run(cmd, quiet=False):
+    if not quiet:
+        print(" ".join(cmd))
+    return subprocess.check_call(cmd)
+
+def read_mtab():
+    mounts = {}
+    with open("/etc/mtab", "rt") as fh:
+        for line in fh.readlines():
+            device, mountpoint, fstype, flags, n1, n2 = line.rstrip().split(" ")
+            if device == fstype:
+                continue  # Does not use a device eg proc
+            mounts[device] = {
+                'mountpoint': mountpoint,
+                'fstype': fstype,
+                'flags': set(flags.split(','))
+            }
+    return mounts
+            
+def read_partitions(device):
+    mounts = read_mtab()
+    info = defaultdict(dict)
+    for line in subprocess.check_output(["sudo", "sfdisk", "-d", device], text=True).splitlines():
+        #if 'n1p5' in line:
+        #    import pdb; pdb.set_trace()
+        if m := re.match(r'^last-lba: (\d+)', line):
+            # This turned out NOT to be the total size after all.
+            #info['end'] = int(m.group(1))
+            pass
+        elif m := re.match(r'^unit: (.*)', line):
+            info['unit'] = m.group(1)
+        elif m := re.match(r'^sector-size: (.*)', line):
+            info['sector-size'] = int(m.group(1))
+        elif m := re.match(r'^(/dev\S+) : start= *(\d+), size= *(\d+),.*?name="(.*?)"', line):
+            # Only the Microsoft partitions seem to have GPT partition
+            # names set.
+            partdev, start, size, gptname = m.groups()
+            info['partitions'][partdev] = {
+                'device': partdev,
+                'start': int(start),
+                'size': int(size),
+                'end': int(start) + int(size),
+                'gptname': gptname,
+            }
+        elif m := re.match(r'^(/dev\S+) : start= *(\d+), size= *(\d+),', line):
+            partdev, start, size = m.groups()
+            info['partitions'][partdev] = {
+                'device': partdev,
+                'start': int(start),
+                'size': int(size),
+                'end': int(start) + int(size),
+                'gptname': None,
+                'mount': mounts.get(partdev),
+            }
+    if info['unit'] != 'sectors':
+        raise Exception(f"script only handles units of sectors, not {info['unit']}")
+
+    info['end'] = int(subprocess.check_output(['sudo', 'blockdev', '--getsz', device], text=True).rstrip())
+    
+    info['ordered-partitions'] = sorted(
+        info['partitions'].keys(),
+        key=lambda k: info['partitions'][k]['start']
+    )
+    
+    return info
+
+slices_filename = os.path.join(args.dir, f"slices.txt")
+
+def check_new_file(filename):
+    if os.path.exists(filename) and not args.force:
+        raise Exception(f"{filename} already exists, use -f (--force) to overwrite")
+
+def copy_chunk(src, dst, offset, count, blocksize):
+    check_new_file(dst)
+    run([
+        'sudo',
+        'dd',
+        f"if={src}",
+        f"of={dst}",
+        f"bs={blocksize}",
+        f"count={count}",
+        f"skip={offset}",
+        'conv=sparse',
+    ])
+
+def make_zeroes(dst, count, blocksize):
+    check_new_file(dst)
+    run([
+        'sudo',
+        'dd',
+        f"if=/dev/zero",
+        f"of={dst}",
+        f"bs={blocksize}",
+        f"count=0",
+        f"seek={count}",
+        'conv=sparse',
+    ])
+    
+if 'create-mapping' in actions or 'all' in actions:
+    info = read_partitions(args.device)
+
+    # Look for an initial portion of the disk containing only "boring"
+    # partitions.
+    boring_types = set([
+        "EFI System Partition",
+        "Microsoft reserved partition",
+    ])
+    boring_end_sectors = 0
+    for part in info['ordered-partitions']:
+        partinfo = info['partitions'][part]
+        if partinfo['gptname'] not in boring_types:
+            boring_end_sectors = partinfo['start']
+            break
+        boring_end_sectors = partinfo['end']
+
+    # Check to be sure the boring portion is fairly small.
+    boring_size = boring_end_sectors * info['sector-size']
+    print(f"boring region is {boring_size} bytes")
+    if boring_size < 10 * MiB or boring_size > 2 * GiB:
+        raise Exception(f"boring region is unexpected size: {boring_size} bytes")
+
+    os.makedirs(args.dir, exist_ok=True)
+    check_new_file(slices_filename)
+
+    print("copying shadow portions of disk and constructing slices file")
+    head_filename = os.path.join(args.dir, f"{args.basename}.head.dat")
+    copy_chunk(args.device, head_filename, 0, boring_end_sectors, info['sector-size'])
+
+    slices = []
+    slices.append({
+        'description': 'initial portion of disk, cloned to a file',
+        'filename': head_filename,
+        'sectors': boring_end_sectors,
+        'bytes': boring_size,
+        'sector-offset': 0,
+        'end': boring_end_sectors,
+        'type': 'file',
+    })
+    gapid = 1
+    maskid = 0
+    for device in info['ordered-partitions']:
+        part = info['partitions'][device]
+
+        if part['end'] <= boring_end_sectors:
+            print(f"{device}: part of the cloned header")
+            continue
+
+        mount = part.get('mount')
+        if mount and mount['mountpoint'].startswith('/boot'):
+            print(f"{device}: cloned {mount['mountpoint']} partition")
+            disposition = 'clone'
+        elif part.get('gptname'):
+            print(f"{device}: assumed to be Windows partition to expose")
+            disposition = 'direct'
+        else:
+            print(f"{device}: other partition to mask with zeroes")
+            disposition = 'mask'
+            
+        prev = slices[-1]
+        gap = part['start'] - prev['end']
+        if gap > 0 and disposition != 'mask':
+            filename = os.path.join(args.dir, f"{args.basename}.gap{gapid}.dat")
+            copy_chunk(args.device, filename, prev['end'], gap, info['sector-size'])
+            gapid += 1
+            slices.append({
+                'description': 'gap between partitions',
+                'filename': filename,
+                'sectors': gap,
+                'bytes': gap * info['sector-size'],
+                'sector-offset': prev['end'],
+                'end': part['start'],
+                'type': 'file'
+            })
+
+        if disposition == 'direct':
+            slices.append({
+                'description': f"exposed partition {device}",
+                'filename': device,
+                'sectors': part['size'],
+                'bytes': part['size'] * info['sector-size'],
+                'sector-offset': part['start'],
+                'end': part['end'],
+                'type': 'partition',
+            })
+        elif disposition == 'mask':
+            filename = os.path.join(args.dir, f"{args.basename}.zero{maskid}.dat")
+            maskid += 1
+            sectors = part['end'] - prev['end']
+            make_zeroes(filename, sectors, info['sector-size'])
+            slices.append({
+                'description': f"masked-off partition {device}",
+                'filename': filename,
+                'sectors': sectors,
+                'bytes': sectors * info['sector-size'],
+                'sector-offset': prev['end'],
+                'end': part['end'],
+                'type': 'file',
+            })
+        elif disposition == 'clone':
+            name = os.path.basename(part['device'])
+            filename = os.path.join(args.dir, f"{args.basename}.{name}.dat")
+            copy_chunk(part['device'], filename, 0, part['size'], info['sector-size'])
+            slices.append({
+                'description': f"partition {device} cloned to a file",
+                'filename': filename,
+                'sectors': part['size'],
+                'bytes': part['size'] * info['sector-size'],
+                'sector-offset': part['start'],
+                'end': part['end'],
+                'type': 'file',
+            })
+        else:
+            raise Exception(f"unknown disposition '{disposition}'")
+
+    filename = os.path.join(args.dir, f"{args.basename}.tail.dat")
+    gap = info['end'] - slices[-1]['end']
+    copy_chunk(args.device, filename, prev['end'], gap, info['sector-size'])
+    slices.append({
+        'description': 'gap after last partition',
+        'filename': filename,
+        'sectors': gap,
+        'bytes': gap * info['sector-size'],
+        'sector-offset': slices[-1]['end'],
+        'end': info['end'],
+        'type': 'file'
+    })
+
+    with open(slices_filename, "w") as fh:
+        fh.write(json.dumps(slices, indent=4))
+
+if 'create-md' in actions or 'all' in actions:
+    with open(slices_filename, 'r') as fh:
+        slices = json.load(fh)
+    for slice in slices:
+        if slice['type'] == 'file':
+            slice['loopback'] = subprocess.check_output([
+                'sudo',
+                'losetup',
+                '-f',
+                '--show',
+                slice['filename']
+            ], text=True).rstrip()
+        if slice['bytes'] % 4096:
+            raise Exception(f"slice['sectors'] will get mangled with mdadm rounding. Time to learn about dmsetup linear?")
+
+    md = 0
+    while os.path.exists(f"/dev/md{md}"):
+        md += 1
+    run([
+        'sudo',
+        'mdadm',
+        '--build',
+        f"/dev/md{md}",
+        '--level=linear',
+        '--rounding=4',
+        f"--raid-devices={len(slices)}"
+    ] + [s.get('loopback') or s['filename'] for s in slices])
+
+    user = subprocess.check_output(['id', '-nu'], text=True).rstrip()
+    group = subprocess.check_output(['id', '-ng'], text=True).rstrip()
+    run(['sudo', 'chown', f"{user}:{group}", f"/dev/md{md}"])
+    run(['sudo', 'chmod', '0666', f"/dev/md{md}"])
+
+if md is None:
+    # Find the last /dev/md{n} device, assuming it's the one created
+    # by this script.
+    md = 0
+    while os.path.exists(f"/dev/md{md}"):
+        md += 1
+    if md == 0:
+        md = None
+    else:
+        md -= 1
+    
+if 'create-vmdk' in actions or 'all' in actions:
+    vmdk_filename = os.path.join(args.dir, f"{args.basename}.vmdk")
+    run(['VBoxManage', 'internalcommands', 'createrawvmdk', '-filename', vmdk_filename, '-rawdisk', f"/dev/md{md}"])
+
+def get_devices(mdfile):
+    devices = []
+    active = 0
+    for line in subprocess.check_output(['sudo', 'mdadm', '--detail', f"/dev/md{md}"], text=True).splitlines():
+        if m := re.match(r'^\s*Number', line):
+            active = 1
+        elif active:
+            devices.append(line.split(" ")[-1])
+    return devices
+
+   
+if 'list' in actions or 'all' in actions:
+    if md is None:
+        raise Exception("no /dev/md* devices found")
+    for device in get_devices(f"/dev/md{md}"):
+        if device.startswith('/dev/loop'):
+            run(['losetup', device], quiet=True)
+        else:
+            print(device)
+    
+if 'remove' in actions:
+    if md is None:
+        raise Exception("no /dev/md* devices found")
+    devices = get_devices(f"/dev/md{md}")
+    run(['sudo', 'mdadm', '--remove', f"/dev/md{md}"])
+    run(['sudo', 'mdadm', '--stop', f"/dev/md{md}"])
+    with open(slices_filename, 'r') as fh:
+        slices = json.load(fh)
+    for device in devices:
+        if device.startswith('/dev/loop'):
+            run(['sudo', 'losetup', '-d', device])
