@@ -53,7 +53,7 @@
   - go to an appropriate directory (mine is `~/VirtualBox VMs/`) and then:
     - create a disk description that exposes the Windows partitions and masks off the live
       Linux partition you're running from:
-      - viewsetup -d /dev/nvme0n1 --map
+      - viewsetup -d /dev/nvme0n1 --action create-mapping --auto
     - create /dev/md0, a virtual block device that cobbles together the above "slices":
       - viewsetup -d /dev/nvme0n1 --action create-md
     - create a VirtualBox disk descriptor that uses it:
@@ -79,4 +79,4 @@
   - when you boot, it will require you to reset your PIN. :-(
 - Ongoing
   - whenever you reboot, you'll need to recreate /dev/md0 with
-    - `viewsetup -d /dev/nvme0n1`
+    - `viewsetup -d /dev/nvme0n1` (same as `--action create-md`)
