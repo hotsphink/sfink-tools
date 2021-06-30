@@ -29,6 +29,8 @@ parser.add_argument('--dir', '-o', default=None,
                     help='directory storing view configuration files')
 parser.add_argument('--force', '-f', action='store_true', default=False,
                     help='overwrite existing files')
+parser.add_argument('--auto', '-a', action='store_true', default=False,
+                    help='choose default disposition for all partitions')
 
 args = parser.parse_args()
 md = None
@@ -43,10 +45,18 @@ if args.dir is None:
         args.basename = os.path.basename(args.device)
     args.dir = f'views/{args.basename}'
 
+
 def run(cmd, quiet=False):
     if not quiet:
         print(" ".join(cmd))
     return subprocess.check_call(cmd)
+
+
+def abort(msg):
+    import sys
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
 
 def read_mtab():
     mounts = {}
@@ -61,39 +71,33 @@ def read_mtab():
                 'flags': set(flags.split(','))
             }
     return mounts
-            
+
+
 def read_partitions(device):
     mounts = read_mtab()
     info = defaultdict(dict)
-    for line in subprocess.check_output(["sudo", "sfdisk", "-d", device], text=True).splitlines():
-        if m := re.match(r'^last-lba: (\d+)', line):
-            # This turned out NOT to be the total size after all.
-            #info['end'] = int(m.group(1))
-            pass
-        elif m := re.match(r'^unit: (.*)', line):
-            info['unit'] = m.group(1)
-        elif m := re.match(r'^sector-size: (.*)', line):
-            info['sector-size'] = int(m.group(1))
-        elif m := re.match(r'^(/dev\S+) : start= *(\d+), size= *(\d+),', line):
-            partdev, start, size = m.groups()
-            part = {
-                'device': partdev,
-                'start': int(start),
-                'size': int(size),
-                'end': int(start) + int(size),
-                'gptname': None,
-                'attrs': set(),
-                'mount': mounts.get(partdev),
-            }
-            # Only the Microsoft partitions seem to have GPT partition
-            # names set.
-            if m := re.search(r', name="(.*?)"', line):
-                part['gptname'] = m.group(1)
-            if m := re.search(r', attrs="(.*?)"', line):
-                part['attrs'] = set(m.group(1).split(','))
-            info['partitions'][partdev] = part
+    fdisk = json.loads(subprocess.check_output(["sudo", "sfdisk", "-J", device], text=True))
+    info['unit'] = fdisk['partitiontable']['unit']
     if info['unit'] != 'sectors':
         raise Exception(f"script only handles units of sectors, not {info['unit']}")
+    info['sector-size'] = fdisk['partitiontable']['sectorsize']
+    for p in fdisk['partitiontable']['partitions']:
+        part = {
+            'device': p['node'],
+            'start': p['start'],
+            'size': p['size'],
+            'end': p['start'] + p['size'],
+            'gptname': p.get('name'),
+            # FIXME: Have not looked at example with multiple attributes.
+            'attrs': set(p.get('attrs', '').split(',')),
+            'mount': mounts.get(p['node']),
+        }
+        info['partitions'][p['node']] = part
+
+    for line in subprocess.check_output(["sudo", "sfdisk", "-l", device], text=True).splitlines():
+        if m := re.match(r'(/dev/\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*(.*)', line):
+            dev, start, end, sectors, size, type_ = m.groups()
+            info['partitions'][dev]['type'] = type_
 
     info['end'] = int(subprocess.check_output(['sudo', 'blockdev', '--getsz', device], text=True).rstrip())
     
@@ -106,9 +110,11 @@ def read_partitions(device):
 
 slices_filename = os.path.join(args.dir, f"slices.txt")
 
+
 def check_new_file(filename):
     if os.path.exists(filename) and not args.force:
         raise Exception(f"{filename} already exists, use -f (--force) to overwrite")
+
 
 def copy_chunk(src, dst, offset, count, blocksize):
     check_new_file(dst)
@@ -123,13 +129,60 @@ def copy_chunk(src, dst, offset, count, blocksize):
         'conv=sparse',
     ])
 
-def is_boring(part):
-    if part['gptname'] in boring_types:
+
+def human_bytes(b):
+    if b < 4000:
+        return f"{b} bytes"
+    b = b / 1024
+    if b < 4000:
+        return f"{b:.1f} KB"
+    b = b / 1024
+    if b < 4000:
+        return f"{b:.1f} MB"
+    b = b / 1024
+    if b < 4000:
+        return f"{b:.1f} GB"
+    b = b / 1024
+    return f"{b:.1f} TB"
+
+
+def is_windows_system_partition(part):
+    gpt_types = set([
+        "efi system partition",
+        "microsoft reserved partition",
+    ])
+    if (part['gptname'] or '').lower() in gpt_types:
         return True
-    if part.get('gptname', '') == 'Basic data partition':
+
+    if (part['gptname'] or '').lower() == 'basic data partition':
         if 'RequiredPartition' in part.get('attrs', set()):
             return True
+
     return False
+
+
+def guess_disposition(part):
+    if is_windows_system_partition(part):
+        return ('clone', f"small Windows system partition")
+
+    mount = part.get('mount')
+    if mount and mount['mountpoint'].startswith('/boot'):
+        return ('clone', f"cloned {mount['mountpoint']} partition")
+
+    if mount:
+        return ('mask', f"mounted partition, mask with zeroes")
+
+    if 'microsoft' in part.get('type', '').lower():
+        return ('expose', f"Windows or other partition to expose")
+
+    if 'lvm' in part.get('type', '').lower():
+        return ('mask', f"LVM partition, masking it off")
+
+    if part.get('gptname'):
+        return ('expose', f"assumed to be Windows or system partition to expose")
+
+    return ('mask', f"other partition to mask with zeroes")
+
 
 def make_zeroes(dst, count, blocksize):
     check_new_file(dst)
@@ -143,137 +196,170 @@ def make_zeroes(dst, count, blocksize):
         f"seek={count}",
         'conv=sparse',
     ])
-    
+
+
+def describe(names):
+    names = [os.path.basename(n) for n in names]
+
+    # If there is a device and its partitions, tack the partition indicators
+    # onto the device (eg /dev/nvme0n1,/dev/nvme0n1p1,/dev/nvme0n1p2 ->
+    # /dev/nvme0n1p1p2).
+    shortest = sorted(names, key=lambda s: len(s))[0]
+    if m := re.search(r'(p\d+)$', shortest):
+        shortest = shortest[0:-len(m.group(1))]
+    parts = []
+    for name in names:
+        if name == shortest:
+            # Just drop the main device; it'll be a gap.
+            continue
+        if not name.startswith(shortest):
+            parts = None
+            break
+        rest = name[len(shortest):]
+        if re.search(r'p\d+$', rest):
+            parts.append(rest)
+    if parts is not None:
+        return shortest + "".join(parts)
+    else:
+        return ",".join(names)
+
 if 'create-mapping' in actions or 'all' in actions:
     info = read_partitions(args.device)
+    maskid = [0]
 
-    # Look for an initial portion of the disk containing only "boring"
-    # partitions.
-    boring_types = set([
-        "EFI System Partition",
-        "Microsoft reserved partition",
-    ])
-    boring_end_sectors = 0
-    for part in info['ordered-partitions']:
-        partinfo = info['partitions'][part]
-        if not is_boring(partinfo):
-            print(f"{part} is not boring: {partinfo['gptname']}")
-            boring_end_sectors = partinfo['start']
-            break
-        print(f"{part} is boring")
-        boring_end_sectors = partinfo['end']
+    def process_range(slices):
+        disposition = slices[0]['disposition']
 
-    # Check to be sure the boring portion is fairly small.
-    boring_size = boring_end_sectors * info['sector-size']
-    print(f"boring region is {boring_size} bytes")
-    if boring_size < 10 * MiB or boring_size > 2 * GiB:
-        raise Exception(f"boring region is unexpected size: {boring_size} bytes")
+        if disposition != 'expose':
+            sectors = slices[-1]['end'] - slices[0]['start']
+            if sectors % (4096 / info['sector-size']):
+                import pdb; pdb.set_trace()
+                devices = " ".join(i['device'] for i in slices)
+                print(f"alignment error for devices {devices}")
+                abort(f"{sectors} will get mangled with mdadm rounding. Time to learn about dmsetup linear?")
+
+        if disposition == 'mask':
+            filename = os.path.join(args.dir, f"{args.basename}.zero{maskid[0]}.dat")
+            maskid[0] += 1
+            make_zeroes(filename, slices[-1]['end'] - slices[0]['start'], info['sector-size'])
+            slices[0]['filename'] = filename
+
+        elif disposition in ('clone', 'gap'):
+            name = describe([slice['device'] for slice in slices])
+            filename = os.path.join(args.dir, f"{args.basename}.{name}.dat")
+            sectors = slices[-1]['end'] - slices[0]['start']
+            copy_chunk(args.device, filename, slices[0]['start'], sectors, info['sector-size'])
+            slices[0]['filename'] = filename
+
+        else:
+            assert disposition == 'expose'
+            slices[0]['filename'] = slices[0]['device']
+
+
+    def make_files_for_slices(slices):
+        # Merge consecutive slices with the same non-expose disposition.
+        range = [slices[0]]
+        for slice in slices[1:]:
+            disposition = slice['disposition']
+            if range[0]['disposition'] == disposition and disposition != 'expose':
+                range.append(slice)
+            elif slice['disposition'] == 'gap' and range[-1]['disposition']:
+                # Attach gap to previous range.
+                range.append(slice)
+            else:
+                process_range(range)
+                range = [slice]
+        if range:
+            process_range(range)
 
     os.makedirs(args.dir, exist_ok=True)
     check_new_file(slices_filename)
 
-    print("copying shadow portions of disk and constructing slices file")
-    head_filename = os.path.join(args.dir, f"{args.basename}.head.dat")
-    copy_chunk(args.device, head_filename, 0, boring_end_sectors, info['sector-size'])
-
+    mounts = read_mtab()
     slices = []
-    slices.append({
-        'description': 'initial portion of disk, cloned to a file',
-        'filename': head_filename,
-        'sectors': boring_end_sectors,
-        'bytes': boring_size,
-        'sector-offset': 0,
-        'end': boring_end_sectors,
-        'type': 'file',
-    })
-    gapid = 1
-    maskid = 0
+    prev_end = 0
     for device in info['ordered-partitions']:
         part = info['partitions'][device]
+        disposition, why = guess_disposition(part)
 
-        if part['end'] <= boring_end_sectors:
-            print(f"{device}: part of the cloned header")
-            continue
-
-        mount = part.get('mount')
-        if mount and mount['mountpoint'].startswith('/boot'):
-            print(f"{device}: cloned {mount['mountpoint']} partition")
-            disposition = 'clone'
-        elif part.get('gptname'):
-            print(f"{device}: assumed to be Windows partition to expose")
-            disposition = 'direct'
+        print(f"{device}:")
+        if mounts.get(device):
+            print(f"  {mounts[device]['fstype']} filesystem mounted at {mounts[device]['mountpoint']}")
+        print(f"  sectors {part['start']}-{part['end']-1}, {human_bytes(part['size'] * info['sector-size'])}")
+        print(f"  GPT partition name: {part['gptname']}")
+        if args.auto:
+            print(f"  automatically chosen disposition is {disposition}: \"{why}\"")
         else:
-            print(f"{device}: other partition to mask with zeroes")
-            disposition = 'mask'
-            
-        prev = slices[-1]
-        gap = part['start'] - prev['end']
-        if gap > 0 and disposition != 'mask':
-            filename = os.path.join(args.dir, f"{args.basename}.gap{gapid}.dat")
-            copy_chunk(args.device, filename, prev['end'], gap, info['sector-size'])
-            gapid += 1
+            print(f"  default disposition is {disposition}: \"{why}\"")
+        while not args.auto:
+            answer = input(f"disposition (one of expose, mask, clone) (default {disposition})> ")
+            if answer != "":
+                if answer in ('expose', 'mask', 'clone'):
+                    disposition = answer
+                    break
+                else:
+                    print("invalid disposition")
+            else:
+                break
+        print()
+
+        gap = part['start'] - prev_end
+        if gap > 0:
             slices.append({
+                'disposition': 'gap',
                 'description': 'gap between partitions',
-                'filename': filename,
+                'device': args.device,
                 'sectors': gap,
                 'bytes': gap * info['sector-size'],
-                'sector-offset': prev['end'],
+                'start': prev_end,
                 'end': part['start'],
                 'type': 'file'
             })
 
-        if disposition == 'direct':
-            slices.append({
+        slices.append({
+            'disposition': disposition,
+            'device': device,
+            'sectors': part['size'],
+            'bytes': part['size'] * info['sector-size'],
+            'start': part['start'],
+            'end': part['end'],
+        })
+
+        if disposition == 'expose':
+            slices[-1].update({
                 'description': f"exposed partition {device}",
-                'filename': device,
-                'sectors': part['size'],
-                'bytes': part['size'] * info['sector-size'],
-                'sector-offset': part['start'],
-                'end': part['end'],
+                'device': device,
                 'type': 'partition',
             })
         elif disposition == 'mask':
-            filename = os.path.join(args.dir, f"{args.basename}.zero{maskid}.dat")
-            maskid += 1
-            sectors = part['end'] - prev['end']
-            make_zeroes(filename, sectors, info['sector-size'])
-            slices.append({
+            slices[-1].update({
                 'description': f"masked-off partition {device}",
-                'filename': filename,
-                'sectors': sectors,
-                'bytes': sectors * info['sector-size'],
-                'sector-offset': prev['end'],
-                'end': part['end'],
                 'type': 'file',
             })
         elif disposition == 'clone':
-            name = os.path.basename(part['device'])
-            filename = os.path.join(args.dir, f"{args.basename}.{name}.dat")
-            copy_chunk(part['device'], filename, 0, part['size'], info['sector-size'])
-            slices.append({
+            slices[-1].update({
                 'description': f"partition {device} cloned to a file",
-                'filename': filename,
-                'sectors': part['size'],
-                'bytes': part['size'] * info['sector-size'],
-                'sector-offset': part['start'],
-                'end': part['end'],
                 'type': 'file',
             })
         else:
             raise Exception(f"unknown disposition '{disposition}'")
 
-    filename = os.path.join(args.dir, f"{args.basename}.tail.dat")
+        prev_end = part['end']
+
     gap = info['end'] - slices[-1]['end']
-    copy_chunk(args.device, filename, prev['end'], gap, info['sector-size'])
-    slices.append({
-        'description': 'gap after last partition',
-        'filename': filename,
-        'sectors': gap,
-        'bytes': gap * info['sector-size'],
-        'sector-offset': slices[-1]['end'],
-        'end': info['end'],
-        'type': 'file'
-    })
+    if gap > 0:
+        slices.append({
+            'disposition': 'gap',
+            'description': 'gap after last partition',
+            'device': args.device,
+            'sectors': gap,
+            'bytes': gap * info['sector-size'],
+            'start': slices[-1]['end'],
+            'end': info['end'],
+            'type': 'file'
+        })
+
+    make_files_for_slices(slices)
 
     with open(slices_filename, "w") as fh:
         fh.write(json.dumps(slices, indent=4))
@@ -282,7 +368,7 @@ if 'create-md' in actions or 'all' in actions:
     with open(slices_filename, 'r') as fh:
         slices = json.load(fh)
     for slice in slices:
-        if slice['type'] == 'file':
+        if slice['type'] == 'file' and slice['filename']:
             slice['loopback'] = subprocess.check_output([
                 'sudo',
                 'losetup',
@@ -290,8 +376,6 @@ if 'create-md' in actions or 'all' in actions:
                 '--show',
                 slice['filename']
             ], text=True).rstrip()
-        if slice['bytes'] % 4096:
-            raise Exception(f"slice['sectors'] will get mangled with mdadm rounding. Time to learn about dmsetup linear?")
 
     md = 0
     while os.path.exists(f"/dev/md{md}"):
