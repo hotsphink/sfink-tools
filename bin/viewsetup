@@ -14,6 +14,18 @@ GiB = 2 ** 30
 
 allowed_actions = ['create-mapping', 'create-md', 'create-vmdk', 'list', 'remove', 'all']
 
+
+def get_disks():
+    lsblk = json.loads(subprocess.check_output(["lsblk", "-J"], text=True))
+    return [
+        d['name']
+        for d in lsblk['blockdevices']
+        if d['type'] == 'disk' and d['mountpoint'] is None
+    ]
+
+disks = get_disks()
+disk = None if len(disks) > 1 else "/dev/" + disks[0]
+
 parser = argparse.ArgumentParser('setup a view of a disk')
 parser.add_argument('--action', '--actions', default='create-md',
                     help='comma-separated actions to perform, from: ' + ' '.join(allowed_actions))
@@ -21,7 +33,7 @@ parser.add_argument('--map', action='store_const', dest='action', const='create-
                     help='alias for --action=create-mapping')
 parser.add_argument('--vmdk', action='store_const', dest='action', const='create-vmdk',
                     help='alias for --action=create-vmdk')
-parser.add_argument('--device', '-d', default='/dev/nvme0n1',
+parser.add_argument('--device', '-d', default=disk,
                     help='(whole) disk to create a view of')
 parser.add_argument('--basename', '-b', default=None,
                     help='name to use in generated files, defaults to basename of device')
@@ -229,9 +241,11 @@ if 'create-mapping' in actions or 'all' in actions:
 
     def process_range(slices):
         disposition = slices[0]['disposition']
+        if disposition == 'gap' and len(slices) > 1:
+            disposition = slices[0]['disposition'] = slices[1]['disposition']
 
+        sectors = slices[-1]['end'] - slices[0]['start']
         if disposition != 'expose':
-            sectors = slices[-1]['end'] - slices[0]['start']
             if sectors % (4096 / info['sector-size']):
                 import pdb; pdb.set_trace()
                 devices = " ".join(i['device'] for i in slices)
@@ -241,13 +255,12 @@ if 'create-mapping' in actions or 'all' in actions:
         if disposition == 'mask':
             filename = os.path.join(args.dir, f"{args.basename}.zero{maskid[0]}.dat")
             maskid[0] += 1
-            make_zeroes(filename, slices[-1]['end'] - slices[0]['start'], info['sector-size'])
+            make_zeroes(filename, sectors, info['sector-size'])
             slices[0]['filename'] = filename
 
         elif disposition in ('clone', 'gap'):
             name = describe([slice['device'] for slice in slices])
             filename = os.path.join(args.dir, f"{args.basename}.{name}.dat")
-            sectors = slices[-1]['end'] - slices[0]['start']
             copy_chunk(args.device, filename, slices[0]['start'], sectors, info['sector-size'])
             slices[0]['filename'] = filename
 
@@ -263,8 +276,13 @@ if 'create-mapping' in actions or 'all' in actions:
             disposition = slice['disposition']
             if range[0]['disposition'] == disposition and disposition != 'expose':
                 range.append(slice)
-            elif slice['disposition'] == 'gap' and range[-1]['disposition']:
+            elif range[0]['disposition'] == 'gap' and disposition in ('clone', 'mask'):
+                # Attach gap to next range.
+                range[0]['disposition'] = disposition
+                range.append(slice)
+            elif disposition == 'gap' and range[-1]['disposition'] in ('clone', 'mask'):
                 # Attach gap to previous range.
+                slice['disposition'] = range[-1]['disposition']
                 range.append(slice)
             else:
                 process_range(range)
@@ -310,7 +328,7 @@ if 'create-mapping' in actions or 'all' in actions:
                 'description': 'gap between partitions',
                 'device': args.device,
                 'sectors': gap,
-                'bytes': gap * info['sector-size'],
+                'size': human_bytes(gap * info['sector-size']),
                 'start': prev_end,
                 'end': part['start'],
                 'type': 'file'
@@ -368,7 +386,7 @@ if 'create-md' in actions or 'all' in actions:
     with open(slices_filename, 'r') as fh:
         slices = json.load(fh)
     for slice in slices:
-        if slice['type'] == 'file' and slice['filename']:
+        if slice['type'] == 'file' and slice.get('filename'):
             slice['loopback'] = subprocess.check_output([
                 'sudo',
                 'losetup',
@@ -380,6 +398,7 @@ if 'create-md' in actions or 'all' in actions:
     md = 0
     while os.path.exists(f"/dev/md{md}"):
         md += 1
+    backed_slices = [s for s in slices if s.get('loopback') or s.get('filename')]
     run([
         'sudo',
         'mdadm',
@@ -387,8 +406,8 @@ if 'create-md' in actions or 'all' in actions:
         f"/dev/md{md}",
         '--level=linear',
         '--rounding=4',
-        f"--raid-devices={len(slices)}"
-    ] + [s.get('loopback') or s['filename'] for s in slices])
+        f"--raid-devices={len(backed_slices)}"
+    ] + [s.get('loopback') or s['filename'] for s in backed_slices])
 
     user = subprocess.check_output(['id', '-nu'], text=True).rstrip()
     group = subprocess.check_output(['id', '-ng'], text=True).rstrip()
