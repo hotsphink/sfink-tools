@@ -207,7 +207,12 @@ sub choose_pid_for_rr {
     # pick the first erroring process, pick the first one of its children that
     # errored (if any; if none did, use the erroring parent). Recursively.
     #
+
+    # Ugh. "-g 300" will confuse this. It wants "-g300". I need to rethink
+    # this. In the meantime...
+    $rr_args =~ s/-[gfpdhstxA] (\S+)/-$1$2/g;
     my @plain_rr_args = grep !/^-/, split(/ /, $rr_args);
+
     open(my $fh, "rr ps @plain_rr_args |");
     my @info;
     while(<$fh>) {
