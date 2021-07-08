@@ -49,16 +49,15 @@
 - construct a virtual disk pointing to your actual disk
   - get my `viewsetup` utility:
     - hg clone https://hg.sr.ht/~sfink/sfink-tools
-    - get it from sfink-tools/bin/viewsetup
-  - go to an appropriate directory (mine is `~/VirtualBox VMs/`) and then:
-    - create a disk description that exposes the Windows partitions and masks off the live
-      Linux partition you're running from:
-      - viewsetup -d /dev/nvme0n1 --action create-mapping --auto
-    - create /dev/md0, a virtual block device that cobbles together the above "slices":
-      - viewsetup -d /dev/nvme0n1 --action create-md
-    - create a VirtualBox disk descriptor that uses it:
-      - viewsetup -d /dev/nvme0n1 --action create-vmdk
-    - these will create their files in a subdirectory `views/nvme0n1/`
+    - get it from `sfink-tools/bin/viewsetup`
+    - or it's a single file, so you could just grab it from https://hg.sr.ht/~sfink/sfink-tools/raw/bin/viewsetup?rev=tip
+  - create a disk description that exposes the Windows partitions and masks off the live
+    Linux partition you're running from:
+    - `viewsetup --map --auto --name ssd`
+  - create /dev/mapper/ssd_view, a virtual block device that cobbles together the above "slices":
+    - `viewsetup ssd`
+  - create a VirtualBox disk descriptor that uses it:
+    - `viewsetup --action create-vmdk ssd`
 - get VirtualBox working with Secure Boot
   - Secure Boot requires signing the vbox kernel modules
     - you could try to follow https://stackoverflow.com/questions/61248315/sign-virtual-box-modules-vboxdrv-vboxnetflt-vboxnetadp-vboxpci-centos-8
@@ -70,7 +69,7 @@
   - Name: whatever (I used "Local Windows", which is not the greatest name)
   - Version: Windows 10 (64-bit)
   - Use an existing virtual hard disk
-    - navigate to the VMDK in the folder created by viewsetup above
+    - navigate to the VMDK created by viewsetup above (`~/.config/diskviews/ssd/ssd.vmdk`)
   - enable EFI
   - use PIIX3 for Chipset (in System/Motherboard)
   - use PIIX4 for storage controller (not NVMe for some reason...?)
@@ -78,5 +77,5 @@
       gives a potential fix, haven't tried it
   - when you boot, it will require you to reset your PIN. :-(
 - Ongoing
-  - whenever you reboot, you'll need to recreate /dev/md0 with
-    - `viewsetup -d /dev/nvme0n1` (same as `--action create-md`)
+  - whenever you reboot, you'll need to recreate /dev/mapper/ssd_view with
+    - `viewsetup ssd` (same as `--action create-md`)
