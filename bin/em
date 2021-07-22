@@ -13,13 +13,16 @@
 use strict;
 use warnings;
 
+use File::Basename qw(basename);
+
 my $ROOTDIR;
 my $TOPROOTDIR;
-my $MQROOTDIR;
 
-my @final_args;
+my @to_edit; # [ <file, lineno> ]
 my $magic = 0;
 my $revision;
+my $base = basename($0);
+my $editor = ($base eq 'vs' ? 'vscode' : $ENV{EDITOR}) || "emacs";
 
 my $verbose;
 my $use_client;
@@ -33,6 +36,8 @@ while ($i < @ARGV) {
         $use_client = 1;
     } elsif ($ARGV[$i] eq '-r' || $ARGV[$i] eq '--revision') {
         $revision = $ARGV[++$i] or die "missing revision\n";
+    } elsif ($ARGV[$i] eq '-e' || $ARGV[$i] eq '--editor') {
+        $editor = $ARGV[++$i] or die "missing editor\n";
     } else {
         push @args, $ARGV[$i];
     }
@@ -41,8 +46,9 @@ while ($i < @ARGV) {
 }
 
 ARG: for my $arg (@args) {
+    my $lineno;
     if ($arg =~ /^[-+]/) {
-        push @final_args, $arg;
+	push @to_edit, [ $arg ];
         next;
     }
 
@@ -54,7 +60,7 @@ ARG: for my $arg (@args) {
         # line.
         print "Command line contained filename:lineno, adding +$2\n"
             if $verbose;
-        push @final_args, "+$2";
+	$lineno = $2;
         $arg = $1;
     }
 
@@ -65,18 +71,13 @@ ARG: for my $arg (@args) {
         if (-r "$ROOTDIR/$arg") {
             $arg = "$ROOTDIR/$arg";
         } else {
-            chomp($ROOTDIR = $MQROOTDIR ||= qx(hg root --mq 2>/dev/null));
-            if (-r "$ROOTDIR/$arg") {
-                $arg = "$ROOTDIR/$arg";
-            } else {
-                chomp(my $path = qx(hg files "relglob:$arg"));
-                if ($path ne '' && -r $path) {
-                    $arg = $path;
-                } elsif ($arg =~ /^[\da-f]{1,40}$/) {
-                    $revision = $arg;
-                    next;
-                }
-            }
+	    chomp(my $path = qx(hg files "relglob:$arg"));
+	    if ($path ne '' && -r $path) {
+		$arg = $path;
+	    } elsif ($arg =~ /^[\da-f]{1,40}$/) {
+		$revision = $arg;
+		next;
+	    }
         }
     }
 
@@ -97,21 +98,21 @@ ARG: for my $arg (@args) {
                 } else {
                     # Open the original file at the first changed line number,
                     # and the reject file at the first hunk.
-                    push @final_args, ("+" . ($hunkstart + $context), $orig,
-                                       "+" . ($context + 3 + 1),      $arg);
+		    push @to_edit, [ $orig, $hunkstart + $context ];
+		    push @to_edit, [ $arg, $context + 3 + 1 ];
                     next ARG;
                 }
             }
         }
 
-        push @final_args, ($orig, $arg);
+	push @to_edit, [$orig], [$arg, $lineno]; # $lineno is probably undef
         $magic = 1;
     } else {
-        push @final_args, $arg;
+	push @to_edit, [ $arg, $lineno ];
     }
 }
 
-if (@final_args == 0) {
+if (@to_edit == 0) {
     chomp($ROOTDIR = $TOPROOTDIR ||= qx(hg root));
 
     my @files;
@@ -124,7 +125,7 @@ if (@final_args == 0) {
     }
 
     if (@files) {
-        push @final_args, map { "$ROOTDIR/$_" } @files;
+        push @to_edit, map { ["$ROOTDIR/$_"] } @files;
     } else {
         $revision //= '.';
         print "Using changes from $revision\n"
@@ -144,7 +145,7 @@ if (@final_args == 0) {
                 if (/^[\-+]/) {
                     print "found first change at line $startline\n"
                         if $verbose;
-                    push @final_args, "+$startline", "$ROOTDIR/$curfile";
+		    push @to_edit, [ "$ROOTDIR/$curfile", $startline ];
                     undef $startline;
                     undef $curfile;
                 } else {
@@ -155,6 +156,23 @@ if (@final_args == 0) {
     }
 }
 
-my $cmd = $use_client ? "emacsclient" : "emacs";
-print "Running: $cmd @final_args\n" if $magic;
-exec($cmd, @final_args);
+my $cmd;
+my @cmd_args;
+if ($editor eq 'emacs') {
+    $cmd = $use_client ? "emacsclient" : "emacs";
+    foreach (@to_edit) {
+	my ($file, $lineno) = @$_;
+	push @cmd_args, "+$lineno" if $lineno;
+	push @cmd_args, $file;
+    }
+} elsif ($editor eq 'vscode' || $editor eq 'code') {
+    $cmd = 'code';
+    push @cmd_args, '-r';
+    foreach (@to_edit) {
+	my ($file, $lineno) = @$_;
+	push @cmd_args, "-g", join(":", grep { $_ } $file, $lineno);
+    }
+}
+
+print "Running: $cmd @cmd_args\n" if $magic or $verbose;
+exec($cmd, @cmd_args);
