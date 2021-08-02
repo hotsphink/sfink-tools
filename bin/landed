@@ -19,10 +19,19 @@ from collections import namedtuple
 Node = namedtuple("Node", ["rev", "phase", "bug", "num", "reviewers", "key", "desc"])
 
 p = argparse.ArgumentParser(
-    usage='landed [options]', description='''\
-Take a set of draft revisions and find their landed equivalents, then output a command that prunes the given revisions, setting the landed equivalents as their successors.
+    usage='landed [options]', description='''
+Take a set of draft revisions and find their landed equivalents, then
+output a command that prunes the given revisions, setting the landed
+equivalents as their successors.
 
-Example: succeed -r .^^^::. --user=sfink --branch=autoland'''
+The usual usage is to just run `landed` with no arguments from a directory
+based on a stack of patches, some of which have landed already. That will loop
+over all non-public ancestors and scan through mozilla-central to find patches
+with matching descriptions that have already landed, and prune the local
+patches while setting their successors to their already-landed equivalents.
+
+More complex example: landed -r .^^^::. --user=sfink --branch=autoland
+'''
 )
 
 DEFAULT_REVSET = "not public() and ancestors(.)"
