@@ -157,14 +157,16 @@ def gather_revisions(revset, limit=None, datelimit=None, query=None):
             if len(m.groups()) > 1:
                 phabrev = m.group(2)
 
-            if m := re.match(r"[bB]ug (\d+)[^\w\[]*(.*)", desc):
+            m = re.match(r"[bB]ug (\d+)[^\w\[]*(.*)", desc)
+            if m:
                 bug = m.group(1)
             else:
                 bug = None
 
             desc = desc.splitlines()[0]
 
-            if m := re.match(r"(.*?)\s*r[?=]([\w., ]+)$", desc):
+            m = re.match(r"(.*?)\s*r[?=]([\w., ]+)$", desc)
+            if m:
                 desc = m.group(1)
                 reviewers = m.group(2)
             else:
@@ -241,11 +243,13 @@ if args.landed_from:
         for line in fh:
             # a revision url, as if it were cut & paste from an automated bug
             # comment
-            if m := re.search(r'/rev/(\w+)', line):
+            m = re.search(r'/rev/(\w+)', line)
+            if m:
                 pieces.append(m.group(1))
                 # a short hash
             else:
-                if m := re.match(r'^([a-f0-9]{12})$', line):
+                m = re.match(r'^([a-f0-9]{12})$', line)
+                if m:
                     pieces.append(m.group(1))
                 else:
                     if args.debug:
