@@ -6,6 +6,8 @@ These are tools that I think might be useful to other people.
 
 Tools included:
 
+ - landed : Prune changesets that have landed, setting their successors to the landed
+   revisions.
  - get-taskcluster-logs : Retrieve groups of log files from a push by scraping taskcluster
  - json : Interactive navigation of a JSON file
  - debug : Start up a debugger within emacs on various types of files
@@ -43,6 +45,32 @@ Other configuration files:
  - hgrc : Mercurial configuration
 
 I use this via a symlink from ~/.hgrc.
+
+----------------------------------------------------------------------
+
+landed - Prune patches that have landed, setting their successors to the landed
+revisions.
+
+Typical usage:
+
+    hg pull
+    landed
+
+That will look at the non-public (aka draft, probably) ancestors of your
+checked out revision, and scan for matching phabricator revisions (or commit
+messages, if phabricator revisions are not present) within the landed tree.
+You'll want to download the latest set of landed changes first, so they exist
+locally.
+
+You can also do this in a more targeted way:
+
+    landed -r 30deabdff172
+
+(or a revspec matching multiple patches).
+
+Note that this will not rebase any orphaned patches for you, so if you are
+pruning landed patches with descendants that have not yet been landed, you will
+need to rebase them (eg by running `hg evolve` or `hg evolve -a` or whatever.)
 
 ----------------------------------------------------------------------
 

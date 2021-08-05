@@ -24,6 +24,10 @@ Take a set of draft revisions and find their landed equivalents, then
 output a command that prunes the given revisions, setting the landed
 equivalents as their successors.
 
+Changesets are matched up by the phabricator revision ID in their comments, if
+any. Otherwise, use the first line of their descriptions (with reviewer
+metadata stripped).
+
 The usual usage is to just run `landed` with no arguments from a directory
 based on a stack of patches, some of which have landed already. That will loop
 over all non-public ancestors and scan through mozilla-central to find patches
@@ -31,7 +35,10 @@ with matching descriptions that have already landed, and prune the local
 patches while setting their successors to their already-landed equivalents.
 
 More complex example: landed -r .^^^::. --user=sfink --branch=autoland
-'''
+
+Note that this will not rebase any orphaned patches for you, so if you are
+pruning landed patches that have not yet landed descendants, you will need to
+rebase them (eg by running `hg evolve` or `hg evolve -a` or whatever.) '''
 )
 
 DEFAULT_REVSET = "not public() and ancestors(.)"
