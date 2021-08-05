@@ -59,9 +59,9 @@ g.add_argument("--branch", "-b", default='central',
 g.add_argument("--landed-from",
                help="Parse this file to extract the landed revisions")
 g.add_argument("--limit", "-l", type=int,
-               help="Do not look more than LIMIT revisions back")
+               help="Do not look more than LIMIT revisions back. Default is to defer to --datelimit.")
 g.add_argument("--datelimit", type=int,
-               help="Do not look more than LIMIT days back, 0 to remove limit")
+               help="Do not look more than LIMIT days back, 0 to remove limit. Default is 2 years.")
 
 p.add_argument("--verbose", "-v", action="store_true",
                help="Verbose output")
@@ -84,9 +84,9 @@ if args.deadmeat != DEFAULT_REVSET and args.topic:
 if args.topic:
     args.deadmeat = f"topic('{args.topic}')"
 
-# If no other limit is requested, look back 1 year.
+# If no other limit is requested, look back 2 years.
 if not args.limit and not args.datelimit:
-    args.datelimit = 365
+    args.datelimit = 365 * 2
 
 wrapper = textwrap.TextWrapper(subsequent_indent='      ',
                                width=int(os.getenv('COLUMNS', '80')) - 2)
@@ -194,7 +194,7 @@ def gather_revisions(revset, limit=None, datelimit=None, query=None):
                 revs[rev] = node
 
             if earliest and datetime.datetime.fromtimestamp(info['date'][0]) < earliest:
-                print(f"Terminating search because the date limit was reached after {n} revisions")
+                print(f"Terminating search because the date limit was reached after {n} revisions (see --datelimit and/or --limit).")
                 break
 
             if query and not lookup:
