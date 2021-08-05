@@ -139,7 +139,11 @@ def gather_revisions(revset, limit=None, datelimit=None, query=None):
         earliest = datetime.datetime.now() - datetime.timedelta(days=datelimit)
     report_interval = 100 if args.user else 10000
     n = 0
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, encoding='utf-8')
+    extra = {}
+    if os.name == 'nt':
+        # hg is very noisy on Windows when you close its output before it's done.
+        extra['stdout'] = subprocess.DEVNULL
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, encoding='utf-8', **extra)
     try:
         for info in gen_revisions(iter(process.stdout.readline, '')):
             n += 1
