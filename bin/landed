@@ -139,7 +139,7 @@ def gather_revisions(revset, limit=None, datelimit=None, query=None):
         earliest = datetime.datetime.now() - datetime.timedelta(days=datelimit)
     report_interval = 100 if args.user else 10000
     n = 0
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True)
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, encoding='utf-8')
     try:
         for info in gen_revisions(iter(process.stdout.readline, '')):
             n += 1
