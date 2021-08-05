@@ -132,7 +132,7 @@ def gather_revisions(revset, limit=None, datelimit=None, query=None):
     if limit:
         cmd.extend(["-l", str(limit)])
     if args.debug:
-        print(f"Running {shlex.join(cmd)}")
+        print(f"Running {' '.join(shlex.quote(s) for s in cmd)}")
 
     earliest = None
     if datelimit:
