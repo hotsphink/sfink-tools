@@ -8,7 +8,7 @@ Tools included:
 
  - landed : Prune changesets that have landed, setting their successors to the landed
    revisions.
- - run-taskcluster-image : Run taskcluster jobs in a local Docker container.
+ - run-taskcluster-job : Run taskcluster jobs in a local Docker container.
  - get-taskcluster-logs : Retrieve groups of log files from a push by scraping taskcluster
  - json : Interactive navigation of a JSON file
  - debug : Start up a debugger within emacs on various types of files
@@ -75,9 +75,9 @@ need to rebase them (eg by running `hg evolve` or `hg evolve -a` or whatever.)
 
 ----------------------------------------------------------------------
 
-run-taskcluster-image : Run taskcluster jobs in a local Docker container.
+run-taskcluster-job : Run taskcluster jobs in a local Docker container.
 
-    run-taskcluster-image --log-task-id a5gT2XbUSGuBd-IMAjjTUw
+    run-taskcluster-job --log-task-id a5gT2XbUSGuBd-IMAjjTUw
 
 to replicate task a5gT2XbUSGuBd-IMAjjTUw locally. The above command will
 
