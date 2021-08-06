@@ -8,6 +8,7 @@ Tools included:
 
  - landed : Prune changesets that have landed, setting their successors to the landed
    revisions.
+ - run-taskcluster-image : Run taskcluster jobs in a local Docker container.
  - get-taskcluster-logs : Retrieve groups of log files from a push by scraping taskcluster
  - json : Interactive navigation of a JSON file
  - debug : Start up a debugger within emacs on various types of files
@@ -71,6 +72,30 @@ You can also do this in a more targeted way:
 Note that this will not rebase any orphaned patches for you, so if you are
 pruning landed patches with descendants that have not yet been landed, you will
 need to rebase them (eg by running `hg evolve` or `hg evolve -a` or whatever.)
+
+----------------------------------------------------------------------
+
+run-taskcluster-image : Run taskcluster jobs in a local Docker container.
+
+    run-taskcluster-image --log-task-id a5gT2XbUSGuBd-IMAjjTUw
+
+to replicate task a5gT2XbUSGuBd-IMAjjTUw locally. The above command will
+
+ - download the log file for that task
+ - find the line that says the task ID of the toolchain task that generated the
+   image that it is running
+ - use `mach taskcluster-load-image` to pull down that image
+ - once you have the image, use `--task-id` in later runs to avoid re-downloading things
+ - download the task description from taskcluster to extract out the command that
+   is to be executed and the environment variables
+ - execute the image (run `$COMMAND` from within the image to run the default command,
+   or `echo $COMMAND` to inspect and modify it.)
+
+Note that $COMMAND will probably execute `run-task` with a gecko revision,
+which will start out by pulling down the whole tree. This is large and will
+take a while. (Avoiding this requires hacking the script a bit;
+https://bugzilla.mozilla.org/show_bug.cgi?id=1605232 was an early attempt at
+that.)
 
 ----------------------------------------------------------------------
 

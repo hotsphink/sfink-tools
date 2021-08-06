@@ -1,0 +1,64 @@
+#!/usr/bin/python
+
+import argparse
+import os
+import re
+import requests
+import subprocess
+import shlex
+import sys
+
+parser = argparse.ArgumentParser("run a taskcluster image")
+parser.add_argument("--log-task-id")
+parser.add_argument("--load-task-id")
+parser.add_argument("--task-id")
+parser.add_argument("--image", default="docker.io/library/debian10-amd64-build:latest")
+parser.add_argument("--env-file")
+args = parser.parse_args()
+
+if args.log_task_id:
+    print("Grabbing the log file for a run of a task and extracting the docker image task ID")
+    log_url = f"https://firefoxci.taskcluster-artifacts.net/{args.log_task_id}/0/public/logs/live_backing.log"
+    log = requests.get(log_url)
+    m = re.search(r'Downloading artifact "public/image.tar.zst" from task ID: (.*)\.\n', log)
+    if not m:
+        print("Could not find image download line in log file")
+        sys.exit(1)
+
+    args.load_task_id = m.group(1)
+    args.task_id = args.log_task_id
+
+if args.load_task_id:
+    print("Loading taskcluster image")
+    out = subprocess.check_output(["mach", "taskcluster-load-image",
+                                   "--task-id", args.load_task_id])
+    m = re.search(r'Loaded image: (\S+)', out)
+    if m:
+        args.image = m.group(1)
+
+if args.task_id and not args.env_file:
+    args.env_file = "/tmp/task_env.sh"
+    print(f"Extracting env settings from task and storing in {args.env_file}")
+    task = requests.get(f"https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/{args.task_id}").json()
+    payload = task["payload"]
+    env = payload["env"]
+    with open(args.env_file, "wt") as fh:
+        for k, v in env.items():
+            print(f"export {k}={shlex.quote(v)}", file=fh)
+        print(f"export COMMAND={shlex.quote(shlex.join(payload['command']))}", file=fh)
+
+if args.image:
+    print("Running docker image")
+    cmd = [
+        "docker", "run", "-ti",
+        "--cap-add=SYS_PTRACE",
+        "--security-opt", "seccomp=unconfined",
+    ]
+    if args.env_file:
+        print("Note that the command will be stored in the $COMMAND env var")
+        print("Once the shell starts, it can be executed by typing $COMMAND:")
+        print("  bash# $COMMAND")
+        cmd += ["-v", f"{args.env_file}:/etc/profile.d/task.sh:z"]
+    cmd += ["-v", "/home/sfink/bin:/usr/local/bin:z"]
+    cmd += [args.image, "bash", "-l"]
+    subprocess.call(cmd)
