@@ -10,6 +10,9 @@
 #    containing the first patch hunk and the line number of the original that it
 #    applies to (ok, so this is probably where this script jumped the shark.)
 
+# TODO: Rewrite in Python, purely to be able to use argparse. (Yeah, I could
+# use Getopt::Long. argparse has better help message output.)
+
 use strict;
 use warnings;
 
@@ -169,8 +172,14 @@ if ($editor eq 'emacs') {
     $cmd = 'code';
     push @cmd_args, '-r';
     foreach (@to_edit) {
-	my ($file, $lineno) = @$_;
-	push @cmd_args, "-g", join(":", grep { $_ } $file, $lineno);
+        my ($file, $lineno) = @$_;
+        push @cmd_args, "-g", join(":", grep { $_ } $file, $lineno);
+    }
+} else {
+    $cmd = $editor;
+    push @cmd_args, map { $_->[0] } @to_edit;
+    if ($editor =~ /vi/ && $to_edit[0][1]) {
+        unshift @cmd_args, "+$to_edit[0][1]";
     }
 }
 
