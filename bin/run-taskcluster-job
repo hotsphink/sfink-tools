@@ -8,11 +8,16 @@ import subprocess
 import shlex
 import sys
 
+# TODO:
+# [ ] Uh... figure out the workflow with --image or whatever. Right now, it creates a
+#     new container without the env file!
+
 parser = argparse.ArgumentParser("run a taskcluster image")
-parser.add_argument("--log-task-id")
-parser.add_argument("--load-task-id")
-parser.add_argument("--task-id")
-parser.add_argument("--image", default="docker.io/library/debian10-amd64-build:latest")
+parser.add_argument("--log-task-id", help="The task you are trying to replicate. Its log file will be scanned for the task ID that provided the base image to run.")
+parser.add_argument("--load-task-id", help="The toolchain task that generated the image to use. This will be passed to `mach load-taskcluster-image`.")
+parser.add_argument("--task-id", help="The task you are trying to replicate. Use this instead of --log-task-id if you have already pulled down the image.")
+parser.add_argument("--image", default="docker.io/library/debian10-amd64-build:latest",
+                    help="The image to create a docker container out of")
 parser.add_argument("--env-file")
 args = parser.parse_args()
 
