@@ -12,6 +12,8 @@ Tools included:
  - get-taskcluster-logs : Retrieve groups of log files from a push by scraping taskcluster
  - em / vs : Open emacs or VSCode on the files touched by a patch, on a relevant
    line number
+ - viewsetup : Construct a virtual disk that exposes selected portions of a local disk,
+   to allow running a Windows install either physically or virtually
  - json : Interactive navigation of a JSON file
  - debug : Start up a debugger within emacs on various types of files
  - rr-exits : List out all rr recordings with their worst exit codes
