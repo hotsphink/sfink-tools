@@ -10,10 +10,11 @@ Tools included:
    revisions.
  - run-taskcluster-job : Run taskcluster jobs in a local Docker container.
  - get-taskcluster-logs : Retrieve groups of log files from a push by scraping taskcluster
+ - em / vs : Open emacs or VSCode on the files touched by a patch, on a relevant
+   line number
  - json : Interactive navigation of a JSON file
  - debug : Start up a debugger within emacs on various types of files
  - rr-exits : List out all rr recordings with their worst exit codes
- - em : Start up emacs on the files touched by a patch, on a relevant line number
  - traverse.py : Gecko-specific, sorta. Utility for traversing a callgraph.
  - wig : Patch harder
 
@@ -96,6 +97,35 @@ which will start out by pulling down the whole tree. This is large and will
 take a while. (Avoiding this requires hacking the script a bit;
 https://bugzilla.mozilla.org/show_bug.cgi?id=1605232 was an early attempt at
 that.)
+
+----------------------------------------------------------------------
+
+em / vs - Edit files relevant to a patch
+
+Run your $EDITOR (defaulting to emacs) on the given files, or on the files
+touched by the changes described by the given revision.
+
+If $EDITOR is unset, then `em` will default to `emacs` and `vs` will default to
+`vscode` (you will need to create a symlink from `vs` -> `em`).
+
+If you are using vscode remote editing, you will want to install this on the
+remote machine and run it from within a terminal there.
+
+1. `em foo.txt:33` will run `emacs +33 foo.txt`
+   so will `em foo.txt:33:` (easier cut & paste of trailing colon for error messages)
+   and foo.txt will be found anywhere in the current hg tree (if not in cwd)
+2. `em` with no args will run emacs on the files changed in the cwd, or if none, then
+   by the cwd's parent hg rev
+3. `em 01faf51a0acc` will run emacs on the files changed by that hg rev.
+4. `em foo.txt.rej` will run emacs on both foo.txt and foo.txt.rej, but at the lines
+   containing the first patch hunk and the line number of the original that it
+   applies to (ok, so this is probably where this script jumped the shark.)
+
+The fancy line number stuff does not apply to all possible editors. emacs and
+vscode are fully supported, though vscode's behavior is a little erratic. vi
+will only set the position for the first file.
+
+Sorry, no git support.
 
 ----------------------------------------------------------------------
 
@@ -182,22 +212,6 @@ just do
 
 It will discover that there's no command ff in $PATH and start up a subshell,
 look for the alias 'ff', and use that command instead.
-
-----------------------------------------------------------------------
-
-em - Edit files relevant to a patch
-
-1. `em foo.txt:33` will run `emacs +33 foo.txt`
-   so will `em foo.txt:33`: (easier cut & paste of trailing colon for error messages)
-   and foo.txt will be found anywhere in the current hg tree (if not in cwd)
-2. `em` with no args will run emacs on the files changed in the cwd, or if none, then
-   by the cwd's parent rev
-3. `em 01faf51a0acc` will run emacs on the files changed by that rev.
-4. `em foo.txt.rej` will run emacs on both foo.txt and foo.txt.rej, but at the lines
-   containing the first patch hunk and the line number of the original that it
-   applies to (ok, so this is probably where this script jumped the shark.)
-
-If your $EDITOR is not set to emacs, you won't get the fancy line number stuff.
 
 ----------------------------------------------------------------------
 
