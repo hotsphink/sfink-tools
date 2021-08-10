@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import argparse
+import json
 import os
 import re
 import requests
@@ -12,13 +13,19 @@ import sys
 # [ ] Uh... figure out the workflow with --image or whatever. Right now, it creates a
 #     new container without the env file!
 
+DEFAULT_ENV_FILE = "/tmp/task_env.sh"
+DEFAULT_IMAGE = "docker.io/library/debian10-amd64-build:latest"
+
 parser = argparse.ArgumentParser("run a taskcluster image")
 parser.add_argument("--log-task-id", help="The task you are trying to replicate. Its log file will be scanned for the task ID that provided the base image to run.")
 parser.add_argument("--load-task-id", help="The toolchain task that generated the image to use. This will be passed to `mach load-taskcluster-image`.")
 parser.add_argument("--task-id", help="The task you are trying to replicate. Use this instead of --log-task-id if you have already pulled down the image.")
-parser.add_argument("--image", default="docker.io/library/debian10-amd64-build:latest",
-                    help="The image to create a docker container out of")
+parser.add_argument("--image", nargs="?", const="infer", default=None,
+                    help="The image to create a new docker container out of, omit IMAGE to select from available")
+parser.add_argument("--container", nargs="?", const="infer", default=None,
+                    help="An existing container to run a shell in, omit CONTAINER to select from available")
 parser.add_argument("--env-file")
+parser.add_argument("--mount", nargs="*", help="files or directories to mount into the container, in the format /outer/path=/inner/path")
 args = parser.parse_args()
 
 if args.log_task_id:
@@ -42,7 +49,7 @@ if args.load_task_id:
         args.image = m.group(1)
 
 if args.task_id and not args.env_file:
-    args.env_file = "/tmp/task_env.sh"
+    args.env_file = DEFAULT_ENV_FILE
     print(f"Extracting env settings from task and storing in {args.env_file}")
     task = requests.get(f"https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/{args.task_id}").json()
     payload = task["payload"]
@@ -51,9 +58,49 @@ if args.task_id and not args.env_file:
         for k, v in env.items():
             print(f"export {k}={shlex.quote(v)}", file=fh)
         print(f"export COMMAND={shlex.quote(shlex.join(payload['command']))}", file=fh)
+        print("export TASKCLUSTER_ROOT_URL=https://firefox-ci-tc.services.mozilla.com")
+    print(f"Wrote {args.env_file}")
+
+if not args.env_file and os.path.exists(DEFAULT_ENV_FILE):
+    args.env_file = DEFAULT_ENV_FILE
+
+def choose(prompt, descriptions):
+    if len(descriptions) == 1:
+        return 0
+    while True:
+        print(prompt)
+        for i, desc in enumerate(descriptions, 1):
+            print(f"({i}) {desc}")
+        response = input()
+        idx = int(response)
+        if idx > 0 and idx <= len(descriptions):
+            return idx - 1
+
+start_container = False
+if args.container == "infer":
+    containers = []
+    for line in subprocess.check_output(["docker", "container", "ps", "-a", "--format", "{{json .}}"], text=True).splitlines():
+        containers.append(json.loads(line))
+
+    def describe(c):
+        return f"container {c['ID']} using image {c['Image']} state={c['State']} running {c['Command']}"
+
+    idx = choose("Choose from the following containers:", [describe(c) for c in containers])
+    args.container = containers[idx]["ID"]
+    start_container = containers[idx]["State"] != "running"
+
+if not args.container and args.image == "infer":
+    images = []
+    for line in subprocess.check_output(["docker", "images", "--format", "{{json .}}"], text=True).splitlines():
+        images.append(json.loads(line))
+    idx = choose(
+        "Choose from the following images:",
+        [f"{image['ID']} (repo={image['Repository']})" for image in images]
+    )
+    args.image = images[idx]["ID"]
 
 if args.image:
-    print("Running docker image")
+    print(f"Running a new container in docker image {args.image}")
     cmd = [
         "docker", "run", "-ti",
         "--cap-add=SYS_PTRACE",
@@ -62,8 +109,19 @@ if args.image:
     if args.env_file:
         print("Note that the command will be stored in the $COMMAND env var")
         print("Once the shell starts, it can be executed by typing $COMMAND:")
-        print("  bash# $COMMAND")
         cmd += ["-v", f"{args.env_file}:/etc/profile.d/task.sh:z"]
-    cmd += ["-v", "/home/sfink/bin:/usr/local/bin:z"]
+    # Oops... I kinda forgot about this hack...
+    if os.path.exists("/home/sfink/bin"):
+        cmd += ["-v", "/home/sfink/bin:/usr/local/bin:z"]
+    for mount in args.mount:
+        outer, inner = mount.split("=")
+        cmd += ["-v", f"{outer}:{inner}:z"]
     cmd += [args.image, "bash", "-l"]
+    subprocess.call(cmd)
+elif args.container:
+    print(f"Running a shell in docker container {args.container}")
+    if start_container:
+        cmd = ["docker", "start", "-a", "-i", args.container]
+    else:
+        cmd = ["docker", "exec", "-ti", args.container, "bash", "-l"]
     subprocess.call(cmd)
