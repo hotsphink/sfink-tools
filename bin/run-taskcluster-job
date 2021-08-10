@@ -12,6 +12,8 @@ import textwrap
 
 DEFAULT_ENV_FILE = "/tmp/task_env.sh"
 DEFAULT_IMAGE = "docker.io/library/debian10-amd64-build:latest"
+ARTIFACT_URL = "https://firefoxci.taskcluster-artifacts.net"
+ROOT_URL = "https://firefox-ci-tc.services.mozilla.com"
 
 
 class HelpFormatter(argparse.HelpFormatter):
@@ -54,7 +56,7 @@ which one it is!
 
 For mounting your gecko checkout, pass
 
-    --mount /home/me/gecko=/builds/worker/checkouts/gecko
+    --mount <gecko checkout>=/builds/worker/checkouts/gecko
 
 and note that this will remove the `--gecko-checkout=...` portion of $COMMAND.
 
@@ -90,11 +92,13 @@ parser.add_argument("--env-file",
 parser.add_argument("--mount", nargs="*",
                     help="files or directories to mount into the container, "
                     "in the format /outer/path=/inner/path")
+parser.add_argument("--root-url", default=ROOT_URL,
+                    help=f"taskcluster root url (default {ROOT_URL})")
 args = parser.parse_args()
 
 if args.log_task_id:
     print("Grabbing the log file for a run of a task and extracting the docker image task ID")
-    log_url = f"https://firefoxci.taskcluster-artifacts.net/{args.log_task_id}/0/public/logs/live_backing.log"
+    log_url = f"{ARTIFACT_URL}/{args.log_task_id}/0/public/logs/live_backing.log"
     log = requests.get(log_url)
     m = re.search(r'Downloading artifact "public/image.tar.zst" from task ID: (.*)\.\n', log)
     if not m:
@@ -115,7 +119,7 @@ if args.load_task_id:
 if args.task_id and not args.env_file:
     args.env_file = DEFAULT_ENV_FILE
     print(f"Extracting env settings from task and storing in {args.env_file}")
-    task = requests.get(f"https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/{args.task_id}").json()
+    task = requests.get(f"{args.root_url}/api/queue/v1/task/{args.task_id}").json()
     payload = task["payload"]
     env = payload["env"]
 
@@ -128,7 +132,7 @@ if args.task_id and not args.env_file:
         for k, v in env.items():
             print(f"export {k}={shlex.quote(v)}", file=fh)
         print(f"export COMMAND={command}", file=fh)
-        print("export TASKCLUSTER_ROOT_URL=https://firefox-ci-tc.services.mozilla.com", file=fh)
+        print(f"export TASKCLUSTER_ROOT_URL={args.root_url}", file=fh)
     print(f"Wrote {args.env_file}")
 
 if not args.env_file and os.path.exists(DEFAULT_ENV_FILE):
