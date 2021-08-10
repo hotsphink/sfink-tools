@@ -54,11 +54,17 @@ if args.task_id and not args.env_file:
     task = requests.get(f"https://firefox-ci-tc.services.mozilla.com/api/queue/v1/task/{args.task_id}").json()
     payload = task["payload"]
     env = payload["env"]
+
+    command = shlex.quote(shlex.join(payload['command']))
+    for mount in args.mount:
+        if mount.startswith("/builds/worker/checkouts/gecko="):
+            command = re.sub(r'--gecko-checkout=\S+', '', command)
+
     with open(args.env_file, "wt") as fh:
         for k, v in env.items():
             print(f"export {k}={shlex.quote(v)}", file=fh)
-        print(f"export COMMAND={shlex.quote(shlex.join(payload['command']))}", file=fh)
-        print("export TASKCLUSTER_ROOT_URL=https://firefox-ci-tc.services.mozilla.com")
+        print(f"export COMMAND={command}", file=fh)
+        print("export TASKCLUSTER_ROOT_URL=https://firefox-ci-tc.services.mozilla.com", file=fh)
     print(f"Wrote {args.env_file}")
 
 if not args.env_file and os.path.exists(DEFAULT_ENV_FILE):
