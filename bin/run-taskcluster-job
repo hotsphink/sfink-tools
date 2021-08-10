@@ -8,6 +8,7 @@ import requests
 import subprocess
 import shlex
 import sys
+import textwrap
 
 DEFAULT_ENV_FILE = "/tmp/task_env.sh"
 DEFAULT_IMAGE = "docker.io/library/debian10-amd64-build:latest"
@@ -30,7 +31,6 @@ class HelpFormatter(argparse.HelpFormatter):
 
         formatted = ''
         for chunk in chunks:
-            import textwrap
             formatted += textwrap.fill(
                 ' '.join(chunk),
                 width,
