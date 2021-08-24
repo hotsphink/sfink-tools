@@ -67,17 +67,33 @@ parser.add_argument('name', nargs='?',
 
 args = parser.parse_args()
 
+# Allow -n/--name option as well as first unnamed argument.
 if args.name is None:
     args.name = args._name
 
+# Default the name based on the directory.
 if args.name is None and args.dir is not None:
     args.name = os.path.basename(args.dir)
 
+# Default the name based on the device.
 if args.name is None and args.device is not None:
     args.name = os.path.basename(args.device)
 
+# Default the directory based on the name.
 if args.dir is None and args.name is not None:
     args.dir = os.path.join(CFG_DIR, args.name)
+
+# If the directory is still unknown, look at existing names. If there is only
+# one, use it, otherwise abort.
+if args.dir is None:
+    names = [ent.name for ent in os.scandir(CFG_DIR) if ent.is_dir()]
+    if len(names) == 1:
+        args.name = names[0]
+        args.dir = os.path.join(CFG_DIR, args.name)
+    elif len(names) == 0:
+        abort(f"No name or device given, and {CFG_DIR} has no names yet")
+    else:
+        abort(f"No --name or --device given. Choose name from: {' '.join(names)}")
 
 # If there is already a slices file, use it to set the device.
 if args.device is None and args.dir is not None and os.path.exists(args.dir):
