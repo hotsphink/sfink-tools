@@ -53,6 +53,12 @@ my %opt = (
 
 $opt{interactive} = 1 if ($ENV{DBG} || '') eq 'startup';
 
+# <khuey> could someone add a bit to it suggesting that AMD users add
+# --env=NSS_DISABLE_HW_SHA=1 to their rr record command lines?
+if (qx(lspci -s 00:00.0) =~ /Advanced Micro Devices/) {
+    $ENV{NSS_DISABLE_HW_SHA} = 1;
+}
+
 my $debugger;
 my $jorendb;
 my $rrpid;
