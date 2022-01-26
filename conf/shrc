@@ -45,3 +45,8 @@ function mc () {
     export MOZCONFIG="$mozconfig"
     { echo -n "MOZCONFIG is now " >&2; echo "$MOZCONFIG" }
 }
+
+function reconnect() {
+    eval $(re-ssh-agent)
+    export DISPLAY=localhost:10.0 # TEMPORARY HACK
+}
