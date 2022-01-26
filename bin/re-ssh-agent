@@ -12,53 +12,78 @@ if (@pids == 0) {
 }
 
 my $pid = $pids[0];
-print "SSH_AGENT_PID=$pid; export SSH_AGENT_PID\n";
 
 my @socks = glob("/tmp/ssh-*/agent.*");
 my $sock;
 
+my @ssh_socks;
+
 if (@socks == 1) {
     ($sock) = @socks;
 } elsif (@socks > 1) {
-    SOCKSEARCH: foreach (@socks) {
-        my ($sock_pid) = /agent.(\d+)$/;
-        if (abs($pid - $sock_pid) <= 1) {
-            $sock = $_;
-            last SOCKSEARCH;
-        } else {
-            # Check whether candidate socket pid is the process listed
-            # after --exit-with-session
-            my $cmd = qx(cat /proc/$pid/cmdline);
-            my @cmd = split(/\0/, $cmd);
-            for (0 .. $#cmd) {
-                if ($cmd[$_] eq '--exit-with-session') {
-                    my $control_cmd = $cmd[$_+1];
-                    if (qx(ps ww $sock_pid) =~ /\Q$control_cmd\E/) {
-                        $sock = $_;
-                        last SOCKSEARCH;
-                    }
-                }
-            }
+    SOCKSEARCH: for my $s (@socks) {
+        my ($sock_pid) = $s =~ /agent.(\d+)$/;
+	if (! $pid) {
+	    # Check for SSH-forwarded agent
+	    chomp(my $exe = qx(sudo readlink /proc/$sock_pid/exe/ 2>&1));
+	    if ($exe =~ /\bsshd$/) {
+		push @ssh_socks, $sock;
+	    }
+	    next SOCKSEARCH;
+	}
 
-            # $sock_pid is ancestor of $pid?
-            my $p = $pid;
-            while ($p != 1) {
-                if ($p == $sock_pid) {
-                    $sock = $_;
-                    last SOCKSEARCH;
-                }
-                if (qx(ps --no-heading -o ppid $p) =~ /(\d+)/) {
-                    $p = $1;
-                } else {
-                    last;
-                }
-            }
+	# HACK! The pid recorded in the sock filename may be a parent
+	# or grandparent of the actual ssh-agent process (presumably
+	# because it forks or double-forks to daemonize).
+        if (abs($pid - $sock_pid) <= 2) {
+            $sock = $s;
+            last SOCKSEARCH;
         }
+
+	# Check whether candidate socket pid is the process listed
+	# after --exit-with-session
+	my $cmd = qx(cat /proc/$pid/cmdline);
+	my @cmd = split(/\0/, $cmd);
+	for (0 .. $#cmd) {
+	    if ($cmd[$_] eq '--exit-with-session') {
+		my $control_cmd = $cmd[$_+1];
+		if (qx(ps ww $sock_pid) =~ /\Q$control_cmd\E/) {
+		    $sock = $_;
+		    last SOCKSEARCH;
+		}
+	    }
+	}
+
+	# $sock_pid is ancestor of $pid?
+	my $p = $pid;
+	while ($p != 1) {
+	    if ($p == $sock_pid) {
+		$sock = $_;
+		last SOCKSEARCH;
+	    }
+	    if (qx(ps --no-heading -o ppid $p) =~ /(\d+)/) {
+		$p = $1;
+	    } else {
+		last;
+	    }
+	}
     }
 }
 
+if (!$sock && @ssh_socks == 1) {
+    ($sock) = @ssh_socks;
+}
+
 if (defined $sock) {
-  print "SSH_AUTH_SOCK=$sock; export SSH_AUTH_SOCK\n";
+    print "SSH_AUTH_SOCK=$sock; export SSH_AUTH_SOCK\n";
 } else {
-  die "Unable to find socket";
+    if ($pid) {
+	die "Unable to find socket for ssh-agent pid $pid";
+    } else {
+	die "Unable to find ssh-forwarded socket";
+    }
+}
+
+if (defined $pid) {
+    print "SSH_AGENT_PID=$pid; export SSH_AGENT_PID\n";
 }
