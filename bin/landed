@@ -293,7 +293,7 @@ for i in range(len(oldv)):
     olddesc = re.sub(r' r=\S+', '', old.desc)
     newdesc = re.sub(r' r=\S+', '', new.desc)
     if olddesc != newdesc:
-        print(f"For now, cowardly refusing to obsolete\n  {display(old.desc, 2)}\nwith\n  {display(new.desc, 2)}")
+        print(f"For now, cowardly refusing to obsolete\n  {display(old.desc, 2)}\nwith\n  {display(new.desc, 2)}\nbecause the descriptions are not identical.")
         failed = True
 
 if failed:
