@@ -1,8 +1,8 @@
 #!python3
 
-# Two functions:
-# 1. Find the most recent public changesets for a given set of local draft changesets.
-# 2. Given two sets of changesets (one public, one draft), hg prune --pair the appropriate ones.
+# - Find the most recent public changesets for a given set of local draft changesets.
+# - Given two sets of changesets (one public, one draft), hg prune --pair the appropriate ones.
+# - Rebase the remaining patches, if any
 
 import argparse
 import datetime
@@ -20,9 +20,9 @@ Node = namedtuple("Node", ["rev", "phase", "bug", "num", "reviewers", "key", "de
 
 p = argparse.ArgumentParser(
     usage='landed [options]', description='''
-Take a set of draft revisions and find their landed equivalents, then
-output a command that prunes the given revisions, setting the landed
-equivalents as their successors.
+Take a set of draft revisions and find their landed equivalents, then output a
+command that prunes the given revisions and sets the landed equivalents as
+their successors.
 
 Changesets are matched up by the phabricator revision ID in their comments, if
 any. Otherwise, use the first line of their descriptions (with reviewer
@@ -33,6 +33,9 @@ based on a stack of patches, some of which have landed already. That will loop
 over all non-public ancestors and scan through mozilla-central to find patches
 with matching descriptions that have already landed, and prune the local
 patches while setting their successors to their already-landed equivalents.
+
+By default, only the last 2 years of history will be considered (to speed up
+the fairly common case where not all changesets are found.)
 
 More complex example: landed -r .^^^::. --user=sfink --branch=autoland
 
@@ -91,6 +94,7 @@ if not args.limit and not args.datelimit:
 wrapper = textwrap.TextWrapper(subsequent_indent='      ',
                                width=int(os.getenv('COLUMNS', '80')) - 2)
 
+# Generator that processes the JSON output of `hg log` and yields revisions.
 def gen_revisions(lineiter):
     stanza = None
     for line in lineiter:
