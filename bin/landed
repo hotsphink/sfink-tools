@@ -47,7 +47,7 @@ rebase them (eg by running `hg evolve` or `hg evolve -a` or whatever.) '''
 DEFAULT_REVSET = "not public() and ancestors(.)"
 
 g = p.add_argument_group('specifying revisions')
-g.add_argument("--deadmeat", "--draft", "--local", "--revisions", "-r",
+g.add_argument("--former", "--draft", "--local", "--revisions", "-r",
                default=DEFAULT_REVSET,
                help="The revset for the revisions to prune")
 g.add_argument("--topic", "-t",
@@ -81,11 +81,11 @@ g.add_argument("--noexec", dest="exec", action="store_false",
 
 args = p.parse_args()
 
-if args.deadmeat != DEFAULT_REVSET and args.topic:
+if args.former != DEFAULT_REVSET and args.topic:
     raise Exception("-r and -t are mutually exclusive")
 
 if args.topic:
-    args.deadmeat = f"topic('{args.topic}')"
+    args.former = f"topic('{args.topic}')"
 
 # If no other limit is requested, look back 2 years.
 if not args.limit and not args.datelimit:
@@ -187,9 +187,9 @@ def gather_revisions(revset, limit=None, datelimit=None, query=None):
                         key, desc)
 
             if lookup and key in lookup:
-                deadmeat = lookup.pop(key)
-                if deadmeat.bug != node.bug:
-                    print(f"\nWarning: landed {node.rev} as bug {node.bug}, draft rev is bug {deadmeat.bug}")
+                former = lookup.pop(key)
+                if former.bug != node.bug:
+                    print(f"\nWarning: landed {node.rev} as bug {node.bug}, draft rev is bug {former.bug}")
                     print("  - " + desc)
                 if args.verbose:
                     print(f'\nfound {node.rev} ("{display(desc, 19)}")')
@@ -221,17 +221,17 @@ def gather_revisions(revset, limit=None, datelimit=None, query=None):
     return revs
 
 
-def correlate_revisions(deadmeat, landed):
+def correlate_revisions(former, landed):
     '''Find the matching subsets of the two input dicts, joined on their
     descriptions. Discard any nonmatching elements, and return them as a pair
-    of value vectors, ordered by the .num field of the `deadmeat`'s values.
+    of value vectors, ordered by the .num field of the `former`'s values.
     '''
 
     # I could just sort by changeset number, but this is not robust in
     # situations where earlier patches in a stack were backed out and re-landed
     # while later ones were not. Join them up by description, using the
     # ordering of the revisions to prune.
-    oldv = sorted(deadmeat.values(), key=lambda n: n.num)
+    oldv = sorted(former.values(), key=lambda n: n.num)
     bykey = {n.key: n for n in oldv}
     newv = [n for n in landed.values() if n.key in bykey]
     newv.sort(key=lambda n: bykey[n.key].num)
@@ -242,8 +242,8 @@ def correlate_revisions(deadmeat, landed):
 
 if args.verbose:
     print("Gathering revisions to prune...")
-deadmeat = gather_revisions(args.deadmeat)
-print(f"Gathered {len(deadmeat)} revisions to obsolete")
+former = gather_revisions(args.former)
+print(f"Gathered {len(former)} revisions to obsolete")
 
 if args.landed_from:
     pieces = []
@@ -270,16 +270,16 @@ else:
     revspec = f"reverse(ancestors({args.branch})) and public()"
     if args.user:
         revspec += f" and user('{args.user}')"
-    landed = gather_revisions(revspec, args.limit, args.datelimit, query=deadmeat)
-    print(f"Found {len(landed)}/{len(deadmeat)} successor revisions")
+    landed = gather_revisions(revspec, args.limit, args.datelimit, query=former)
+    print(f"Found {len(landed)}/{len(former)} successor revisions")
     if not landed:
         sys.exit(1)
 
 if args.debug:
-    print(f"old = {deadmeat.keys()}\n")
+    print(f"old = {former.keys()}\n")
     print(f"new = {landed.keys()}\n")
 
-oldv, newv = correlate_revisions(deadmeat, landed)
+oldv, newv = correlate_revisions(former, landed)
 
 if any(n.phase == 'public' for n in oldv):
     print("This command is only for obsoleting draft revs")
