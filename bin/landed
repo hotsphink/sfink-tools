@@ -221,7 +221,7 @@ def gather_revisions(revset, limit=None, datelimit=None, query=None):
     return revs
 
 
-def correlate_revisions(former, landed):
+def associate_revisions(former, landed):
     '''Find the matching subsets of the two input dicts, joined on their
     descriptions. Discard any nonmatching elements, and return them as a pair
     of value vectors, ordered by the .num field of the `former`'s values.
@@ -231,6 +231,10 @@ def correlate_revisions(former, landed):
     # situations where earlier patches in a stack were backed out and re-landed
     # while later ones were not. Join them up by description, using the
     # ordering of the revisions to prune.
+    #
+    # Example: A1 B A1' A2 (where A1' is the backout of A1, and A2 is an updated A1)
+    # Sorting by changeset number would produce [B, A2]. When correlating with
+    # [landedA, landedB], this would get the matching wrong.
     oldv = sorted(former.values(), key=lambda n: n.num)
     bykey = {n.key: n for n in oldv}
     newv = [n for n in landed.values() if n.key in bykey]
@@ -279,7 +283,7 @@ if args.debug:
     print(f"old = {former.keys()}\n")
     print(f"new = {landed.keys()}\n")
 
-oldv, newv = correlate_revisions(former, landed)
+oldv, newv = associate_revisions(former, landed)
 
 if any(n.phase == 'public' for n in oldv):
     print("This command is only for obsoleting draft revs")
