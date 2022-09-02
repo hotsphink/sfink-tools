@@ -320,11 +320,11 @@ def vec2revset(vec):
 
     if args.numeric:
         return '+'.join([first.num if first == last
-                         else f"{first.num}:{last.num}"
+                         else f"{first.num}::{last.num}"
                          for first, last in seq])
     else:
         return '+'.join([first.rev if first == last
-                         else f"{first.rev}:{last.rev}"
+                         else f"{first.rev}::{last.rev}"
                          for first, last in seq])
 
 
