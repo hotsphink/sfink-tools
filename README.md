@@ -6,6 +6,7 @@ These are tools that I think might be useful to other people.
 
 Tools included:
 
+ - artifetch : Retrieve artifacts from pushes, according to a flexible query spec. Example: give me the performance score from all runs (replicates) of the "id-getter-5.html" Talos subtest from a fzf-selected set of pushes.
  - landed : Prune changesets that have landed, setting their successors to the landed
    revisions.
  - run-taskcluster-job : Run taskcluster jobs in a local Docker container.
