@@ -1066,6 +1066,13 @@ sub path_stacks {
             $DB::single = 1 if ! $s;
             push @stacks, [ $s, [ @$sofar, $key ] ];
         }
+    } elsif ($component =~ /^\*\[(\d+)-(\d+)\]$/) {
+        my ($from, $to) = ($1, $2);
+        for my $key (all_keys($obj)) {
+            next unless $key =~ /^\d+$/ && $from <= $key && $key <= $to;
+            my $s = append($stack, $key, $type, 'no-errors') // next;
+            push @stacks, [ $s, [ @$sofar, $key ] ];
+        }
     } elsif ($component eq '**') {
         for my $path (all_paths($obj, $type)) {
             my $s = appendPath($stack, $path, $type, 'no-errors') // next;
