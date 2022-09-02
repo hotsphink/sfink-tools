@@ -1,0 +1,518 @@
+#!/usr/bin/python
+
+import argparse
+import json
+import logging
+import os
+import re
+import requests
+import thclient
+import urllib
+import yaml
+
+
+def join_cache_path(path):
+    root_cache_dir = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+    return os.path.join(root_cache_dir, path)
+
+
+CACHE = join_cache_path("artifetch/jobs.json")
+ARTIFACT_CACHE = join_cache_path("artifetch/artifacts/")
+SITE = "https://treeherder.mozilla.org"
+VERSION = 0.1
+HEADERS = {"User-Agent": f"artifetch {VERSION} by sfink@mozilla.com"}
+
+parser = argparse.ArgumentParser(usage="artifetch [options]")
+parser.add_argument("--list-pushes",
+                    nargs="?", const=10, action="store",
+                    help="List out N most recent try pushes")
+parser.add_argument("--list-jobs",
+                    nargs="?", action="store", const=True,
+                    help="List out jobs for a push (optional value, or use --push=PUSH)")
+parser.add_argument("--list-artifacts", help="List out artifacts for a given JOB id")
+parser.add_argument("--artifacts", help="List out artifacts matching ARTIFACT")
+parser.add_argument("--show-job", dest="job", help="Display info for a given JOB id")
+parser.add_argument("--branch", default="try", help="The branch to use for commands that do not use a specific URL")
+parser.add_argument("--json", action="store_true", help="Dump out raw JSON output")
+parser.add_argument("--push", help="Push ID to query")
+parser.add_argument("--query", help="Query YAML file")
+parser.add_argument("--no-cache", action="store_true", help="Do not use cached results")
+parser.add_argument("--user", "-u", default=None, help="User to use for filtering pushes")
+args = parser.parse_args()
+
+
+def load_cache(path):
+    try:
+        with open(path, "rt") as fh:
+            return json.load(fh)
+    except OSError:
+        return {}
+
+
+def save_cache(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wt") as fh:
+        json.dump(data, fh)
+
+
+def require_user():
+    if args.user:
+        return args.user
+    import subprocess
+    try:
+        output = subprocess.check_output(["hg", "config", "ui.username"], text=True)
+        # Extract just the email address from `My Name <myname@nowhere.com>`.
+        if m := re.search(r'<(.*?)>', output):
+            args.user = m.group(1)
+        else:
+            args.user = output.strip()
+    except subprocess.CalledProcessError:
+        output = subprocess.check_output(["git", "config", "--get", "user.email"], text=True)
+        args.user = output.strip()
+
+    return args.user
+
+
+cache = None
+if not args.no_cache:
+    cache = load_cache(CACHE)
+
+# thclient doesn't seem to support the jobs > read API. It has an endpoint
+# called 'jobdetails' instead. I'm not sure if that even exists now??
+def get(endpoint, project=None, **params):
+    if project is not None:
+        url = f"{SITE}/api/project/{project}/{endpoint}/"
+    else:
+        url = f"{SITE}/api//{endpoint}/"
+    return requests.get(url, params=params, headers=HEADERS)
+
+
+def get_results(endpoint, project=None, **params):
+    response = get(endpoint, project=project, **params)
+    return response.json()["results"]
+
+
+def graphql(task_id):
+    headers = HEADERS
+    headers.update({"Content-Type": "application/json"})
+    return requests.post(
+        "https://firefox-ci-tc.services.mozilla.com/graphql",
+        json={
+            "operationName":"Task",
+            "variables":{
+                "taskId":task_id,
+                "artifactsConnection":{
+                    "limit":1000
+                },
+            },
+            "query":"""\
+query Task(
+    $taskId: ID!,
+    $artifactsConnection: PageConnection
+) {
+  task(taskId: $taskId) {
+    taskId
+    taskGroupId
+    routes
+    extra
+    metadata {
+      name
+      description
+      owner
+      __typename
+    }
+    status {
+      state
+      runs {
+        taskId
+        runId
+        state
+        artifacts(connection: $artifactsConnection) {
+          ...Artifacts
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
+
+fragment Artifacts on ArtifactsConnection {
+  pageInfo {
+    hasNextPage
+    hasPreviousPage
+    cursor
+    previousCursor
+    nextCursor
+    __typename
+  }
+  edges {
+    node {
+      name
+      contentType
+      __typename
+    }
+    __typename
+  }
+  __typename
+}"""
+        },
+        headers=headers
+    )
+
+# Global variable because I am bad.
+PushDescriptions = {}
+
+
+def summarize_push(push):
+    rev = push["revisions"][0]
+    desc = re.sub(r'\n+\s*', ' ; ', rev["comments"])
+    if len(desc) >= 76:
+        desc = desc[0:76] + "..."
+    id = push["id"]
+    PushDescriptions[id] = desc
+    return f"{id} - {desc}"
+
+
+def list_pushes(args):
+    user = require_user()
+    pushes = get_results("push", project=args.branch, author=user, count=args.list_pushes)
+    if args.json:
+        print(json.dumps(pushes, indent=4))
+        return
+
+    for p in pushes:
+        print(f"{p['id']} - {len(p['revisions'])} revs")
+        for rev in p["revisions"]:
+            desc = re.sub(r'\n.*', '', rev["comments"])
+            print(f"  {rev['revision']} {desc}")
+
+
+def choose_pushes(n=10):
+    import pyfzf
+    fzf = pyfzf.FzfPrompt()
+    user = require_user()
+    pushes = get_results("push", project=args.branch,
+                         author=user, count=n)
+    options = [summarize_push(p) for p in pushes]
+    choices = fzf.prompt(options, "--multi")
+    return [c[0:c.index(" ")] for c in choices]
+
+
+def get_jobs(push):
+    return get_results("jobs", project=args.branch, push_id=push)
+
+def list_jobs(args):
+    if not args.push:
+        raise Exception("--push ID required")
+
+    jobs = get_jobs(args.push)
+
+    if args.json:
+        print(json.dumps(jobs, indent=4))
+        return
+
+    for j in jobs:
+        group = j["job_group_symbol"]
+        symbol = j["job_type_symbol"]
+        job_symbol = symbol if group == "?" else f"{group}({symbol})"
+        print("  {id} - {job_symbol} ({state}: {result}) task {task_id}".format(
+            **j, job_symbol=job_symbol))
+        print("    {job_type_name} - {job_guid}".format(**j))
+
+
+def get_job_artifacts(job_id, cache=None):
+    if cache:
+        if cjobs := cache.get("job"):
+            if cjob := cjobs.get(str(job_id)):
+                if artifacts := cjob.get("artifacts"):
+                    return artifacts
+
+    job = get_results('jobs', project=args.branch, id=job_id)
+    task = job[-1]["task_id"]
+    data = graphql(task).json()["data"]
+    runs = data["task"]["status"]["runs"]
+    lastrun = runs[-1]
+    state = lastrun["state"]
+    edges = lastrun["artifacts"]["edges"]
+    names = [e["node"]["name"] for e in edges]
+    artifacts = []
+    for name in names:
+        artifacts.append("{site}/api/queue/v1/task/{task}/runs/{run}/artifacts/{artifact}".format(
+            site="https://firefox-ci-tc.services.mozilla.com",
+            task=task,
+            run=lastrun["runId"],
+            artifact=urllib.parse.quote(name, safe=''),
+        ))
+    if cache:
+        cache.setdefault("job", {}).setdefault(job_id, {})["artifacts"] = artifacts
+    return artifacts
+
+    return {
+        "task": task,
+        "run": lastrun["runId"],
+        "artifacts": artifacts,
+    }
+
+
+def list_artifacts(args):
+    for a in get_job_artifacts(args.list_artifacts):
+        print(a)
+
+
+def list_matching_artifacts(args):
+    match = args.artifacts
+    push = args.push
+    for job in get_jobs(push):
+        #print(f"Fetching artifacts for push {push} job {job['id']}")
+        for a in get_job_artifacts(job["id"]):
+            if match in a:
+                print(a)
+
+
+def show_job(args):
+    if not args.job:
+        raise Exception("--job ID required")
+
+    job = get_results('jobs', project=args.branch, id=args.job)
+
+    if args.json:
+        print(json.dumps(job, indent=4))
+
+
+def get_pushes(start, end):
+    result = []
+
+    # gets last 10 by default
+    user = require_user()
+    pushes = get_results("push", project=args.branch, author=user)
+    for p in reversed(pushes):
+        id = p["id"]
+        if id == start:
+            result.append(id)
+        elif len(result):
+            result.append(id)
+            if id == end:
+                return result
+
+    recent = [p["id"] for p in pushes]
+    raise Exception(f"do not see {start}::{end} in recent pushes {recent}")
+
+
+def get_pushes_matching(filter):
+    result = []
+
+    user = require_user()
+    pushes = get_results("push", project=args.branch, author=user, count=20)
+    for p in reversed(pushes):
+        if filter(p):
+            result.append(p["id"])
+    return result
+
+
+def cache_lookup(cache, path):
+    path = list(path) # Make a mutable copy
+    while path:
+        next = cache.get(path.pop(0))
+        if next is None:
+            return None
+        cache = next
+    return cache
+
+
+def cached_value(cache, path, value):
+    for segment in path[:-1]:
+        cache = cache.setdefault(segment, {})
+    cache[path[0]] = value
+    return value
+
+
+def resolve_push_range(spec, cache):
+    cache_path = ("pushes", f"spec={spec}")
+    if pushes := cache_lookup(cache, cache_path):
+        return pushes
+
+    pushes = []
+    for part in spec.split("+"):
+        range = part.split("::")
+        if len(range) == 1:
+            pushes.append(int(range))
+        else:
+            pushes.extend(get_pushes(int(range[0]), int(range[1])))
+    return cached_value(cache, cache_path, pushes)
+
+
+def resolve_pushes(spec, cache):
+    if ids := spec.get("ids"):
+        return resolve_push_range(ids, cache)
+
+    if comment := spec.get("comment"):
+        # Do not cache, because we may be rerunning to pick up newer pushes.
+        def push_has_comment(p):
+            return any([comment in r["comments"] for r in p["revisions"]])
+        return get_pushes_matching(filter=push_has_comment)
+
+    if revision := spec.get("rev"):
+        # Do not cache, because we may be rerunning to pick up newer pushes.
+        def rev_matches(rev, pattern):
+            return rev in pattern.split("+")
+        def push_has_rev(p):
+            return any([rev_matches(r["revision"], revision) for r in p["revisions"]])
+        return get_pushes_matching(filter=push_has_rev)
+
+    if nchoices := spec.get("choose-from"):
+        return choose_pushes(nchoices)
+
+    raise Exception("pushes request must be 'ids' or 'comment'")
+
+
+def fetch_artifact(url):
+    cache_file = os.path.join(ARTIFACT_CACHE, urllib.parse.quote(url, safe=''))
+    try:
+        with open(cache_file, "rt") as fh:
+            data = fh.read()
+            if len(data):
+                return data
+    except OSError:
+        pass
+
+    data = requests.get(url).text
+    os.makedirs(ARTIFACT_CACHE, exist_ok=True)
+    with open(cache_file, "wt") as fh:
+        fh.write(data)
+    return data
+
+def parse_match(k):
+    return [p for p in re.findall(r'\[\]|[^.\[]+|\.', k) if p != '.']
+
+
+def find_matches(data, path, sofar=[]):
+    if not path:
+        return [(sofar, data)]
+    results = []
+    if path[0] == '[]':
+        for i, v in enumerate(data):
+            results += find_matches(v, path[1:], sofar + [i])
+    else:
+        k = path[0]
+        results += find_matches(data[k], path[1:], sofar + [k])
+    return results
+
+
+def join_path(path, base):
+    result = []
+    for segment in path:
+        if segment == "$":
+            result.extend(base)
+        elif segment == "__parent__":
+            result.pop()
+        else:
+            result.append(segment)
+    return result
+
+
+def lookup(path, data):
+    for segment in path:
+        data = data[segment]
+    return data
+
+
+def lookup_multi(path, data):
+    if not path:
+        return [data]
+
+    results = []
+    segment = path[0]
+    if segment == "[]":
+        for d in data:
+            results.extend(lookup_multi(path[1:], d))
+    else:
+        results.extend(lookup_multi(path[1:], data[segment]))
+    return results
+
+
+PushTable = {}
+PrevPush = None
+
+def number(v, table):
+    if (n := table.get(v)) is not None:
+        return n
+    n = len(table)
+    table[v] = n
+    return n
+
+
+def output_metric(push, value, output):
+    global PrevPush
+    global PushDescriptions
+
+    if output != "gnuplot":
+        raise Exception(f"unsupported output format {output}")
+
+    push = int(push)
+    if push != PrevPush:
+        if desc := PushDescriptions.get(push):
+            if PrevPush is not None:
+                print("")
+            print(f"# {desc}")
+        PrevPush = push
+    pushnum = number(push, PushTable)
+    print(f"{pushnum} {value}")
+
+
+def process_artifact(url, job, push, query):
+    logging.info(f"process artifact {url}")
+    raw = fetch_artifact(url)
+    if metric := query["metric"].get("json"):
+        data = json.loads(raw)
+        match_key = parse_match(metric["match-key"])
+        match_value = metric["match-value"]
+        if "values" in metric:
+            retrieve_multi = parse_match(metric["values"])
+            for path, keyval in find_matches(data, match_key):
+                if keyval == match_value:
+                    values = lookup_multi(join_path(retrieve_multi, path), data)
+                    for value in values:
+                        output_metric(push, value, metric.get("output", "gnuplot"))
+        else:
+            retrieve = parse_match(metric["value"])
+            for path, keyval in find_matches(data, match_key):
+                if keyval == match_value:
+                    value = lookup(join_path(retrieve, path), data)
+                    output_metric(push, value)
+
+
+def process_query(args):
+    with open(args.query) as fh:
+        query = yaml.safe_load(fh)
+    artifact_match = query["artifact"]
+    for push in resolve_pushes(query["pushes"], cache):
+        logging.info(f"Scanning push {push}")
+        for job in get_jobs(push):
+            for a in get_job_artifacts(job["id"], cache):
+                if artifact_match in a:
+                    process_artifact(a, job, push, query)
+
+
+if args.query:
+    process_query(args)
+elif args.list_pushes:
+    list_pushes(args)
+elif args.list_jobs:
+    if not isinstance(args.list_jobs, bool):
+        args.push = args.list_jobs
+    list_jobs(args)
+elif args.list_artifacts:
+    list_artifacts(args)
+elif args.artifacts:
+    list_matching_artifacts(args)
+elif args.job:
+    show_job(args)
+else:
+    print(json.dumps(choose_pushes(20)))
+    print("Do what, now?")
+
+if cache:
+    save_cache(CACHE, cache)
