@@ -6,6 +6,8 @@
 # recently edited one from a sibling directory.
 #
 function mc () {
+    local root
+    root="$(hg root)"
     if [ $# = 0 ]; then
         { echo -n "MOZCONFIG is " >&2; echo "${MOZCONFIG:-unset}" }
     fi
@@ -13,12 +15,12 @@ function mc () {
         if [ -z "$MOZCONFIG" ]; then
             local n
             n=0
-            for f in $(ls "$(hg root)" | fgrep mozconfig. | fgrep -v '~'); do
+            for f in $(ls "$root" | fgrep mozconfig. | fgrep -v '~'); do
                 [ $n -eq 0 ] && echo "available:"
                 n=$(( $n + 1 ))
                 echo "  ${f#*mozconfig.}"
             done
-            [ $n -eq 0 ] && echo "no mozconfig.* files available in $(hg root)"
+            [ $n -eq 0 ] && echo "no mozconfig.* files available in $root"
         fi
         return
     fi
@@ -28,7 +30,7 @@ function mc () {
     if ! [ -f "$mozconfig" ]; then
         echo "Warning: $mozconfig does not exist" >&2
         local tmp
-        tmp=$(ls -tr "$(dirname "$(hg root)")"/*/mozconfig.$1 | tail -1)
+        tmp=$(ls -tr "$(dirname "$root")"/*/mozconfig.$1 | tail -1)
         if [ -z "$tmp" ]; then
             echo "No mozconfig.$1 found" >&2
             return
@@ -38,10 +40,15 @@ function mc () {
         if [[ "${REPLY#y}" == "$REPLY" ]]; then
             return
         fi
-        echo "Copying $tmp to "$(hg root)""
-        cp "$tmp" "$(hg root)"
-        mozconfig="$(hg root)/mozconfig.$1"
+        echo "Copying $tmp to $root"
+        cp "$tmp" "$root"
+        mozconfig="$root/mozconfig.$1"
     fi
+
+    local _objdir
+    _objdir=$(env topsrcdir="$root" perl -lne 'if (/MOZ_OBJDIR\s*=\s*(.*)/) { $_ = $1; s!\@TOPSRCDIR\@!$ENV{topsrcdir}!; print }' "$mozconfig")
+    if [ -n "$_objdir" ]; then export objdir="$_objdir"; fi
+
     export MOZCONFIG="$mozconfig"
     { echo -n "MOZCONFIG is now " >&2; echo "$MOZCONFIG" }
 }
