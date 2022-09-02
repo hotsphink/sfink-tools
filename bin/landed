@@ -331,13 +331,97 @@ def vec2revset(vec):
 oldrevset = vec2revset(oldv)
 newrevset = vec2revset(newv)
 
+#old_descendants = sorted(
+#    gather_revisions(f"descendants({oldv[0].rev})").values(),
+#    key=lambda v: v.num
+#)
+
 print()
 cmd = ["hg", "prune", "--pair", "-r", oldrevset, "--succ", newrevset]
 print("COMMAND: " + " ".join(cmd))
+
+oldrevs = set(node.rev for node in oldv)
+#remnant = [node for node in old_descendants if node.rev not in oldrevs]
+remnant = [node for node in former.values() if node.rev not in oldrevs]
+
+if len(remnant) > 0:
+    # Options:
+    # - collapse the stack (if relevant) and rebase onto current tip
+    # - collapse the stack (if relevant) and rebase onto latest landed
+    # - rebase everything onto its successor
+    # - leave it alone, rebase nothing
+    # - collapse the stack (if relevant) and rebase onto original base
+    #   aka just remove the obsoleted things (bad idea if they depend
+    #   on them in some way)
+    #
+    # Consider doing a per-patch selection. (So if something is a failed attempt,
+    # leave it in place, but rebase everything else.)
+    #
+    # Consider only looking at the former revs.
+
+    new_base = max(newv, key=lambda e: e.num)
+
+    nodes = gather_revisions(f"last(public() and ancestors({oldv[0].rev}))")
+    if len(nodes.keys()) != 1:
+        print(f"Failed to identify src base rev")
+        sys.exit(1)
+    src_base = next(iter(nodes.values()))
+    print(f"..src_base = {src_base.rev}")
+
+    nodes = gather_revisions(f"last(public() and ancestors({newv[0].rev}))")
+    if len(nodes.keys()) != 1:
+        print(f"Failed to identify dest base rev")
+        sys.exit(1)
+    dst_base = next(iter(nodes.values()))
+    print(f"..dst_base = {src_base.rev}")
+
 if args.exec is None:
     args.exec = input("Run the above command? (y/n) ") == "y"
-
 if args.exec:
     subprocess.check_call(cmd)
 else:
     print("(Copy & paste the above command, or rerun with --exec)")
+
+# Any changesets based on an obsoleted revset?
+if len(remnant) > 0:
+    nodes = gather_revisions(args.branch)
+    if len(nodes) != 1:
+        print(f"Failed to identify tip of {args.branch}")
+        sys.exit(1)
+    branch_head = next(iter(nodes.values()))
+    print(f"..branch_head = {src_base.rev}")
+
+    print(f"After pruning those revisions, there will be {len(remnant)} orphaned changeset(s):")
+    subprocess.check_call([
+        "hg", "log",
+        "--template", "{node|short} {desc|firstline} {instabilities}\n",
+        "--graph",
+        "-r", vec2revset(remnant)
+    ])
+    #for r in remnant:
+    #    print(f"  {r.rev} {r.desc}")
+
+    #p = subprocess.Popen(["hg", "fxheads", "-T", '{node|short} {join(fxheads, " ")}\\n'], stdout=subprocess.PIPE, text=True)
+    #out = p.communicate()
+
+    if len(set([src_base.rev, dst_base.rev, branch_head.rev])) == 1:
+        base = src_base
+    else:
+        print("What would you like to rebase them onto?")
+        print(f"1. Current branch head ({branch_head.rev})")
+        print(f"2. Landed parent ({dst_base.rev})")
+        print(f"3. Former base (just remove obsoleted revs from current stack) ({src_base.rev}")
+        base_choice = input("Rebase destination> ")
+        try:
+            base_choice = int(base_choice)
+        except ValueError:
+            base_choice = 0
+        if base_choice < 1 or base_choice > 3:
+            print("Invalid option.")
+            sys.exit(1)
+        base = (None, branch_head.rev, dst_base.rev, src_base.rev)[base_choice]
+
+    cmd = ["hg", "rebase", "-d", base, "-r", vec2revset(remnant)]
+    print("COMMAND: " + " ".join(cmd))
+    if input("Run the above command? (y/n) ") == "y":
+        subprocess.check_call(cmd)
