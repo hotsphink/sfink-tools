@@ -33,7 +33,7 @@ def get_disks():
     return [
         d['name']
         for d in lsblk['blockdevices']
-        if d['type'] == 'disk' and d['mountpoint'] is None
+        if d['type'] == 'disk' and d.get('mountpoint') is None and d.get('mountpoints', [None])[0] is None
     ]
 
 
