@@ -14,3 +14,5 @@ set print object on
 set print static-members off
 
 set python print-stack full
+
+set debuginfod enabled on
