@@ -7,7 +7,6 @@ import os
 import re
 import requests
 import sys
-import thclient
 import urllib
 import yaml
 
@@ -86,13 +85,14 @@ def require_user():
     return args.user
 
 
-# thclient doesn't seem to support the jobs > read API. It has an endpoint
-# called 'jobdetails' instead. I'm not sure if that even exists now??
+# I should be using thclient, but the pip-installed version is out of date, and
+# the in-tree treeherder one is missing some endpoints that I need. And it
+# doesn't really add much portability or anything.
 def get(endpoint, project=None, **params):
     if project is not None:
         url = f"{SITE}/api/project/{project}/{endpoint}/"
     else:
-        url = f"{SITE}/api//{endpoint}/"
+        url = f"{SITE}/api/{endpoint}/"
     return requests.get(url, params=params, headers=HEADERS)
 
 
