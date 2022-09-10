@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import argparse
+import gzip
 import json
 import logging
 import os
@@ -445,7 +446,7 @@ def resolve_pushes(spec, cache):
 def fetch_artifact(url):
     cache_file = os.path.join(ARTIFACT_CACHE, urllib.parse.quote(url, safe=''))
     try:
-        with open(cache_file, "rt") as fh:
+        with gzip.open(cache_file, "rt") as fh:
             data = fh.read()
             if len(data):
                 logging.info(f"used cached file {cache_file}")
@@ -453,7 +454,8 @@ def fetch_artifact(url):
     except OSError:
         pass
 
-    data = requests.get(url).text
+    r = requests.get(url, stream=True)
+    data = gzip.open(r.raw).read().decode()
     os.makedirs(ARTIFACT_CACHE, exist_ok=True)
     with open(cache_file, "wt") as fh:
         fh.write(data)
