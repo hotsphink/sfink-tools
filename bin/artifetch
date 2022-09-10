@@ -11,6 +11,7 @@ import sys
 import urllib
 import yaml
 
+from typing import Any
 
 def join_cache_path(path):
     root_cache_dir = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
@@ -461,11 +462,16 @@ def fetch_artifact(url):
         fh.write(data)
     return data
 
-def parse_match(k):
+Data = dict[str, Any] | list[Any]
+Path = list[str | int]
+ResultPaths = list[Path]
+
+
+def parse_path(k : str) -> Path:
     return [p for p in re.findall(r'\[\]|[^.\[]+|\.', k) if p != '.']
 
 
-def find_matches(data, path, sofar=[]):
+def find_path_matches(data : Data, path : Path, sofar : Path=[]) -> list[tuple[Path, Any]]:
     if not path:
         return [(sofar, data)]
     results = []
@@ -478,7 +484,7 @@ def find_matches(data, path, sofar=[]):
     return results
 
 
-def join_path(path, base):
+def resolve_path(path : Path, bases : ResultPaths):
     result = []
     for segment in path:
         if segment == "$":
@@ -490,7 +496,7 @@ def join_path(path, base):
     return result
 
 
-def lookup(path, data):
+def lookup(path : Path, data):
     for segment in path:
         data = data[segment]
     return data
@@ -511,6 +517,8 @@ def lookup_multi(path, data):
 
 
 PushTable = {}
+
+PushTable : dict[int, int] = {}
 PrevPush = None
 
 def number(v, table):
