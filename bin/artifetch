@@ -338,7 +338,7 @@ def list_matching_artifacts(args):
     match = args.artifacts
     push = args.push
     for job in get_jobs(push):
-        #print(f"Fetching artifacts for push {push} job {job['id']}")
+        logging.debug(f"Fetching artifacts for push {push} job {job['id']}")
         for a in get_job_artifacts(job["id"]):
             if match in a:
                 print(a, file=OutFile)
@@ -373,32 +373,9 @@ def get_pushes(start, end):
 
 
 def get_pushes_matching(filter):
-    result = []
-
     user = require_user()
     pushes = get_results("push", project=args.branch, author=user, count=20)
-    for p in reversed(pushes):
-        if filter(p):
-            result.append(p["id"])
-    return result
-
-
-def cache_lookup(cache, path):
-    path = list(path) # Make a mutable copy
-    while path:
-        next = cache.get(path.pop(0))
-        if next is None:
-            return None
-        cache = next
-    logging.info(f"loaded {'.'.join(path)} from cache")
-    return cache
-
-
-def cached_value(cache, path, value):
-    for segment in path[:-1]:
-        cache = cache.setdefault(segment, {})
-    cache[path[0]] = value
-    return value
+    return [p["id"] for p in reversed(pushes) if filter(p)]
 
 
 def resolve_push_range(spec, cache):
@@ -476,19 +453,23 @@ def find_path_matches(data : Data, path : Path, sofar : Path=[]) -> list[tuple[P
         return [(sofar, data)]
     results = []
     if path[0] == '[]':
-        for i, v in enumerate(data):
-            results += find_matches(v, path[1:], sofar + [i])
+        for i in range(len(data)):
+            results += find_path_matches(data[i], path[1:], sofar + [i])
     else:
         k = path[0]
-        results += find_matches(data[k], path[1:], sofar + [k])
+        if isinstance(data, list):
+            k = int(k)
+        results += find_path_matches(data[k], path[1:], sofar + [k])
     return results
 
 
 def resolve_path(path : Path, bases : ResultPaths):
     result = []
     for segment in path:
-        if segment == "$":
-            result.extend(base)
+        if segment.startswith("$"):
+            i = int(segment[1:] or '1')
+            # $n converts to the *parent* of match-key-n.
+            result.extend(bases[i][:-1])
         elif segment == "__parent__":
             result.pop()
         else:
@@ -502,21 +483,23 @@ def lookup(path : Path, data):
     return data
 
 
-def lookup_multi(path, data):
-    if not path:
-        return [data]
+def lookup_values_g(extractor, match : ResultPaths, data, labels):
+    path = parse_path(extractor["values"])
+    path = resolve_path(path, match)
 
-    results = []
-    segment = path[0]
-    if segment == "[]":
-        for d in data:
-            results.extend(lookup_multi(path[1:], d))
+    for p, datum in find_path_matches(data, path):
+        result = {"value": datum}
+        for lpath, lname in labels:
+            result[lname] = lookup(resolve_path(lpath, match), data)
+        yield result
+
+
+def match_key(key : str, val):
+    if key.startswith("/"):
+        return bool(re.search(key[1:-1], val))
     else:
-        results.extend(lookup_multi(path[1:], data[segment]))
-    return results
+        return key == val
 
-
-PushTable = {}
 
 PushTable : dict[int, int] = {}
 PrevPush = None
@@ -529,25 +512,110 @@ def number(v, table):
     return n
 
 
-def output_metric(push, value, output):
+def output_metric(push, job, result, output={}, cache=None):
     global PrevPush
     global PushDescriptions
 
-    if output != "gnuplot":
+    style = output.get("style", "gnuplot")
+    format = output.get("format", "{pushnum} {value}")
+    header_format = output.get("header-format", "# {desc}")
+
+    if style != "gnuplot":
         raise Exception(f"unsupported output format {output}")
 
     push = int(push)
-    if push != PrevPush:
-        if desc := PushDescriptions.get(push):
+    jobdesc = describe_job(job["id"], cache)
+    desc = get_push_summary(cache, push)
+
+    if header_format != False:
+        if push != PrevPush:
             if PrevPush is not None:
                 print("", file=OutFile)
-            print(f"# {desc}", file=OutFile)
+            print(header_format.format(**locals()), file=OutFile)
         PrevPush = push
-    pushnum = number(push, PushTable)
-    print(f"{pushnum} {value}", file=OutFile)
+
+    push_idx = number(push, PushTable)
+    print(format.format(**locals(), **result), file=OutFile)
 
 
-def process_artifact(url, job, push, query):
+def parse_metric_extractor(metric):
+    keys = [None]
+    targets = [None]
+
+    # TODO: Error checking. (This assumes the keys are well-named and
+    # corresponding.)
+
+    # Currently, only json metric extraction is implemented, and this will
+    # raise an exception if anything else is used.
+    json = metric["json"]
+
+    if mk1 := json.get("match-key"):
+        keys.append(parse_path(mk1))
+        targets.append(json["match-value"])
+    else:
+        for k in json.keys():
+            parts = k.split("match-key-", 1)
+            if len(parts) == 1:
+                continue
+            i = int(parts[1])
+            while len(keys) <= i:
+                keys.append(None)
+                targets.append(None)
+            keys[i] = parse_path(json[f"match-key-{i}"])
+            targets[i] = json[f"match-value-{i}"]
+
+    return {
+        "keys": keys,
+        "targets": targets,
+        "values": json.get("value", json.get("values")),
+        "labels": json.get("label"),
+    }
+
+
+def match_remaining(matchers, paths: ResultPaths, data : Data) -> list[ResultPaths]:
+    if not matchers:
+        return [paths]
+
+    i, keypath, target =  matchers[0]
+    keypath = resolve_path(keypath, paths)
+
+    result : list[ResultPaths] = []
+    for path, keyval in find_path_matches(data, keypath):
+        if match_key(target, keyval):
+            result.append(paths + [path])
+    return result
+
+
+def extract_matches(extractor, data : Data):
+    matchers = list(zip(
+        range(len(extractor["keys"])),
+        extractor["keys"],
+        extractor["targets"]
+    ))
+    matchers.pop(0)  # Matchers are 1-based indexes. Sorry.
+
+    matches : list[ResultPaths] = []
+
+    # For each match for the first match-key
+    matcher = matchers.pop(0)
+
+    for path, keyval in find_path_matches(data, matcher[1]):
+        if match_key(matcher[2], keyval):
+            # Find everything that matches the rest.
+            matches += match_remaining(matchers, [None, path], data)
+
+    labels = []
+    for label, path in (extractor["labels"] or {}).items():
+        labels.append((parse_path(path), label))
+
+    values = []
+    for match in matches:
+        values.extend(lookup_values_g(extractor, match, data, labels))
+
+    return values
+
+
+def process_artifact(url, job, push, query, cache):
     logging.info(f"process artifact {url}")
     raw = fetch_artifact(url)
     metric = query["metric"]
@@ -566,7 +634,7 @@ def process_query(args, cache):
     logging.info(f"Pushes: {'+'.join(pushes)}")
     for push in pushes:
         logging.info(f"Scanning push {push}")
-        for job in get_jobs(push):
+        for job in reversed(get_jobs(push)):
             for a in get_job_artifacts(job["id"], cache):
                 if match_key(artifact_match, a):
                     process_artifact(a, job, push, query, cache)
