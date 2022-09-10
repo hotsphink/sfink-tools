@@ -22,6 +22,19 @@ SITE = "https://treeherder.mozilla.org"
 VERSION = 0.1
 HEADERS = {"User-Agent": f"artifetch {VERSION} by sfink@mozilla.com"}
 
+# Anything here can be guaranteed to exist.
+EMPTY_CACHE = {
+    "pushes": {
+        # "spec=<spec>" for resolve_push_range a+b::c+d+e syntax (b::c ranges are looked up).
+    },
+    "job": {
+        # <job_id>: { "artifacts": list of artifact urls }
+    },
+    "push": {
+        # <push_id>: { "desc": description of push grabbed from first revision }
+    },
+}
+
 parser = argparse.ArgumentParser(prog='artifetch', usage="artifetch [options]")
 parser.add_argument("--version", action='version', version=f'%(prog)s {VERSION}')
 parser.add_argument("--verbose", "-v", default=0, action="count", help="Verbose output")
@@ -51,20 +64,43 @@ parser.add_argument("--pushes", help="List of push IDs to query")
 
 def load_cache(path):
     if args.refresh:
-        return None
+        return EMPTY_CACHE
 
     try:
         with open(path, "rt") as fh:
             return json.load(fh)
     except OSError:
-        return {}
+        return EMPTY_CACHE
 
 
 def save_cache(path, data):
+    if data is None:
+        logging.info(f"no cache data to save")
+        return
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wt") as fh:
         json.dump(data, fh)
     logging.info(f"saved to cache file {path}")
+
+
+def cache_lookup(cache, path):
+    if cache is None:
+        return None
+    for p in path:
+        next = cache.get(str(p))
+        if next is None:
+            return None
+        cache = next
+    logging.debug(f"loaded {'.'.join(str(p) for p in path)} from cache")
+    return cache
+
+
+def cache_value(cache, path, value):
+    if cache:
+        for segment in path[:-1]:
+            cache = cache.setdefault(str(segment), {})
+        cache[path[-1]] = value
+    return value
 
 
 def require_user():
@@ -180,13 +216,17 @@ PushDescriptions = {}
 
 
 def summarize_push(push):
+    cache_path = ("push", push["id"], "desc")
+    if desc := cache_lookup(cache, cache_path):
+        return desc
+
     rev = push["revisions"][0]
     desc = re.sub(r'\n+\s*', ' ; ', rev["comments"])
     if len(desc) >= 76:
         desc = desc[0:76] + "..."
-    id = push["id"]
-    PushDescriptions[id] = desc
-    return f"{id} - {desc}"
+    PushDescriptions[push["id"]] = desc
+    cache_value(cache, cache_path, desc)
+    return desc
 
 
 def list_pushes(args):
@@ -203,19 +243,27 @@ def list_pushes(args):
             print(f"  {rev['revision']} {desc}", file=OutFile)
 
 
+def get_push_summary(cache, push_id):
+    if desc := cache_lookup(cache, ("push", push_id, "desc")):
+        return desc
+    push = get_results("push", project=args.branch, id=push_id)[0]
+    return summarize_push(push)
+
+
 def choose_pushes(n=10):
     import pyfzf
     fzf = pyfzf.FzfPrompt()
     user = require_user()
     pushes = get_results("push", project=args.branch,
                          author=user, count=n)
-    options = [summarize_push(p) for p in pushes]
+    options = [f"{p['id']} - {summarize_push(p)}" for p in pushes]
     choices = fzf.prompt(options, "--multi --no-sort --marker=* --ansi")
     return [c[0:c.index(" ")] for c in choices]
 
 
 def get_jobs(push):
     return get_results("jobs", project=args.branch, push_id=push, count=1000)
+
 
 def list_jobs(args):
     if not args.push:
@@ -236,16 +284,30 @@ def list_jobs(args):
         print("    {job_type_name} - {job_guid}".format(**j), file=OutFile)
 
 
-def get_job_artifacts(job_id, cache=None):
-    if cache:
-        if cjobs := cache.get("job"):
-            if cjob := cjobs.get(str(job_id)):
-                if artifacts := cjob.get("artifacts"):
-                    logging.info(f"loaded job {job_id} from cache: {len(artifacts)} artifacts")
-                    return artifacts
+def describe_job(job_id, cache):
+    job = cache_lookup(cache, ("job", job_id))
+    if job is None:
+        return "?"
+    if "job_group_symbol" not in job:
+        import pdb; pdb.set_trace()
+    if job["job_group_symbol"] == "?":
+        return job["job_type_symbol"]
+    return "{job_group_symbol}({job_type_symbol})".format(**job)
 
-    job = get_results('jobs', project=args.branch, id=job_id)
-    task = job[-1]["task_id"]
+
+def get_job_artifacts(job_id, cache=None):
+    if cjob := cache_lookup(cache, ("job", job_id)):
+        if artifacts := cjob.get("artifacts"):
+            if "job_group_symbol" in cjob:
+                logging.info(f"loaded job {job_id} {describe_job(job_id, cache)} from cache: {len(artifacts)} artifacts")
+                return artifacts
+
+    job = get_results('jobs', project=args.branch, id=job_id)[-1]
+
+    for k in ("job_group_symbol", "job_group_name", "job_type_name", "job_type_symbol", "result", "state"):
+        cache_value(cache, ("job", job_id, k), job.get(k))
+
+    task = job["task_id"]
     data = graphql(task).json()["data"]
     runs = data["task"]["status"]["runs"]
     lastrun = runs[-1]
@@ -260,16 +322,9 @@ def get_job_artifacts(job_id, cache=None):
             run=lastrun["runId"],
             artifact=urllib.parse.quote(name, safe=''),
         ))
-    if cache:
-        cache.setdefault("job", {}).setdefault(job_id, {})["artifacts"] = artifacts
-    logging.debug(f"job {job_id}: {len(artifacts)} artifacts")
+    cache_value(cache, ("job", job_id, "artifacts"), artifacts)
+    logging.debug(f"job {job_id} {describe_job(job_id, cache)}: {len(artifacts)} artifacts")
     return artifacts
-
-    return {
-        "task": task,
-        "run": lastrun["runId"],
-        "artifacts": artifacts,
-    }
 
 
 def list_artifacts(args):
@@ -356,7 +411,8 @@ def resolve_push_range(spec, cache):
             pushes.append(part)
         else:
             pushes.extend(get_pushes(int(range[0]), int(range[1])))
-    return cached_value(cache, cache_path, pushes)
+
+    return cache_value(cache, cache_path, pushes)
 
 
 def resolve_pushes(spec, cache):
@@ -484,26 +540,15 @@ def output_metric(push, value, output):
 def process_artifact(url, job, push, query):
     logging.info(f"process artifact {url}")
     raw = fetch_artifact(url)
-    if metric := query["metric"].get("json"):
-        data = json.loads(raw)
-        match_key = parse_match(metric["match-key"])
-        match_value = metric["match-value"]
-        if "values" in metric:
-            retrieve_multi = parse_match(metric["values"])
-            for path, keyval in find_matches(data, match_key):
-                if keyval == match_value:
-                    values = lookup_multi(join_path(retrieve_multi, path), data)
-                    for value in values:
-                        output_metric(push, value, metric.get("output", "gnuplot"))
-        else:
-            retrieve = parse_match(metric["value"])
-            for path, keyval in find_matches(data, match_key):
-                if keyval == match_value:
-                    value = lookup(join_path(retrieve, path), data)
-                    output_metric(push, value)
+    metric = query["metric"]
+    data : Data = json.loads(raw)
+    extractor = parse_metric_extractor(metric)
+    output = metric.get("output", {})
+    for result in extract_matches(extractor, data):
+        output_metric(push, job, result, output, cache)
 
 
-def process_query(args):
+def process_query(args, cache):
     with open(args.query) as fh:
         query = yaml.safe_load(fh)
     artifact_match = query["artifact"]
@@ -513,8 +558,8 @@ def process_query(args):
         logging.info(f"Scanning push {push}")
         for job in get_jobs(push):
             for a in get_job_artifacts(job["id"], cache):
-                if artifact_match in a:
-                    process_artifact(a, job, push, query)
+                if match_key(artifact_match, a):
+                    process_artifact(a, job, push, query, cache)
 
 
 args = parser.parse_args()
@@ -528,12 +573,15 @@ OutFile = sys.stdout
 if args.output:
     OutFile = open(args.output, "wt")
 
-cache = None
-if not (args.no_cache or args.refresh):
+# Ok, I am bad. The cache holds useful data collected during the run, so don't
+# just set it to None if --no-cache is given. This is laziness; I ought to have
+# a "real" data store and let the cache be a pure backing store.
+cache = EMPTY_CACHE
+if not args.no_cache:
     cache = load_cache(CACHE)
 
 if args.query:
-    process_query(args)
+    process_query(args, cache)
 elif args.list_pushes:
     list_pushes(args)
 elif args.list_jobs:
