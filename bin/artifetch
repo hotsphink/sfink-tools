@@ -2,6 +2,7 @@
 
 import argparse
 import gzip
+import io
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import sys
 import urllib
 import yaml
 
+from collections import defaultdict
 from typing import Any
 
 def join_cache_path(path):
@@ -61,7 +63,7 @@ parser.add_argument("--artifacts", help="List out artifacts matching ARTIFACT")
 parser.add_argument("--show-job", dest="job", help="Display info for a given JOB id")
 
 parser.add_argument("--push", help="Push ID to query")
-parser.add_argument("--pushes", help="List of push IDs to query")
+parser.add_argument("--pushes", help="List of push IDs to query, or !n for the nth newest history item, counting from zero")
 
 
 def load_cache(path):
@@ -89,7 +91,11 @@ def cache_lookup(cache, path):
     if cache is None:
         return None
     for p in path:
-        next = cache.get(str(p))
+        if isinstance(cache, list):
+            i = int(p)
+            next = cache[i] if i < len(cache) else None
+        else:
+            next = cache.get(str(p))
         if next is None:
             return None
         cache = next
@@ -217,9 +223,10 @@ fragment Artifacts on ArtifactsConnection {
 PushDescriptions = {}
 
 
-def summarize_push(push):
-    cache_path = ("push", push["id"], "desc")
-    if desc := cache_lookup(cache, cache_path):
+# Summarize and cache a push.
+def summarize_push(push, cache):
+    cache_path = ("push", push["id"])
+    if desc := cache_lookup(cache, cache_path + ("desc",)):
         return desc
 
     rev = push["revisions"][0]
@@ -227,7 +234,8 @@ def summarize_push(push):
     if len(desc) >= 76:
         desc = desc[0:76] + "..."
     PushDescriptions[push["id"]] = desc
-    cache_value(cache, cache_path, desc)
+    push["desc"] = desc
+    cache_value(cache, cache_path, push)
     return desc
 
 
@@ -245,26 +253,34 @@ def list_pushes(args):
             print(f"  {rev['revision']} {desc}", file=OutFile)
 
 
-def get_push_summary(cache, push_id):
+def get_push_summary(push_id, cache):
     if desc := cache_lookup(cache, ("push", push_id, "desc")):
         return desc
     push = get_results("push", project=args.branch, id=push_id)[0]
-    return summarize_push(push)
+    return summarize_push(push, cache)
 
 
-def choose_pushes(n=10):
+def get_push(push_id, cache):
+    if push := cache_lookup(cache, ("push", push_id)):
+        return push
+    push = get_results("push", project=args.branch, id=push_id)[0]
+    summarize_push(push, cache)
+    return push
+
+
+def choose_pushes(cache, n=10):
     import pyfzf
     fzf = pyfzf.FzfPrompt()
     user = require_user()
     pushes = get_results("push", project=args.branch,
                          author=user, count=n)
-    options = [f"{p['id']} - {summarize_push(p)}" for p in pushes]
+    options = [f"{p['id']} - {summarize_push(p, cache)}" for p in pushes]
     choices = fzf.prompt(options, "--multi --no-sort --marker=* --ansi")
     return [c[0:c.index(" ")] for c in choices]
 
 
-def get_jobs(push):
-    return get_results("jobs", project=args.branch, push_id=push, count=1000)
+def get_jobs(push_id):
+    return get_results("jobs", project=args.branch, push_id=push_id, count=1000)
 
 
 def list_jobs(args):
@@ -286,15 +302,17 @@ def list_jobs(args):
         print("    {job_type_name} - {job_guid}".format(**j), file=OutFile)
 
 
-def describe_job(job_id, cache):
-    job = cache_lookup(cache, ("job", job_id))
+def job_symbol(job, cache):
     if job is None:
         return "?"
-    if "job_group_symbol" not in job:
-        import pdb; pdb.set_trace()
     if job["job_group_symbol"] == "?":
         return job["job_type_symbol"]
     return "{job_group_symbol}({job_type_symbol})".format(**job)
+
+
+def describe_job(job_id, cache):
+    job = cache_lookup(cache, ("job", job_id))
+    return job_symbol(job, cache)
 
 
 def get_job_artifacts(job_id, cache=None):
@@ -396,7 +414,10 @@ def resolve_push_range(spec, cache):
 
 def resolve_pushes(spec, cache):
     if args.pushes:
-        spec = {"ids": args.pushes}
+        if args.pushes.startswith("!"):
+            spec = {"ids": "+".join(cache_lookup(cache, ("history", "pushes", -int(args.pushes[1:]))))}
+        else:
+            spec = {"ids": args.pushes}
 
     if ids := spec.get("ids"):
         return resolve_push_range(ids, cache)
@@ -416,28 +437,54 @@ def resolve_pushes(spec, cache):
         return get_pushes_matching(filter=push_has_rev)
 
     if nchoices := spec.get("choose-from"):
-        return choose_pushes(nchoices)
+        return choose_pushes(cache, nchoices)
 
     raise Exception("pushes request must be 'ids' or 'comment'")
 
 
 def fetch_artifact(url):
-    cache_file = os.path.join(ARTIFACT_CACHE, urllib.parse.quote(url, safe=''))
-    try:
-        with gzip.open(cache_file, "rt") as fh:
-            data = fh.read()
-            if len(data):
-                logging.info(f"used cached file {cache_file}")
-                return data
-    except OSError:
-        pass
+    cache_file_base = os.path.join(ARTIFACT_CACHE, urllib.parse.quote(url, safe=''))
+    data = None
+    for cache_file in (cache_file_base, cache_file_base + ".gz"):
+        try:
+            with gzip.open(open(cache_file, "rb"), "rt") as fh:
+                data = fh.read()
+        except gzip.BadGzipFile:
+            with open(cache_file, "rt") as fh:
+                data = fh.read()
+        except OSError:
+            pass
 
+        if data is not None:
+            break
+
+    if data is not None and len(data):
+        logging.info(f"used cached file {cache_file}")
+        return (data, cache_file)
+
+    # Hack: read full file into memory in order to handle both compressed and
+    # uncompressed data.
     r = requests.get(url, stream=True)
-    data = gzip.open(r.raw).read().decode()
+    raw_data = r.raw.read()
+
+    # Further hacks: the URL may not have a .gz extension even though the
+    # data is compressed. Adjust the cache_file name to reflect the compression or lack thereof.
+
     os.makedirs(ARTIFACT_CACHE, exist_ok=True)
-    with open(cache_file, "wt") as fh:
-        fh.write(data)
-    return data
+
+    try:
+        data = gzip.GzipFile(fileobj=io.BytesIO(raw_data)).read().decode()
+        if not cache_file.endswith(".gz"):
+            cache_file += ".gz"
+        with open(cache_file, "wb") as fh:
+            fh.write(raw_data)
+    except gzip.BadGzipFile:
+        data = raw_data.decode()
+        with open(cache_file, "wt") as fh:
+            fh.write(data)
+
+    return (data, cache_file)
+
 
 Data = dict[str, Any] | list[Any]
 Path = list[str | int]
@@ -449,6 +496,7 @@ def parse_path(k : str) -> Path:
 
 
 def find_path_matches(data : Data, path : Path, sofar : Path=[]) -> list[tuple[Path, Any]]:
+    import pdb; pdb.set_trace()
     if not path:
         return [(sofar, data)]
     results = []
@@ -483,21 +531,40 @@ def lookup(path : Path, data):
     return data
 
 
-def lookup_values_g(extractor, match : ResultPaths, data, labels):
+def lookup_json_values_g(extractor, match : ResultPaths, data, labels):
     path = parse_path(extractor["values"])
     path = resolve_path(path, match)
 
     for p, datum in find_path_matches(data, path):
         result = {"value": datum}
-        for lpath, lname in labels:
+        for lname, lpath in labels:
             result[lname] = lookup(resolve_path(lpath, match), data)
         yield result
+
+
+def lookup_text_values_g(extractor, data, labels):
+    pattern = extractor["keys"][1]
+    assert(pattern.startswith("/") and pattern.endswith("/"))
+    matcher = re.compile(pattern[1:-1])
+    for line in data.splitlines():
+        if m := re.search(matcher, line):
+            result = {}
+            for lname, lvalue in [("value", extractor["values"])] + labels:
+                result[lname] = re.sub(r'\$(\d+)', lambda lm: m.group(int(lm.group(1))), lvalue)
+            yield result
+
+def lookup_values_g(extractor, match, data, labels):
+    if extractor["type"] == "json":
+        yield from lookup_json_values_g(extractor, match, data, labels)
+    elif extractor["type"] == "text":
+        yield from lookup_text_values_g(extractor, data, labels)
 
 
 def match_key(key : str, val):
     if key.startswith("/"):
         return bool(re.search(key[1:-1], val))
     else:
+        val = re.sub(r'.*%2F', "", val)
         return key == val
 
 
@@ -512,41 +579,62 @@ def number(v, table):
     return n
 
 
-def output_metric(push, job, result, output={}, cache=None):
+# FIXME
+def guess_repository(repo_id, cache):
+    if repo_id == 4:
+        return 'try'
+    return 'mozilla-central'
+
+
+def output_metric(push, job, result, added, filename, output={}, cache=None):
     global PrevPush
     global PushDescriptions
 
     style = output.get("style", "gnuplot")
-    format = output.get("format", "{pushnum} {value}")
+    format = output.get("format", "{push_idx} {value}")
     header_format = output.get("header-format", "# {desc}")
 
     if style != "gnuplot":
         raise Exception(f"unsupported output format {output}")
 
-    push = int(push)
-    jobdesc = describe_job(job["id"], cache)
-    desc = get_push_summary(cache, push)
+    # Warning: all locals are accessible in the varous output format strings.
+    # So the naming matters.
+
+    push_id = int(push["id"])
+    push_desc = summarize_push(push, cache)
+    repo = guess_repository(push['repository_id'], cache)
+    revision = push['revision']
+    push_url = f"https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}"
+    job_id = job["id"]
+    job_desc = describe_job(job_id, cache)
+    task_id = job['task_id']
+    job_url = f"https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
 
     if header_format != False:
-        if push != PrevPush:
+        if push_id != PrevPush:
             if PrevPush is not None:
                 print("", file=OutFile)
             print(header_format.format(**locals()), file=OutFile)
-        PrevPush = push
+        PrevPush = push_id
 
-    push_idx = number(push, PushTable)
+    #if result['process_idx'] == 1 and result['mempath'] == "js-main-runtime/gc-heap/unused-arenas":
+    #    import pdb; pdb.set_trace()
+
+    push_idx = number(push_id, PushTable)
+    for label, idx, label_value in added:
+        if label_format := output.get("label-format", {}).get(label):
+            print(label_format.format(**locals(), **result), file=OutFile)
+
     print(format.format(**locals(), **result), file=OutFile)
 
 
-def parse_metric_extractor(metric):
+def parse_json_metric_extractor(metric):
     keys = [None]
     targets = [None]
 
     # TODO: Error checking. (This assumes the keys are well-named and
     # corresponding.)
 
-    # Currently, only json metric extraction is implemented, and this will
-    # raise an exception if anything else is used.
     json = metric["json"]
 
     if mk1 := json.get("match-key"):
@@ -565,11 +653,31 @@ def parse_metric_extractor(metric):
             targets[i] = json[f"match-value-{i}"]
 
     return {
+        "type": "json",
         "keys": keys,
         "targets": targets,
-        "values": json.get("value", json.get("values")),
+        "values": json["value"],
         "labels": json.get("label"),
     }
+
+
+def parse_text_metric_extractor(metric):
+    spec = metric["text"]
+    return {
+        "type": "text",
+        "keys": (None, spec["match-key"],),
+        "targets": (None, True,),
+        "values": spec["value"],
+        "labels": spec.get("label", ()),
+    }
+
+
+def parse_metric_extractor(metric):
+    if "json" in metric:
+        return parse_json_metric_extractor(metric)
+    if "text" in metric:
+        return parse_text_metric_extractor(metric)
+    raise Exception("no metric spec found")
 
 
 def match_remaining(matchers, paths: ResultPaths, data : Data) -> list[ResultPaths]:
@@ -586,7 +694,7 @@ def match_remaining(matchers, paths: ResultPaths, data : Data) -> list[ResultPat
     return result
 
 
-def extract_matches(extractor, data : Data):
+def extract_matches_g(extractor, data : Data):
     matchers = list(zip(
         range(len(extractor["keys"])),
         extractor["keys"],
@@ -599,45 +707,99 @@ def extract_matches(extractor, data : Data):
     # For each match for the first match-key
     matcher = matchers.pop(0)
 
-    for path, keyval in find_path_matches(data, matcher[1]):
-        if match_key(matcher[2], keyval):
-            # Find everything that matches the rest.
-            matches += match_remaining(matchers, [None, path], data)
+    if extractor["type"] == "json":
+        labels = []
+        for label, path in (extractor["labels"] or {}).items():
+            labels.append((label, parse_path(path)))
 
-    labels = []
-    for label, path in (extractor["labels"] or {}).items():
-        labels.append((parse_path(path), label))
+        for path, keyval in find_path_matches(data, matcher[1]):
+            if match_key(matcher[2], keyval):
+                # Find everything that matches the rest.
+                matches += match_remaining(matchers, [None, path], data)
 
-    values = []
-    for match in matches:
-        values.extend(lookup_values_g(extractor, match, data, labels))
+        for match in matches:
+            for result in lookup_values_g(extractor, match, data, labels):
+                yield result
 
-    return values
+    elif extractor["type"] == "text":
+        labels = list((extractor["labels"] or {}).items())
+        yield from lookup_values_g(extractor, None, data, labels)
 
 
 def process_artifact(url, job, push, query, cache):
     logging.info(f"process artifact {url}")
-    raw = fetch_artifact(url)
+    raw, filename = fetch_artifact(url)
     metric = query["metric"]
-    data : Data = json.loads(raw)
     extractor = parse_metric_extractor(metric)
+    if extractor["type"] == "json":
+        data : Data = json.loads(raw)
+    else:
+        data : Data = raw
     output = metric.get("output", {})
-    for result in extract_matches(extractor, data):
-        output_metric(push, job, result, output, cache)
+
+    # {label name: {value: idx}}
+    labeled_values = defaultdict(dict)
+
+    indexes = {}
+    for result in extract_matches_g(extractor, data):
+        added = []
+        for label, value in result.items():
+            map = labeled_values[label]
+            if (idx := map.get(value)) is None:
+                idx = len(map)
+                added.append((label, idx, value))
+                map[value] = idx
+            indexes[label + "_idx"] = idx
+        result.update(indexes)
+        output_metric(push, job, result, added, filename, output, cache)
+
+
+def limited_filter(job_filter, limit, filter_state):
+    def new_filter(job):
+        if filter_state["njobs"] >= limit or not job_filter(job):
+            return False
+        filter_state["njobs"] += 1
+        return True
+    return new_filter
 
 
 def process_query(args, cache):
     with open(args.query) as fh:
         query = yaml.safe_load(fh)
     artifact_match = query["artifact"]
-    pushes = resolve_pushes(query["pushes"], cache)
-    logging.info(f"Pushes: {'+'.join(pushes)}")
-    for push in pushes:
-        logging.info(f"Scanning push {push}")
-        for job in reversed(get_jobs(push)):
+
+    filter_name = "all jobs"
+    job_filter = lambda j: True
+    filter_state = {"njobs": 0}
+    if job_query := query.get("jobs"):
+        if sym := job_query.get("symbol"):
+            job_filter = lambda j: job_symbol(j, cache) == sym
+            filter_name = f"jobs matching {sym}"
+        if limit := job_query.get("limit-per-push"):
+            filter_state["job_limit"] = limit
+            job_filter = limited_filter(job_filter, limit, filter_state)
+            filter_name = f"first of {filter_name}"
+
+    pushes = resolve_pushes(query.get("pushes", {"choose-from": 20}), cache)
+    logging.info("Pushes: " + "+".join(pushes))
+    if cache:
+        history = cache.setdefault("history", {})
+        history.setdefault("pushes", []).append(pushes)
+
+    for push_id in pushes:
+        push = get_push(push_id, cache)
+        logging.info(f"Scanning push {push['desc']}")
+
+        filter_state["njobs"] = 0
+        for job in get_jobs(push["id"]):
+            logging.debug(f"checking job {job_symbol(job, cache)} against {filter_name}")
+        for job in filter(job_filter, reversed(get_jobs(push["id"]))):
             for a in get_job_artifacts(job["id"], cache):
                 if match_key(artifact_match, a):
                     process_artifact(a, job, push, query, cache)
+
+        if filter_state["njobs"] == 0:
+            logging.warning(f"no jobs matching: '{filter_name}' for push {push['desc']}")
 
 
 args = parser.parse_args()
@@ -673,7 +835,7 @@ elif args.artifacts:
 elif args.job:
     show_job(args)
 else:
-    print(json.dumps(choose_pushes(20)))
+    print(json.dumps(choose_pushes(cache, 20)))
     print("Do what, now?")
 
 if not args.no_cache:
