@@ -1,0 +1,37 @@
+# Processed with `artifetch --query <thisfile>`
+
+# The semantics of this query are kind of loose. Some things have priority,
+# in which case conflicting entries will just be ignored. Maybe I'll fix that
+# someday.
+pushes:
+  # Range match from (internal) push IDs. Get them from --list-pushes.
+  #ids: 1115321::1115344
+
+  # Match against comment of final commit in the push.
+  #comment: "ctor "
+
+  # Not a full revset, just 1 or more revs separated with `+`.
+  #rev: 4ec21b918c44+a2664bf7445f
+
+  # Bring up a fzf menu to select from the last N pushes. This is the default.
+  choose-from: 20
+
+jobs:
+  symbol: "SY(ab)"
+  limit-per-push: 1
+
+# Substring match on the artifact URL.
+# Uh... the talos jobs have perfherder-data. awsy has perfherder_data.
+artifact: /perfherder.data/
+
+metric:
+  json:
+    match-key-1: "suites[].name"
+    match-value-1: "Base Content JS"
+    match-key-2: "$1.subtests[].name"
+    match-value-2: "After tabs open [+30s, forced GC]"
+    value: "$2.value"
+  output:
+    style: gnuplot
+    header-format: "# push: {push_desc}"
+    format: "{push_idx} {value}"

@@ -1,0 +1,41 @@
+# Processed with `artifetch --query <thisfile>`
+#
+# The semantics of this query are kind of loose. Some things have priority,
+# in which case conflicting entries will just be ignored. Maybe I'll fix that
+# someday.
+
+pushes:
+  # Bring up a fzf menu to select from the last N pushes.
+  choose-from: 20
+
+jobs:
+  symbol: "SY(ab)"
+  limit-per-push: 1
+
+artifact: /memory-report-TabsOpenForceGC/
+
+# awsy looks for files named TabsOpenForceGC-* and takes the last one
+# (update_checkpoint_paths). It generates one total per process, and takes the
+# median: https://bit.ly/3QOAkng
+#
+# Note that the awsy scripts can be run on the command line! So eg
+# mach python testing/awsy/awsy/parse_about_memory.py /tmp/memory-report.json.gz js-main-runtime/ --proc-filter="web "
+
+metric:
+  json:
+    match-key-1: "reports[].path"
+    match-value-1: /^js-main-runtime//
+    match-key-2: "$.process"
+    match-value-2: /^(?:web |Web Content)/
+    value: "$.amount"
+    # For each value found, additionally retrieve the following labels relative to where the value was found,
+    # for use in the output.format pattern.
+    label:
+      mempath: "$.path"
+      process: "$2.process"
+  output:
+    style: gnuplot
+    header-format: "# push: {push_desc} [job={job_desc}]\n# {push_url}"
+    label-format:
+      process: "# process {idx} = {label_value} (job {job_id} <{job_url}>)\n# {filename}"
+    format: "{process_idx} {value} # {mempath}"

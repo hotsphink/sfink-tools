@@ -376,7 +376,7 @@ def get_pushes(start, end):
     result = []
 
     user = require_user()
-    pushes = get_results("push", project=args.branch, author=user, count=20)
+    pushes = get_results("push", project=args.branch, author=user, count=50)
     for p in reversed(pushes):
         id = p["id"]
         if id == start:
@@ -496,7 +496,6 @@ def parse_path(k : str) -> Path:
 
 
 def find_path_matches(data : Data, path : Path, sofar : Path=[]) -> list[tuple[Path, Any]]:
-    import pdb; pdb.set_trace()
     if not path:
         return [(sofar, data)]
     results = []
@@ -781,7 +780,7 @@ def process_query(args, cache):
             filter_name = f"first of {filter_name}"
 
     pushes = resolve_pushes(query.get("pushes", {"choose-from": 20}), cache)
-    logging.info("Pushes: " + "+".join(pushes))
+    logging.info("Pushes: " + "+".join(str(p) for p in pushes))
     if cache:
         history = cache.setdefault("history", {})
         history.setdefault("pushes", []).append(pushes)
