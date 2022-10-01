@@ -152,7 +152,7 @@ def get_results(endpoint, project=None, **params):
 def graphql(task_id):
     headers = HEADERS
     headers.update({"Content-Type": "application/json"})
-    return requests.post(
+    response = requests.post(
         "https://firefox-ci-tc.services.mozilla.com/graphql",
         json={
             "operationName":"Task",
@@ -218,6 +218,13 @@ fragment Artifacts on ArtifactsConnection {
         },
         headers=headers
     )
+
+    data = response.json()
+    if errors := data.get("errors"):
+        for error in errors:
+            logging.error("{code}: {message}")
+        raise Exception(",".join(e["code"] for e in errors))
+    return data
 
 # Global variable because I am bad.
 PushDescriptions = {}
@@ -328,7 +335,7 @@ def get_job_artifacts(job_id, cache=None):
         cache_value(cache, ("job", job_id, k), job.get(k))
 
     task = job["task_id"]
-    data = graphql(task).json()["data"]
+    data = graphql(task)["data"]
     runs = data["task"]["status"]["runs"]
     lastrun = runs[-1]
     state = lastrun["state"]
@@ -589,11 +596,11 @@ def output_metric(push, job, result, added, filename, output={}, cache=None):
     global PrevPush
     global PushDescriptions
 
-    style = output.get("style", "gnuplot")
+    style = output.get("style", "formatted")
     format = output.get("format", "{push_idx} {value}")
     header_format = output.get("header-format", "# {desc}")
 
-    if style != "gnuplot":
+    if style not in ("gnuplot", "formatted"):
         raise Exception(f"unsupported output format {output}")
 
     # Warning: all locals are accessible in the varous output format strings.
@@ -615,9 +622,6 @@ def output_metric(push, job, result, added, filename, output={}, cache=None):
                 print("", file=OutFile)
             print(header_format.format(**locals()), file=OutFile)
         PrevPush = push_id
-
-    #if result['process_idx'] == 1 and result['mempath'] == "js-main-runtime/gc-heap/unused-arenas":
-    #    import pdb; pdb.set_trace()
 
     push_idx = number(push_id, PushTable)
     for label, idx, label_value in added:
@@ -779,7 +783,7 @@ def process_query(args, cache):
             job_filter = limited_filter(job_filter, limit, filter_state)
             filter_name = f"first of {filter_name}"
 
-    pushes = resolve_pushes(query.get("pushes", {"choose-from": 20}), cache)
+    pushes = resolve_pushes(query.get("pushes") or {"choose-from": 20}, cache)
     logging.info("Pushes: " + "+".join(str(p) for p in pushes))
     if cache:
         history = cache.setdefault("history", {})
