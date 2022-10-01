@@ -39,6 +39,8 @@ EMPTY_CACHE = {
     },
 }
 
+logger = logging.getLogger("artifetch")
+
 parser = argparse.ArgumentParser(prog='artifetch', usage="artifetch [options]")
 parser.add_argument("--version", action='version', version=f'%(prog)s {VERSION}')
 parser.add_argument("--verbose", "-v", default=0, action="count", help="Verbose output")
@@ -79,12 +81,12 @@ def load_cache(path):
 
 def save_cache(path, data):
     if data is None:
-        logging.info("no cache data to save")
+        logger.info("no cache data to save")
         return
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wt") as fh:
         json.dump(data, fh)
-    logging.info(f"saved to cache file {path}")
+    logger.info(f"saved to cache file {path}")
 
 
 def cache_lookup(cache, path):
@@ -99,7 +101,7 @@ def cache_lookup(cache, path):
         if next is None:
             return None
         cache = next
-    logging.debug(f"loaded {'.'.join(str(p) for p in path)} from cache")
+    logger.debug(f"loaded {'.'.join(str(p) for p in path)} from cache")
     return cache
 
 
@@ -144,8 +146,8 @@ def get_results(endpoint, project=None, **params):
     response = get(endpoint, project=project, **params)
     if response.ok:
         return response.json()["results"]
-    logging.error("API request failed: {response.status_code} {response.reason}")
-    logging.error(response.text)
+    logger.error(f"API request failed: {response.status_code} {response.reason}")
+    logger.error(response.text)
     sys.exit(1)
 
 
@@ -222,7 +224,7 @@ fragment Artifacts on ArtifactsConnection {
     data = response.json()
     if errors := data.get("errors"):
         for error in errors:
-            logging.error("{code}: {message}")
+            logger.error("{code}: {message}".format(**error))
         raise Exception(",".join(e["code"] for e in errors))
     return data
 
@@ -327,7 +329,7 @@ def get_job_artifacts(job_id, cache=None):
     if cjob := cache_lookup(cache, ("job", job_id)):
         if artifacts := cjob.get("artifacts"):
             if "job_group_symbol" in cjob:
-                logging.info(f"loaded job {job_id} {describe_job(job_id, cache)} from cache: {len(artifacts)} artifacts")
+                logger.info(f"loaded job {job_id} {describe_job(job_id, cache)} from cache: {len(artifacts)} artifacts")
                 return artifacts
 
     job = get_results('jobs', project=args.branch, id=job_id)[-1]
@@ -350,7 +352,7 @@ def get_job_artifacts(job_id, cache=None):
             artifact=urllib.parse.quote(name, safe=''),
         ))
     cache_value(cache, ("job", job_id, "artifacts"), artifacts)
-    logging.debug(f"job {job_id} {describe_job(job_id, cache)}: {len(artifacts)} artifacts")
+    logger.debug(f"job {job_id} {describe_job(job_id, cache)}: {len(artifacts)} artifacts")
     return artifacts
 
 
@@ -363,7 +365,7 @@ def list_matching_artifacts(args):
     match = args.artifacts
     push = args.push
     for job in get_jobs(push):
-        logging.debug(f"Fetching artifacts for push {push} job {job['id']}")
+        logger.debug(f"Fetching artifacts for push {push} job {job['id']}")
         for a in get_job_artifacts(job["id"]):
             if match in a:
                 print(a, file=OutFile)
@@ -465,7 +467,7 @@ def fetch_artifact(url):
             break
 
     if data is not None and len(data):
-        logging.info(f"used cached file {cache_file}")
+        logger.info(f"used cached file {cache_file}")
         return (data, cache_file)
 
     # Hack: read full file into memory in order to handle both compressed and
@@ -727,7 +729,7 @@ def extract_matches_g(extractor, data : Data):
 
 
 def process_artifact(url, job, push, query, cache):
-    logging.info(f"process artifact {url}")
+    logger.info(f"process artifact {url}")
     raw, filename = fetch_artifact(url)
     metric = query["metric"]
     extractor = parse_metric_extractor(metric)
@@ -781,33 +783,37 @@ def process_query(args, cache):
             filter_name = f"first of {filter_name}"
 
     pushes = resolve_pushes(query.get("pushes") or {"choose-from": 20}, cache)
-    logging.info("Pushes: " + "+".join(str(p) for p in pushes))
+    logger.info("Pushes: " + "+".join(str(p) for p in pushes))
     if cache:
         history = cache.setdefault("history", {})
         history.setdefault("pushes", []).append(pushes)
 
     for push_id in pushes:
         push = get_push(push_id, cache)
-        logging.info(f"Scanning push {push['desc']}")
+        logger.info(f"Scanning push {push['desc']}")
 
         filter_state["njobs"] = 0
         for job in get_jobs(push["id"]):
-            logging.debug(f"checking job {job_symbol(job, cache)} against {filter_name}")
+            logger.debug(f"checking job {job_symbol(job, cache)} against {filter_name}")
         for job in filter(job_filter, reversed(get_jobs(push["id"]))):
             for a in get_job_artifacts(job["id"], cache):
                 if match_key(artifact_match, a):
                     process_artifact(a, job, push, query, cache)
 
         if filter_state["njobs"] == 0:
-            logging.warning(f"no jobs matching: '{filter_name}' for push {push['desc']}")
+            logger.warning(f"no jobs matching: '{filter_name}' for push {push['desc']}")
 
 
 args = parser.parse_args()
 
 if args.verbose == 1:
-    logging.basicConfig(level=logging.INFO)
+    logger.setLevel(logging.INFO)
 elif args.verbose > 1:
-    logging.basicConfig(level=logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
+
+loghandler = logging.StreamHandler()
+loghandler.setFormatter(logging.Formatter("%(levelname)s - %(message)s"))
+logger.addHandler(loghandler)
 
 OutFile = sys.stdout
 if args.output:

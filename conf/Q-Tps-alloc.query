@@ -1,19 +1,21 @@
 # Processed with `artifetch --query <thisfile>`
-#
+
 # The semantics of this query are kind of loose. Some things have priority,
 # in which case conflicting entries will just be ignored. Maybe I'll fix that
-# someday.
-
+# someday. For now, comment everything out to use the fuzzy selector.
 pushes:
   # Range match from (internal) push IDs. Get them from --list-pushes.
+  # Note that the tasks in a push will expire, and you'll get something
+  # like: "ResourceNotFound: `PIemJYs6RSadJuXCK_LCSA` does not correspond to a task that exists."
   #ids: 1115321::1115344
 
+  # Match against the comment in the youngest revision in the push.
   #comment: "ctor "
 
   # Not a full revset, just 1 or more revs separated with `+`.
   #rev: 4ec21b918c44+a2664bf7445f
 
-  # Bring up a fzf menu to select from the last N pushes.
+  # Bring up a fzf menu to select from the last N pushes. This is the default.
   #choose-from: 20
 
 artifact: /perfherder-data/
