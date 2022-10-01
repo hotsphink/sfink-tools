@@ -79,7 +79,7 @@ def load_cache(path):
 
 def save_cache(path, data):
     if data is None:
-        logging.info(f"no cache data to save")
+        logging.info("no cache data to save")
         return
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wt") as fh:
@@ -155,14 +155,14 @@ def graphql(task_id):
     response = requests.post(
         "https://firefox-ci-tc.services.mozilla.com/graphql",
         json={
-            "operationName":"Task",
-            "variables":{
-                "taskId":task_id,
-                "artifactsConnection":{
-                    "limit":1000
+            "operationName": "Task",
+            "variables": {
+                "taskId": task_id,
+                "artifactsConnection": {
+                    "limit": 1000
                 },
             },
-            "query":"""\
+            "query": """\
 query Task(
     $taskId: ID!,
     $artifactsConnection: PageConnection
@@ -225,6 +225,7 @@ fragment Artifacts on ArtifactsConnection {
             logging.error("{code}: {message}")
         raise Exception(",".join(e["code"] for e in errors))
     return data
+
 
 # Global variable because I am bad.
 PushDescriptions = {}
@@ -338,7 +339,6 @@ def get_job_artifacts(job_id, cache=None):
     data = graphql(task)["data"]
     runs = data["task"]["status"]["runs"]
     lastrun = runs[-1]
-    state = lastrun["state"]
     edges = lastrun["artifacts"]["edges"]
     names = [e["node"]["name"] for e in edges]
     artifacts = []
@@ -450,15 +450,14 @@ def resolve_pushes(spec, cache):
 
 
 def fetch_artifact(url):
-    cache_file_base = os.path.join(ARTIFACT_CACHE, urllib.parse.quote(url, safe=''))
+    cache_file_base = ARTIFACT_CACHE / urllib.parse.quote(url, safe='')
     data = None
-    for cache_file in (cache_file_base, cache_file_base + ".gz"):
+    for cache_file in (cache_file_base, cache_file_base.with_suffix(".gz")):
         try:
-            with gzip.open(open(cache_file, "rb"), "rt") as fh:
+            with gzip.open(cache_file.open("rb"), "rt") as fh:
                 data = fh.read()
         except gzip.BadGzipFile:
-            with open(cache_file, "rt") as fh:
-                data = fh.read()
+            data = cache_file.read_text()
         except OSError:
             pass
 
@@ -483,12 +482,9 @@ def fetch_artifact(url):
         data = gzip.GzipFile(fileobj=io.BytesIO(raw_data)).read().decode()
         if not cache_file.endswith(".gz"):
             cache_file += ".gz"
-        with open(cache_file, "wb") as fh:
-            fh.write(raw_data)
+        cache_file.write_bytes(raw_data)
     except gzip.BadGzipFile:
-        data = raw_data.decode()
-        with open(cache_file, "wt") as fh:
-            fh.write(data)
+        cache_file.write_text(raw_data.decode())
 
     return (data, cache_file)
 
@@ -576,6 +572,7 @@ def match_key(key : str, val):
 
 PushTable : dict[int, int] = {}
 PrevPush = None
+
 
 def number(v, table):
     if (n := table.get(v)) is not None:
