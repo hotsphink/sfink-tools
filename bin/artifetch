@@ -13,11 +13,12 @@ import urllib
 import yaml
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 def join_cache_path(path):
     root_cache_dir = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
-    return os.path.join(root_cache_dir, path)
+    return Path(root_cache_dir) / path
 
 
 CACHE = join_cache_path("artifetch/jobs.json")
@@ -454,7 +455,7 @@ def resolve_pushes(spec, cache):
 def fetch_artifact(url):
     cache_file_base = ARTIFACT_CACHE / urllib.parse.quote(url, safe='')
     data = None
-    for cache_file in (cache_file_base, cache_file_base.with_suffix(".gz")):
+    for cache_file in (cache_file_base, Path(str(cache_file_base) + ".gz")):
         try:
             with gzip.open(cache_file.open("rb"), "rt") as fh:
                 data = fh.read()
@@ -491,16 +492,16 @@ def fetch_artifact(url):
     return (data, cache_file)
 
 
-Data = dict[str, Any] | list[Any]
-Path = list[str | int]
-ResultPaths = list[Path]
+DataT = dict[str, Any] | list[Any]
+PathT = list[str | int]
+ResultPathsT = list[PathT]
 
 
-def parse_path(k : str) -> Path:
+def parse_path(k : str) -> PathT:
     return [p for p in re.findall(r'\[\]|[^.\[]+|\.', k) if p != '.']
 
 
-def find_path_matches(data : Data, path : Path, sofar : Path=[]) -> list[tuple[Path, Any]]:
+def find_path_matches(data : DataT, path : PathT, sofar : PathT=[]) -> list[tuple[PathT, Any]]:
     if not path:
         return [(sofar, data)]
     results = []
@@ -515,7 +516,7 @@ def find_path_matches(data : Data, path : Path, sofar : Path=[]) -> list[tuple[P
     return results
 
 
-def resolve_path(path : Path, bases : ResultPaths):
+def resolve_path(path : PathT, bases : ResultPathsT):
     result = []
     for segment in path:
         if segment.startswith("$"):
@@ -529,13 +530,13 @@ def resolve_path(path : Path, bases : ResultPaths):
     return result
 
 
-def lookup(path : Path, data):
+def lookup(path : PathT, data):
     for segment in path:
         data = data[segment]
     return data
 
 
-def lookup_json_values_g(extractor, match : ResultPaths, data, labels):
+def lookup_json_values_g(extractor, match : ResultPathsT, data, labels):
     path = parse_path(extractor["values"])
     path = resolve_path(path, match)
 
@@ -682,21 +683,21 @@ def parse_metric_extractor(metric):
     raise Exception("no metric spec found")
 
 
-def match_remaining(matchers, paths: ResultPaths, data : Data) -> list[ResultPaths]:
+def match_remaining(matchers, paths: ResultPathsT, data : DataT) -> list[ResultPathsT]:
     if not matchers:
         return [paths]
 
     i, keypath, target =  matchers[0]
     keypath = resolve_path(keypath, paths)
 
-    result : list[ResultPaths] = []
+    result : list[ResultPathsT] = []
     for path, keyval in find_path_matches(data, keypath):
         if match_key(target, keyval):
             result.append(paths + [path])
     return result
 
 
-def extract_matches_g(extractor, data : Data):
+def extract_matches_g(extractor, data : DataT):
     matchers = list(zip(
         range(len(extractor["keys"])),
         extractor["keys"],
@@ -704,7 +705,7 @@ def extract_matches_g(extractor, data : Data):
     ))
     matchers.pop(0)  # Matchers are 1-based indexes. Sorry.
 
-    matches : list[ResultPaths] = []
+    matches : list[ResultPathsT] = []
 
     # For each match for the first match-key
     matcher = matchers.pop(0)
@@ -734,9 +735,9 @@ def process_artifact(url, job, push, query, cache):
     metric = query["metric"]
     extractor = parse_metric_extractor(metric)
     if extractor["type"] == "json":
-        data : Data = json.loads(raw)
+        data : DataT = json.loads(raw)
     else:
-        data : Data = raw
+        data : DataT = raw
     output = metric.get("output", {})
 
     # {label name: {value: idx}}
