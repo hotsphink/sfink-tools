@@ -14,6 +14,7 @@ metric:
       pid: "$1"  # Hm... this is colliding syntax!
       old: "$2"
   output:
-    style: gnuplot
+    style: formatted
     header-format: "# job {job_desc} on push: {push_desc}\n# {push_url}"
-    format: "{push_idx} {pid} {old} {value}"
+    format: "{push_idx} {pid} {sum(old)} {sum(value)}"
+    groupby: ["push", "pid"]

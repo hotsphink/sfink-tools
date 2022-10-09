@@ -573,16 +573,7 @@ def match_key(key : str, val):
         return key == val
 
 
-PushTable : dict[int, int] = {}
 PrevPush = None
-
-
-def number(v, table):
-    if (n := table.get(v)) is not None:
-        return n
-    n = len(table)
-    table[v] = n
-    return n
 
 
 # FIXME
@@ -592,7 +583,7 @@ def guess_repository(repo_id, cache):
     return 'mozilla-central'
 
 
-def output_metric(push, job, result, added, filename, output={}, cache=None):
+def output_metric(result, added, output={}, cache=None):
     global PrevPush
     global PushDescriptions
 
@@ -603,27 +594,26 @@ def output_metric(push, job, result, added, filename, output={}, cache=None):
     if style not in ("gnuplot", "formatted"):
         raise Exception(f"unsupported output format {output}")
 
-    # Warning: all locals are accessible in the varous output format strings.
+    # Warning: all locals are accessible in the various output format strings.
     # So the naming matters.
 
-    push_id = int(push["id"])
-    push_desc = summarize_push(push, cache)
-    repo = guess_repository(push['repository_id'], cache)
-    revision = push['revision']
+    push_obj = result["push"]
+    push_desc = summarize_push(push_obj, cache)
+    repo = guess_repository(push_obj['repository_id'], cache)
+    revision = push_obj['revision']
     push_url = f"https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}"
-    job_id = job["id"]
-    job_desc = describe_job(job_id, cache)
-    task_id = job['task_id']
+    job_obj = result["job"]
+    job_desc = describe_job(job_obj["id"], cache)
+    task_id = job_obj["task_id"]
     job_url = f"https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
 
     if header_format != False:
-        if push_id != PrevPush:
+        if result["push_id"] != PrevPush:
             if PrevPush is not None:
                 print("", file=OutFile)
             print(header_format.format(**locals()), file=OutFile)
-        PrevPush = push_id
+        PrevPush = result["push_id"]
 
-    push_idx = number(push_id, PushTable)
     for label, idx, label_value in added:
         if label_format := output.get("label-format", {}).get(label):
             print(label_format.format(**locals(), **result), file=OutFile)
@@ -729,6 +719,50 @@ def extract_matches_g(extractor, data : DataT):
         yield from lookup_values_g(extractor, None, data, labels)
 
 
+class GroupBy(object):
+    def __init__(self, groupby, expr, cache):
+        self.groupby = groupby
+        self.expr = expr
+        self.cache = cache
+        self.aggregates = []
+        for m in re.finditer(r'{(\w+)\((\w+)\)}', expr):
+            self.aggregates.append((m.group(1), m.group(2)))
+        self.sums = defaultdict(lambda: defaultdict(int))
+        self.counts = defaultdict(int)
+        self.proto_result = {}
+
+        self.job = {}
+        self.filename = {}
+        self.output = None
+
+    def __call__(self, result, added, output, cache):
+        rawkey = (result[k] for k in self.groupby)
+        # Allow `groupby: ["push"]`` for example (objects will be distinguished by their "id" values.)
+        key = tuple(k["id"] if isinstance(k, dict) else k for k in rawkey)
+        for func, field in self.aggregates:
+            self.sums[key][field] += int(result[field])
+            self.counts[key] += 1
+        self.proto_result.setdefault(key, {}).update(result)
+
+    def output_results(self, output):
+        for key in self.sums.keys():
+            # This is a complete mess.
+            result = dict(self.proto_result[key])
+            for m in re.finditer(r'{(\w+)\((\w+)\)}', self.expr):
+                func, field = m.groups()
+                call = m.group(0)[1:-1]
+                if func == "sum":
+                    result[call] = self.sums[key][field]
+                elif func == "count":
+                    result[call] = self.counts[key]
+                elif func == "mean":
+                    result[call] = self.sums[key][field] / self.counts[key]
+                else:
+                    raise Exception(f"unknown aggregate function '{func}'")
+
+            output_metric(result, (), output, self.cache)
+
+
 def process_artifact(url, job, push, query, cache):
     logger.info(f"process artifact {url}")
     raw, filename = fetch_artifact(url)
@@ -740,13 +774,31 @@ def process_artifact(url, job, push, query, cache):
         data : DataT = raw
     output = metric.get("output", {})
 
+    if groupby := output.get("groupby"):
+        handler = GroupBy(groupby, output["format"], cache)
+    else:
+        handler = output_metric
+
     # {label name: {value: idx}}
     labeled_values = defaultdict(dict)
 
     indexes = {}
     for result in extract_matches_g(extractor, data):
+        result.update({
+            "filename": filename,
+            "push": push,
+            "push_id": push["id"],
+            "job": job,
+            "job_id": job["id"],
+        })
         added = []
         for label, value in result.items():
+            if isinstance(value, dict):
+                # eg job will be skipped, since job_idx will be based off of job_id
+                continue
+            if label.endswith("_id"):
+                # eg job_id -> job_idx
+                label = label[:-3]
             map = labeled_values[label]
             if (idx := map.get(value)) is None:
                 idx = len(map)
@@ -754,7 +806,10 @@ def process_artifact(url, job, push, query, cache):
                 map[value] = idx
             indexes[label + "_idx"] = idx
         result.update(indexes)
-        output_metric(push, job, result, added, filename, output, cache)
+        handler(result, added, output, cache)
+
+    if output.get("groupby"):
+        handler.output_results(output)
 
 
 def limited_filter(job_filter, limit, filter_state):
