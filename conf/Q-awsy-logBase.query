@@ -8,13 +8,16 @@ artifact: gecko.log
 
 metric:
   text:
-    match-key: '/STRSTAT ([-\d]+): ([-\d]+) ([-\d]+)/'
+    match-key: '/STRSTAT ([-\d]+): ([-\d]+) ([-\d]+) ([-\d]+) ([-\d]+)/'
     value: "$3"
     label:
       pid: "$1"  # Hm... this is colliding syntax!
       old: "$2"
+      length: "$4"
+      good: "$5"
   output:
     style: formatted
-    header-format: "# job {job_desc} on push: {push_desc}\n# {push_url}"
+    job-header: "# job {job_desc} on push {push_id}: {push_desc}\n# {push_url}"
     format: "{push_idx} {pid} {sum(old)} {sum(value)}"
     groupby: ["push", "pid"]
+    #format: "{push_idx} pid={pid} len={length} (good {good}) built with {old} -> usable={value}"

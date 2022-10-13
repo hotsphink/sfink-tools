@@ -34,8 +34,8 @@ metric:
       mempath: "$.path"
       process: "$2.process"
   output:
-    style: gnuplot
-    header-format: "# push: {push_desc} [job={job_desc}]\n# {push_url}"
-    label-format:
-      process: "# process {idx} = {label_value} (job {job_id} <{job_url}>)\n# {filename}"
+    style: formatted
+    job-header: "# push {push_idx}: {push_desc} [job={job_desc}]\n# {push_url}"
+    label-header:
+      process: "# process {process_idx} = {process} (job {job_id} <{job_url}>)\n# {filename}"
     format: "{process_idx} {value} # {mempath}"

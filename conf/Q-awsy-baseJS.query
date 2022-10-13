@@ -33,5 +33,5 @@ metric:
     value: "$2.value"
   output:
     style: gnuplot
-    header-format: "# push: {push_desc}"
+    job-header: "# push {push_idx}: {push_desc}"
     format: "{push_idx} {value}"

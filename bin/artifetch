@@ -27,6 +27,9 @@ SITE = "https://treeherder.mozilla.org"
 VERSION = 0.1
 HEADERS = {"User-Agent": f"artifetch {VERSION} by sfink@mozilla.com"}
 
+PUSH_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}"
+JOB_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
+
 # Anything here can be guaranteed to exist.
 EMPTY_CACHE = {
     "pushes": {
@@ -483,8 +486,8 @@ def fetch_artifact(url):
 
     try:
         data = gzip.GzipFile(fileobj=io.BytesIO(raw_data)).read().decode()
-        if not cache_file.endswith(".gz"):
-            cache_file += ".gz"
+        if not str(cache_file).endswith(".gz"):
+            cache_file = str(cache_file) + ".gz"
         cache_file.write_bytes(raw_data)
     except gzip.BadGzipFile:
         cache_file.write_text(raw_data.decode())
@@ -589,36 +592,24 @@ def output_metric(result, added, output={}, cache=None):
 
     style = output.get("style", "formatted")
     format = output.get("format", "{push_idx} {value}")
-    header_format = output.get("header-format", "# {desc}")
+    header_format = output.get("job-header", "# {desc}")
 
     if style not in ("gnuplot", "formatted"):
         raise Exception(f"unsupported output format {output}")
-
-    # Warning: all locals are accessible in the various output format strings.
-    # So the naming matters.
-
-    push_obj = result["push"]
-    push_desc = summarize_push(push_obj, cache)
-    repo = guess_repository(push_obj['repository_id'], cache)
-    revision = push_obj['revision']
-    push_url = f"https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}"
-    job_obj = result["job"]
-    job_desc = describe_job(job_obj["id"], cache)
-    task_id = job_obj["task_id"]
-    job_url = f"https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
 
     if header_format != False:
         if result["push_id"] != PrevPush:
             if PrevPush is not None:
                 print("", file=OutFile)
-            print(header_format.format(**locals()), file=OutFile)
+            print(header_format.format(**result), file=OutFile)
         PrevPush = result["push_id"]
 
+    # Every time a new index is generated, output the label-header format so the index can be mapped to the data it corresponds to.
     for label, idx, label_value in added:
-        if label_format := output.get("label-format", {}).get(label):
-            print(label_format.format(**locals(), **result), file=OutFile)
+        if label_format := output.get("label-header", {}).get(label):
+            print(label_format.format(**result), file=OutFile)
 
-    print(format.format(**locals(), **result), file=OutFile)
+    print(format.format(**result), file=OutFile)
 
 
 def parse_json_metric_extractor(metric):
@@ -763,7 +754,7 @@ class GroupBy(object):
             output_metric(result, (), output, self.cache)
 
 
-def process_artifact(url, job, push, query, cache):
+def process_artifact(url, job, push_result, query, cache):
     logger.info(f"process artifact {url}")
     raw, filename = fetch_artifact(url)
     metric = query["metric"]
@@ -782,29 +773,41 @@ def process_artifact(url, job, push, query, cache):
     # {label name: {value: idx}}
     labeled_values = defaultdict(dict)
 
+    job_result = dict(push_result)
+    job_result.update({
+        "filename": filename,
+        "job": job,
+        "job_id": job["id"],
+        "job_desc": describe_job(job["id"], cache),
+        "task_id": job["task_id"],
+    })
+    job_result["job_url"] = JOB_URL.format(**job_result)
+
     indexes = {}
     for result in extract_matches_g(extractor, data):
-        result.update({
-            "filename": filename,
-            "push": push,
-            "push_id": push["id"],
-            "job": job,
-            "job_id": job["id"],
-        })
+        result.update(job_result)
         added = []
         for label, value in result.items():
             if isinstance(value, dict):
-                # eg job will be skipped, since job_idx will be based off of job_id
+                # eg job will be skipped. job_idx will be based off of job_id.
+                continue
+            if label.endswith("_idx"):
+                # don't need indexes of indexes
                 continue
             if label.endswith("_id"):
-                # eg job_id -> job_idx
+                # eg job_id -> job, which will then generate job_idx
                 label = label[:-3]
+
+            if f"{label}_idx" in result:
+                continue  # eg push_idx is a global index; do not override.
             map = labeled_values[label]
             if (idx := map.get(value)) is None:
                 idx = len(map)
                 added.append((label, idx, value))
                 map[value] = idx
-            indexes[label + "_idx"] = idx
+
+            indexes[f"{label}_idx"] = idx
+
         result.update(indexes)
         handler(result, added, output, cache)
 
@@ -844,9 +847,21 @@ def process_query(args, cache):
         history = cache.setdefault("history", {})
         history.setdefault("pushes", []).append(pushes)
 
+    push_table = {}
     for push_id in pushes:
         push = get_push(push_id, cache)
         logger.info(f"Scanning push {push['desc']}")
+
+        push_result = {
+            "push": push,
+            "push_id": push_id,
+            # Associate each push with an "index" set to an autoincrementing value associated with its push_id.
+            "push_idx": push_table.setdefault(push_id, len(push_table)),
+            "push_desc": summarize_push(push, cache),
+            "revision": push['revision'],
+            "repo": guess_repository(push['repository_id'], cache),
+        }
+        push_result["push_url"] = PUSH_URL.format(**push_result)
 
         filter_state["njobs"] = 0
         for job in get_jobs(push["id"]):
@@ -854,7 +869,7 @@ def process_query(args, cache):
         for job in filter(job_filter, reversed(get_jobs(push["id"]))):
             for a in get_job_artifacts(job["id"], cache):
                 if match_key(artifact_match, a):
-                    process_artifact(a, job, push, query, cache)
+                    process_artifact(a, job, push_result, query, cache)
 
         if filter_state["njobs"] == 0:
             logger.warning(f"no jobs matching: '{filter_name}' for push {push['desc']}")
