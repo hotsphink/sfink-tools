@@ -1,6 +1,10 @@
 [ui]
 ###merge = kdiff3
-merge = meld
+#merge = meld
+#merge = :merge3
+#merge = diffmerge
+#merge = :vscode
+merge = code
 #traceback = True
 #verbose = True
 #debug = True
@@ -59,6 +63,7 @@ absorb =
 # fsmonitor =
 blackbox =
 journal =
+extdiff =
 
 # Nonstandard additional commands
 #qbackout = ~/lib/version-control-tools/hgext/qbackout/
@@ -142,6 +147,9 @@ recommit = !$HG uncommit --all && $HG amend -i
 
 interdiff = !set -x; $HG export --hidden $1 > /tmp/left.diff; $HG export --hidden $2 > /tmp/right.diff; interdiff /tmp/left.diff /tmp/right.diff
 
+# `hg diffpast 3 .` will look at the interdiff between the predecessor^4 and predecessor^3 of `.`
+diffpast = !set -x; n=$1; rev=$2; rrev=$2; while [[ $n -gt 0 ]]; do rrev="$rev"; rev="predecessors($rev)"; n=$(( $n - 1 )); done; $HG --hidden diff -r "$rev" -r "$$rrev"
+
 ###### aliases for scenarios that I don't run into anymore ######
 
 # qedit: bring up a text editor on the patch series file, marking applied
@@ -163,13 +171,6 @@ workon = !bash -c 'cd $($HG root) && $EDITOR $($HG status -n -m -a ${1+--change 
 
 # From junw, mostly what evolve does:
 # evolve=rebase -r 'orphan()-obsolete()' -d 'max((successors(max(roots(ALLSRC) & ::SRC)^)-obsolete())::)'
-
-########### aliases I no longer use and ought to delete ##########
-
-series = qseries -v
-goto = qgoto
-touched = qtouched
-shortlog = log --template='{node|short}: {desc|firstline}\n'
 
 # Usage: hg enbug <desc> # desc should be oneword
 #
@@ -239,20 +240,7 @@ nodates = 1
 unified = 8
 
 [paths]
-try = ssh://sfink@mozilla.com@hg.mozilla.org/try/
-mi = ssh://sfink@mozilla.com@hg.mozilla.org/integration/mozilla-inbound
-mc = ssh://sfink@mozilla.com@hg.mozilla.org/mozilla-central
-aurora = ssh://sfink@mozilla.com@hg.mozilla.org/releases/mozilla-aurora/
-beta = ssh://sfink@mozilla.com@hg.mozilla.org/releases/mozilla-beta/
-release = ssh://sfink@mozilla.com@hg.mozilla.org/releases/mozilla-release/
-birch = ssh://sfink@mozilla.com@hg.mozilla.org/projects/birch/
-cypress = ssh://sfink@mozilla.com@hg.mozilla.org/projects/cypress/
-cedar = ssh://sfink@mozilla.com@hg.mozilla.org/projects/cedar/
-maple = ssh://sfink@mozilla.com@hg.mozilla.org/projects/maple/
-review = https://reviewboard-hg.mozilla.org/autoreview
-unified = https://hg.mozilla.org/mozilla-unified
-hgmo = ssh://hgmo/users/sfink_mozilla.com/mozilla
-hgmoro = https://hg.mozilla.org/users/sfink_mozilla.com/mozilla
+#unified = https://hg.mozilla.org/mozilla-unified
 
 [web]
 #cacerts = /etc/mercurial/hgrc.d/cacert.pem
@@ -267,9 +255,27 @@ kdiff3.gui = True
 kdiff3.premerge = True
 kdiff3.binary = False
 
+meld.gui = True
+meld.executable = /usr/bin/env
+meld.args = GDK_BACKEND=x11 meld -o $output $local $base $other
+
+diffmerge.gui = True
+diffmerge.executable = diffmerge
+
+vscode.regkey = SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{EA457B21-F73E-494C-ACAB-524FDE069978}_is1
+vscode.regname = DisplayIcon
+vscode.args = --wait $output
+vscode.binary = False
+vscode.gui = True
+vscode.checkconflicts = True
+vscode.premerge = keep
+
+code.priority = 100
+code.premerge = True
+code.args = --wait --merge $other $local $base $output
+
 [bugzilla]
 url = https://bugzilla.mozilla.org
-username = sphink@gmail.com
 # apikey in ~/.config/hg/hgrc
 
 [bzexport]
@@ -278,35 +284,12 @@ username = sphink@gmail.com
 update-patch = True
 unified = 10
 
-# Testing
-# dry-run = True
-
-# Testing
-#api_server = https://api-dev.bugzilla.mozilla.org/test/latest/
-#bugzilla = https://landfill.bugzilla.org/bzapi_sandbox/
-#product = FoodReplicator
-#component = Salt
-#username = sfink@mozilla.com
-
-# Production
-#api_server = https://api-dev.bugzilla.mozilla.org/latest/
-#bugzilla = https://bugzilla.mozilla.org/
-
-# Staging
-#api_server = https://api-dev.bugzilla.mozilla.org/tip/
-#bugzilla = https://bugzilla-stage-tip.mozilla.org/
-#username = sfink@mozilla.com
-
 [qimportbz]
 patch_format = bug-%(bugnum)s-%(desc)s
 
 [mozext]
-ircnick = sfink
 skip_relbranch_bookmarks = True
 disable_local_database = False
-
-[mozilla]
-ircnick = sfink
 
 [progress]
 delay = 1
@@ -373,7 +356,15 @@ wip.user = magenta
 [rebase]
 # Turned this off because it can causes topics to disappear during rebase.
 # (as of evolve 8.4.0-ish.)
-#experimental.inmemory = true
+#
+# re-enabling to see if it is better now.
+experimental.inmemory = true
+
+[extdiff]
+# <mossop> adds a hg vsd command to open side by side diffs of individual files
+# in VS Code.
+cmd.vsd = code
+ops.vsd = --wait --diff
 
 [experimental]
 graphshorten = true
@@ -381,11 +372,6 @@ worddiff = true
 
 [hggit]
 usephases = True
-
-[format-source]
-clang-format = /home/sfink/src/mozilla/mach clang-format -assume-filename=$HG_FILENAME -p
-clang-format:configpaths = .clang-format, .clang-format-ignore
-clang-format:fileext = .cpp, .c, .h
 
 [phabsend]
 setbaseparent = true
