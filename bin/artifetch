@@ -495,7 +495,8 @@ def fetch_artifact(url):
             cache_file = str(cache_file) + ".gz"
         cache_file.write_bytes(raw_data)
     except gzip.BadGzipFile:
-        cache_file.write_text(raw_data.decode())
+        data = raw_data.decode()
+        cache_file.write_text(data)
 
     return (data, cache_file)
 
