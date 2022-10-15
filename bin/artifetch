@@ -456,6 +456,11 @@ def resolve_pushes(spec, cache):
 
 
 def fetch_artifact(url):
+    if url.startswith("file://"):
+        # requests doesn't seem to handle file: URLs.
+        filename = url[7:]
+        return (Path(filename).read_text(), filename)
+
     cache_file_base = ARTIFACT_CACHE / urllib.parse.quote(url, safe='')
     data = None
     for cache_file in (cache_file_base, Path(str(cache_file_base) + ".gz")):
@@ -827,11 +832,36 @@ def limited_filter(job_filter, limit, filter_state):
 def process_query(args, cache):
     with open(args.query) as fh:
         query = yaml.safe_load(fh)
-    artifact_match = query["artifact"]
 
     filter_name = "all jobs"
     job_filter = lambda j: True
     filter_state = {"njobs": 0}
+
+    if local_artifacts := query.get("artifacts"):
+        for push_id, a in enumerate(local_artifacts):
+            push = {
+                "id": push_id,
+            }
+            push_result = {
+                "push": push,
+                "push_id": push_id,
+                "push_idx": push_id,
+                "push_desc": f"local data {a}",
+                "revision": "local",
+                "repo": "local",
+            }
+            push_result["push_url"] = "file://" + a
+            job = {
+                "id": 0,
+                "task_id": "__local__",
+            }
+            if "://" not in a:
+                a = f"file://{a}"
+            process_artifact(a, job, push_result, query, cache)
+        return
+
+    artifact_match = query["artifact"]
+
     if job_query := query.get("jobs"):
         if sym := job_query.get("symbol"):
             job_filter = lambda j: job_symbol(j, cache) == sym
@@ -839,7 +869,10 @@ def process_query(args, cache):
         if limit := job_query.get("limit-per-push"):
             filter_state["job_limit"] = limit
             job_filter = limited_filter(job_filter, limit, filter_state)
-            filter_name = f"first of {filter_name}"
+            filter_name = f"first {limit} of {filter_name}"
+
+    setattr(job_filter, "state", filter_state)
+    setattr(job_filter, "name", filter_name)
 
     pushes = resolve_pushes(query.get("pushes") or {"choose-from": 20}, cache)
     logger.info("Pushes: " + "+".join(str(p) for p in pushes))
@@ -863,16 +896,16 @@ def process_query(args, cache):
         }
         push_result["push_url"] = PUSH_URL.format(**push_result)
 
-        filter_state["njobs"] = 0
+        job_filter.state["njobs"] = 0
         for job in get_jobs(push["id"]):
-            logger.debug(f"checking job {job_symbol(job, cache)} against {filter_name}")
+            logger.debug(f"checking job {job_symbol(job, cache)} against {job_filter.name}")
         for job in filter(job_filter, reversed(get_jobs(push["id"]))):
             for a in get_job_artifacts(job["id"], cache):
                 if match_key(artifact_match, a):
                     process_artifact(a, job, push_result, query, cache)
 
-        if filter_state["njobs"] == 0:
-            logger.warning(f"no jobs matching: '{filter_name}' for push {push['desc']}")
+        if job_filter.state["njobs"] == 0:
+            logger.warning(f"no jobs matching: '{job_filter.name}' for push {push['desc']}")
 
 
 args = parser.parse_args()
