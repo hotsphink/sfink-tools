@@ -240,7 +240,7 @@ nodates = 1
 unified = 8
 
 [paths]
-#unified = https://hg.mozilla.org/mozilla-unified
+unified = https://hg.mozilla.org/mozilla-unified
 
 [web]
 #cacerts = /etc/mercurial/hgrc.d/cacert.pem
