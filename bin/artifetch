@@ -16,13 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-def join_cache_path(path):
-    root_cache_dir = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
-    return Path(root_cache_dir) / path
-
-
-CACHE = join_cache_path("artifetch/jobs.json")
-ARTIFACT_CACHE = join_cache_path("artifetch/artifacts/")
+DEFAULT_CACHE_ROOT = Path(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")))
 SITE = "https://treeherder.mozilla.org"
 VERSION = 0.1
 HEADERS = {"User-Agent": f"artifetch {VERSION} by sfink@mozilla.com"}
@@ -30,29 +24,20 @@ HEADERS = {"User-Agent": f"artifetch {VERSION} by sfink@mozilla.com"}
 PUSH_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}"
 JOB_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
 
-# Anything here can be guaranteed to exist.
-EMPTY_CACHE = {
-    "pushes": {
-        # "spec=<spec>" for resolve_push_range a+b::c+d+e syntax (b::c ranges are looked up).
-    },
-    "job": {
-        # <job_id>: { "artifacts": list of artifact urls }
-    },
-    "push": {
-        # <push_id>: { "desc": description of push grabbed from first revision }
-    },
-}
+logger = logging.getLogger("artifetch")
+autoincrement = defaultdict(int)
 
 logger = logging.getLogger("artifetch")
 
 parser = argparse.ArgumentParser(prog='artifetch', usage="artifetch [options]")
 parser.add_argument("--version", action='version', version=f'%(prog)s {VERSION}')
 parser.add_argument("--verbose", "-v", default=0, action="count", help="Verbose output")
+parser.add_argument("--cache-root", default=str(DEFAULT_CACHE_ROOT), help="Root of cache dir, useful to override for testing")
 
 parser.add_argument("--json", action="store_true", help="Dump out raw JSON output")
 parser.add_argument("--output", "-o", help="File to save output to, default stdout")
 parser.add_argument("--refresh", action="store_true", help="Do not use cached results")
-parser.add_argument("--no-cache", action="store_true", help="Do not use or save to cache")
+parser.add_argument("--no-cache", action="store_true", help="Do not load from or save to cache")
 parser.add_argument("--user", "-u", default=None, help="User to use for filtering pushes")
 parser.add_argument("--branch", default="try",
                     help="The branch to use for commands that do not use a specific URL")
@@ -72,49 +57,123 @@ parser.add_argument("--push", help="Push ID to query")
 parser.add_argument("--pushes", help="List of push IDs to query, or !n for the nth newest history item, counting from zero")
 
 
-def load_cache(path):
-    if args.refresh:
-        return EMPTY_CACHE
-
-    try:
-        with open(path, "rt") as fh:
-            return json.load(fh)
-    except OSError:
-        return EMPTY_CACHE
 
 
-def save_cache(path, data):
-    if data is None:
-        logger.info("no cache data to save")
-        return
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wt") as fh:
-        json.dump(data, fh)
-    logger.info(f"saved to cache file {path}")
 
 
-def cache_lookup(cache, path):
-    if cache is None:
-        return None
-    for p in path:
-        if isinstance(cache, list):
-            i = int(p)
-            next = cache[i] if i < len(cache) else None
-        else:
-            next = cache.get(str(p))
-        if next is None:
+class Cache(object):
+# Anything here can be guaranteed to exist.
+    EMPTY_CACHE = {
+        "pushes": {
+            # "spec=<spec>" for resolve_push_range a+b::c+d+e syntax (b::c ranges are looked up).
+        },
+        "job": {
+            # <job_id>: { "artifacts": list of artifact urls }
+        },
+        "push": {
+            # <push_id>: { "desc": description of push grabbed from first revision }
+        },
+    }
+
+    def __init__(self, cache_root, refresh, no_cache):
+        self.path = Path(cache_root) / "artifetch/jobs.json"
+        self.artifact_path = Path(cache_root) / "artifetch/artifacts/"
+        self.refresh = refresh
+        self.no_cache = no_cache
+        self.data = None
+
+    def load(self):
+        if self.refresh or self.no_cache:
+            self.data = self.EMPTY_CACHE
+            return
+
+        try:
+            with open(self.path, "rt") as fh:
+                self.data = json.load(fh)
+        except OSError:
+            self.data = self.EMPTY_CACHE
+
+    def save(self):
+        if self.data is None:
+            logger.info("no cache data to save")
+            return
+        if self.no_cache:
+            logger.info("--no-cache given, not saving")
+            return
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path, "wt") as fh:
+            json.dump(self.data, fh)
+        logger.info(f"saved to cache file {self.path}")
+
+    def lookup(self, path):
+        cache = self.data
+        if cache is None:
             return None
-        cache = next
-    logger.debug(f"loaded {'.'.join(str(p) for p in path)} from cache")
-    return cache
+        for p in path:
+            if isinstance(cache, list):
+                i = int(p)
+                next = cache[i] if i < len(cache) else None
+            else:
+                next = cache.get(str(p))
+            if next is None:
+                return None
+            cache = next
+        logger.debug(f"loaded {'.'.join(str(p) for p in path)} from cache")
+        return cache
 
+    def value(self, path, value):
+        '''Insert a value at a path in the cache, and return the value.'''
+        cache = self.data
+        if cache:
+            for segment in path[:-1]:
+                cache = cache.setdefault(str(segment), {})
+            cache[path[-1]] = value
+        return value
 
-def cache_value(cache, path, value):
-    if cache:
-        for segment in path[:-1]:
-            cache = cache.setdefault(str(segment), {})
-        cache[path[-1]] = value
-    return value
+    def fetch_artifact(self, url):
+        if url.startswith("file://"):
+            # requests doesn't seem to handle file: URLs.
+            filename = url[7:]
+            return (Path(filename).read_text(), filename)
+
+        cache_file_base = self.ARTIFACT_CACHE / urllib.parse.quote(url, safe='')
+        data = None
+        for cache_file in (cache_file_base, Path(str(cache_file_base) + ".gz")):
+            try:
+                with gzip.open(cache_file.open("rb"), "rt") as fh:
+                    data = fh.read()
+            except gzip.BadGzipFile:
+                data = cache_file.read_text()
+            except OSError:
+                pass
+
+            if data is not None:
+                break
+
+        if data is not None and len(data):
+            logger.info(f"used cached file {cache_file}")
+            return (data, cache_file)
+
+        # Hack: read full file into memory in order to handle both compressed and
+        # uncompressed data.
+        r = requests.get(url, stream=True)
+        raw_data = r.raw.read()
+
+        # Further hacks: the URL may not have a .gz extension even though the
+        # data is compressed. Adjust the cache_file name to reflect the compression or lack thereof.
+
+        os.makedirs(self.ARTIFACT_CACHE, exist_ok=True)
+
+        try:
+            data = gzip.GzipFile(fileobj=io.BytesIO(raw_data)).read().decode()
+            if not str(cache_file).endswith(".gz"):
+                cache_file = str(cache_file) + ".gz"
+            cache_file.write_bytes(raw_data)
+        except gzip.BadGzipFile:
+            data = raw_data.decode()
+            cache_file.write_text(data)
+
+        return (data, cache_file)
 
 
 def require_user():
@@ -240,7 +299,7 @@ PushDescriptions = {}
 # Summarize and cache a push.
 def summarize_push(push, cache):
     cache_path = ("push", push["id"])
-    if desc := cache_lookup(cache, cache_path + ("desc",)):
+    if desc := cache.lookup(cache_path + ("desc",)):
         return desc
 
     rev = push["revisions"][0]
@@ -249,7 +308,7 @@ def summarize_push(push, cache):
         desc = desc[0:76] + "..."
     PushDescriptions[push["id"]] = desc
     push["desc"] = desc
-    cache_value(cache, cache_path, push)
+    cache.value(cache_path, push)
     return desc
 
 
@@ -268,14 +327,14 @@ def list_pushes(args):
 
 
 def get_push_summary(push_id, cache):
-    if desc := cache_lookup(cache, ("push", push_id, "desc")):
+    if desc := cache.lookup(("push", push_id, "desc")):
         return desc
     push = get_results("push", project=args.branch, id=push_id)[0]
     return summarize_push(push, cache)
 
 
 def get_push(push_id, cache):
-    if push := cache_lookup(cache, ("push", push_id)):
+    if push := cache.lookup(("push", push_id)):
         return push
     push = get_results("push", project=args.branch, id=push_id)[0]
     summarize_push(push, cache)
@@ -325,12 +384,12 @@ def job_symbol(job, cache):
 
 
 def describe_job(job_id, cache):
-    job = cache_lookup(cache, ("job", job_id))
+    job = cache.lookup(("job", job_id))
     return job_symbol(job, cache)
 
 
 def get_job_artifacts(job_id, cache=None):
-    if cjob := cache_lookup(cache, ("job", job_id)):
+    if cjob := cache.lookup(("job", job_id)):
         if artifacts := cjob.get("artifacts"):
             if "job_group_symbol" in cjob:
                 logger.info(f"loaded job {job_id} {describe_job(job_id, cache)} from cache: {len(artifacts)} artifacts")
@@ -339,7 +398,7 @@ def get_job_artifacts(job_id, cache=None):
     job = get_results('jobs', project=args.branch, id=job_id)[-1]
 
     for k in ("job_group_symbol", "job_group_name", "job_type_name", "job_type_symbol", "result", "state"):
-        cache_value(cache, ("job", job_id, k), job.get(k))
+        cache.value(("job", job_id, k), job.get(k))
 
     task = job["task_id"]
     data = graphql(task)["data"]
@@ -355,7 +414,7 @@ def get_job_artifacts(job_id, cache=None):
             run=lastrun["runId"],
             artifact=urllib.parse.quote(name, safe=''),
         ))
-    cache_value(cache, ("job", job_id, "artifacts"), artifacts)
+    cache.value(("job", job_id, "artifacts"), artifacts)
     logger.debug(f"job {job_id} {describe_job(job_id, cache)}: {len(artifacts)} artifacts")
     return artifacts
 
@@ -411,7 +470,7 @@ def get_pushes_matching(filter):
 
 def resolve_push_range(spec, cache):
     cache_path = ("pushes", f"spec={spec}")
-    if pushes := cache_lookup(cache, cache_path):
+    if pushes := cache.lookup(cache_path):
         return pushes
 
     pushes = []
@@ -422,13 +481,13 @@ def resolve_push_range(spec, cache):
         else:
             pushes.extend(get_pushes(int(range[0]), int(range[1])))
 
-    return cache_value(cache, cache_path, pushes)
+    return cache.value(cache_path, pushes)
 
 
 def resolve_pushes(spec, cache):
     if args.pushes:
         if args.pushes.startswith("!"):
-            spec = {"ids": "+".join(cache_lookup(cache, ("history", "pushes", -int(args.pushes[1:]))))}
+            spec = {"ids": "+".join(cache.lookup(("history", "pushes", -int(args.pushes[1:]))))}
         else:
             spec = {"ids": args.pushes}
 
@@ -453,52 +512,6 @@ def resolve_pushes(spec, cache):
         return choose_pushes(cache, nchoices)
 
     raise Exception("pushes request must be 'ids' or 'comment'")
-
-
-def fetch_artifact(url):
-    if url.startswith("file://"):
-        # requests doesn't seem to handle file: URLs.
-        filename = url[7:]
-        return (Path(filename).read_text(), filename)
-
-    cache_file_base = ARTIFACT_CACHE / urllib.parse.quote(url, safe='')
-    data = None
-    for cache_file in (cache_file_base, Path(str(cache_file_base) + ".gz")):
-        try:
-            with gzip.open(cache_file.open("rb"), "rt") as fh:
-                data = fh.read()
-        except gzip.BadGzipFile:
-            data = cache_file.read_text()
-        except OSError:
-            pass
-
-        if data is not None:
-            break
-
-    if data is not None and len(data):
-        logger.info(f"used cached file {cache_file}")
-        return (data, cache_file)
-
-    # Hack: read full file into memory in order to handle both compressed and
-    # uncompressed data.
-    r = requests.get(url, stream=True)
-    raw_data = r.raw.read()
-
-    # Further hacks: the URL may not have a .gz extension even though the
-    # data is compressed. Adjust the cache_file name to reflect the compression or lack thereof.
-
-    os.makedirs(ARTIFACT_CACHE, exist_ok=True)
-
-    try:
-        data = gzip.GzipFile(fileobj=io.BytesIO(raw_data)).read().decode()
-        if not str(cache_file).endswith(".gz"):
-            cache_file = str(cache_file) + ".gz"
-        cache_file.write_bytes(raw_data)
-    except gzip.BadGzipFile:
-        data = raw_data.decode()
-        cache_file.write_text(data)
-
-    return (data, cache_file)
 
 
 DataT = dict[str, Any] | list[Any]
@@ -762,7 +775,7 @@ class GroupBy(object):
 
 def process_artifact(url, job, push_result, query, cache):
     logger.info(f"process artifact {url}")
-    raw, filename = fetch_artifact(url)
+    raw, filename = cache.fetch_artifact(url)
     metric = query["metric"]
     extractor = parse_metric_extractor(metric)
     if extractor["type"] == "json":
@@ -927,6 +940,7 @@ if args.output:
 # Ok, I am bad. The cache holds useful data collected during the run, so don't
 # just set it to None if --no-cache is given. This is laziness; I ought to have
 # a "real" data store and let the cache be a pure backing store.
+cache = Cache(args.cache_root, args.refresh, args.no_cache)
 cache = EMPTY_CACHE
 if not args.no_cache:
     cache = load_cache(CACHE)
@@ -949,5 +963,4 @@ else:
     print(json.dumps(choose_pushes(cache, 20)))
     print("Do what, now?")
 
-if not args.no_cache:
-    save_cache(CACHE, cache)
+cache.save()
