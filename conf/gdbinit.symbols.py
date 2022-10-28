@@ -24,7 +24,7 @@ except ImportError:
     from urllib import quote
     from urlparse import urljoin
 
-SYMBOL_SERVER_URL = 'https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/'
+SYMBOL_SERVER_URL = 'https://symbols.mozilla.org'
 
 debug_dir = os.path.join(os.environ['HOME'], '.cache', 'gdb')
 cache_dir = os.path.join(debug_dir, '.build-id')
@@ -54,12 +54,14 @@ def try_fetch_symbols(filename, build_id, destination):
     try:
         u = urlopen(url)
         if u.getcode() != 200:
+            print('  GET {} returned code {}'.format(url, u.getcode()))
             return None
         print('Fetching symbols from {0}'.format(url))
         with open(debug_file, 'wb') as f, gzip.GzipFile(fileobj=io.BytesIO(u.read()), mode='r') as z:
             shutil.copyfileobj(z, f)
             return debug_file
-    except:
+    except Exception as e:
+        print('  failed with exception: ' + str(e))
         return None
 
 

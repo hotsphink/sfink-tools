@@ -38,4 +38,6 @@ metric:
     job-header: "# push {push_idx}: {push_desc} [job={job_desc}]\n# {push_url}"
     label-header:
       process: "# process {process_idx} = {process} (job {job_id} <{job_url}>)\n# {filename}"
-    format: "{process_idx} {value} # {mempath}"
+    #format: "{process_idx} {value} # {mempath}"
+    groupby: ["process_idx"]
+    format: "{push_idx} {sum(value)}"
