@@ -27,7 +27,10 @@ JOB_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&s
 logger = logging.getLogger("artifetch")
 autoincrement = defaultdict(int)
 
-logger = logging.getLogger("artifetch")
+if "--test" in sys.argv:
+    iftest = lambda t: t
+else:
+    iftest = lambda t: argparse.SUPPRESS
 
 parser = argparse.ArgumentParser(prog='artifetch', usage="artifetch [options]")
 parser.add_argument("--version", action='version', version=f'%(prog)s {VERSION}')
@@ -56,9 +59,25 @@ parser.add_argument("--show-job", dest="job", help="Display info for a given JOB
 parser.add_argument("--push", help="Push ID to query")
 parser.add_argument("--pushes", help="List of push IDs to query, or !n for the nth newest history item, counting from zero")
 
+parser.add_argument("--test", action="store_true", help="enable extra options for testing")
 
+parser.add_argument("--record", type=str, help=iftest("directory to record into"))
+parser.add_argument("--replay", type=str, help=iftest("directory to replay from"))
 
+args = parser.parse_args()
 
+if args.verbose == 1:
+    logger.setLevel(logging.INFO)
+elif args.verbose > 1:
+    logger.setLevel(logging.DEBUG)
+
+loghandler = logging.StreamHandler()
+loghandler.setFormatter(logging.Formatter("%(levelname)s - %(message)s"))
+logger.addHandler(loghandler)
+
+OutFile = sys.stdout
+if args.output:
+    OutFile = open(args.output, "wt")
 
 
 class Cache(object):
@@ -206,13 +225,25 @@ def get(endpoint, project=None, **params):
 
 
 def get_results(endpoint, project=None, **params):
-    response = get(endpoint, project=project, **params)
-    if response.ok:
-        return response.json()["results"]
-    logger.error(f"API request failed: {response.status_code} {response.reason}")
-    logger.error(response.text)
-    sys.exit(1)
+    if args.replay or args.record:
+        autoincrement[endpoint] += 1
+        filename = endpoint + "-" + str(autoincrement[endpoint])
 
+    if args.replay:
+        text = (Path(args.replay) / filename).read_text()
+        data = json.loads(text)
+    else:
+        response = get(endpoint, project=project, **params)
+        if not response.ok:
+            logger.error(f"API request failed: {response.status_code} {response.reason}")
+            logger.error(response.text)
+            sys.exit(1)
+        data = response.json()
+
+    if args.record:
+        (Path(args.record) / filename).write_text(json.dumps(data))
+
+    return data["results"] if endpoint != "repository" else data
 
 def graphql(task_id):
     headers = HEADERS
@@ -927,20 +958,8 @@ def process_query(args, cache):
             logger.warning(f"no jobs matching: '{job_filter.name}' for push {push['desc']}")
 
 
-args = parser.parse_args()
-
-if args.verbose == 1:
-    logger.setLevel(logging.INFO)
-elif args.verbose > 1:
-    logger.setLevel(logging.DEBUG)
-
-loghandler = logging.StreamHandler()
-loghandler.setFormatter(logging.Formatter("%(levelname)s - %(message)s"))
-logger.addHandler(loghandler)
-
-OutFile = sys.stdout
-if args.output:
-    OutFile = open(args.output, "wt")
+if args.record:
+    os.makedirs(args.record, exist_ok=True)
 
 # Ok, I am bad. The cache holds useful data collected during the run, so don't
 # just set it to None if --no-cache is given. This is laziness; I ought to have
