@@ -598,11 +598,16 @@ def match_key(key : str, val):
 PrevPush = None
 
 
-# FIXME
-def guess_repository(repo_id, cache):
-    if repo_id == 4:
-        return 'try'
-    return 'mozilla-central'
+def get_repository(repo_id, cache):
+    repo = cache.lookup(("repository", repo_id))
+    if repo:
+        return repo
+
+    results = get_results("repository")
+    cached = cache.value(("repository"), {})
+    retrieved = {str(r["id"]): r["name"] for r in results}
+    cached.update(retrieved)
+    return cached[str(repo_id)]
 
 
 def output_metric(result, added, output={}, cache=None):
@@ -906,7 +911,7 @@ def process_query(args, cache):
             "push_idx": push_table.setdefault(push_id, len(push_table)),
             "push_desc": summarize_push(push, cache),
             "revision": push['revision'],
-            "repo": guess_repository(push['repository_id'], cache),
+            "repo": get_repository(push['repository_id'], cache),
         }
         push_result["push_url"] = PUSH_URL.format(**push_result)
 
