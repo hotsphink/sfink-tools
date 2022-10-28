@@ -39,6 +39,8 @@ parser.add_argument("--cache-root", default=str(DEFAULT_CACHE_ROOT), help="Root 
 
 parser.add_argument("--json", action="store_true", help="Dump out raw JSON output")
 parser.add_argument("--output", "-o", help="File to save output to, default stdout")
+parser.add_argument("--again", nargs="?", const="all", action="store",
+                    help="Repeat last query")
 parser.add_argument("--refresh", action="store_true", help="Do not use cached results")
 parser.add_argument("--no-cache", action="store_true", help="Do not load from or save to cache")
 parser.add_argument("--user", "-u", default=None, help="User to use for filtering pushes")
@@ -79,6 +81,10 @@ OutFile = sys.stdout
 if args.output:
     OutFile = open(args.output, "wt")
 
+if args.again == "all":
+    args.again = ["pushes", "jobs"]
+else:
+    args.again = args.again.split(",")
 
 class Cache(object):
 # Anything here can be guaranteed to exist.
@@ -155,7 +161,7 @@ class Cache(object):
             filename = url[7:]
             return (Path(filename).read_text(), filename)
 
-        cache_file_base = self.ARTIFACT_CACHE / urllib.parse.quote(url, safe='')
+        cache_file_base = self.artifact_path / urllib.parse.quote(url, safe='')
         data = None
         for cache_file in (cache_file_base, Path(str(cache_file_base) + ".gz")):
             try:
@@ -181,7 +187,7 @@ class Cache(object):
         # Further hacks: the URL may not have a .gz extension even though the
         # data is compressed. Adjust the cache_file name to reflect the compression or lack thereof.
 
-        os.makedirs(self.ARTIFACT_CACHE, exist_ok=True)
+        self.artifact_path.mkdir(parents=True, exist_ok=True)
 
         try:
             data = gzip.GzipFile(fileobj=io.BytesIO(raw_data)).read().decode()
@@ -616,6 +622,8 @@ def lookup_values_g(extractor, match, data, labels):
         yield from lookup_json_values_g(extractor, match, data, labels)
     elif extractor["type"] == "text":
         yield from lookup_text_values_g(extractor, data, labels)
+    elif extractor["type"] == "files":
+        yield {}
 
 
 def match_key(key : str, val):
@@ -647,7 +655,7 @@ def output_metric(result, added, output={}, cache=None):
 
     style = output.get("style", "formatted")
     format = output.get("format", "{push_idx} {value}")
-    header_format = output.get("job-header", "# {desc}")
+    header_format = output.get("job-header", "# {desc}" if "desc" in result else False)
 
     if style not in ("gnuplot", "formatted"):
         raise Exception(f"unsupported output format {output}")
@@ -716,7 +724,12 @@ def parse_metric_extractor(metric):
         return parse_json_metric_extractor(metric)
     if "text" in metric:
         return parse_text_metric_extractor(metric)
-    raise Exception("no metric spec found")
+    return {
+        "type": "files",
+        "labels": {},
+        "keys": (None,),
+        "targets": (None,),
+    }
 
 
 def match_remaining(matchers, paths: ResultPathsT, data : DataT) -> list[ResultPathsT]:
@@ -743,6 +756,10 @@ def extract_matches_g(extractor, data : DataT):
 
     matches : list[ResultPathsT] = []
 
+    if extractor["type"] == "files":
+        yield from lookup_values_g(extractor, None, data, {})
+        return
+
     # For each match for the first match-key
     matcher = matchers.pop(0)
 
@@ -757,10 +774,9 @@ def extract_matches_g(extractor, data : DataT):
                 matches += match_remaining(matchers, [None, path], data)
 
         for match in matches:
-            for result in lookup_values_g(extractor, match, data, labels):
-                yield result
+            yield from lookup_values_g(extractor, match, data, labels)
 
-    elif extractor["type"] == "text":
+    else:
         labels = list((extractor["labels"] or {}).items())
         yield from lookup_values_g(extractor, None, data, labels)
 
@@ -816,8 +832,10 @@ def process_artifact(url, job, push_result, query, cache):
     extractor = parse_metric_extractor(metric)
     if extractor["type"] == "json":
         data : DataT = json.loads(raw)
-    else:
+    elif extractor["type"] == "text":
         data : DataT = raw
+    else:
+        data : DataT = None
     output = metric.get("output", {})
 
     if groupby := output.get("groupby"):
@@ -870,22 +888,98 @@ def process_artifact(url, job, push_result, query, cache):
         handler.output_results(output)
 
 
-def limited_filter(job_filter, limit, filter_state):
-    def new_filter(job):
-        if filter_state["njobs"] >= limit or not job_filter(job):
-            return False
-        filter_state["njobs"] += 1
-        return True
-    return new_filter
+class BaseFilter(object):
+    def __init__(self, base_filter = None, desc = None):
+        self.base = base_filter
+        if desc is None:
+            self.name = base_filter.name if base_filter else "all items"
+        else:
+            self.name = f"all {desc}"
+
+    def __call__(self, incoming):
+        if self.base is None:
+            return incoming
+        return self.base(incoming)
+
+
+class LimitFilter(BaseFilter):
+    def __init__(self, base_filter, limit):
+        super().__init__(base_filter)
+        self.limit = limit
+        if self.limit:
+            self.name = f"first {self.limit} of {base_filter.name}"
+        else:
+            self.name = base_filter.name
+
+    def __call__(self, incoming):
+        results = []
+        for item in self.base(incoming):
+            results.append(item)
+            if self.limit and len(results) >= limit:
+                return results
+        return results
+
+
+class MatchFilter(BaseFilter):
+    def __init__(self, base_filter, matcher, desc):
+        super().__init__(base_filter)
+        self.name = f"({base_filter.name} with {desc}"
+        self.matcher = matcher
+
+    def __call__(self, incoming):
+        return filter(self.match, incoming)
+
+
+class ChooseFilter(BaseFilter):
+    def __init__(self, base_filter, cache, again, extract_description=lambda s: s):
+        super().__init__(base_filter)
+        self.extract_description = extract_description
+        self.cache = cache
+        self.again = again
+        setattr(ChooseFilter, "count", 0)
+
+    def __call__(self, incoming):
+        incoming = list(incoming)  # flatten iterator
+
+        ChooseFilter.count += 1
+        n = ChooseFilter.count
+        # Ugh.
+        cache_path = ("history", "choose", f"choose-{n}")
+
+        indexes = None
+        if self.again:
+            previous = self.cache.lookup(cache_path)
+            if previous is not None:
+                indexes = [int(i) for i in previous]
+
+        if indexes is None:
+            import pyfzf
+            fzf = pyfzf.FzfPrompt()
+            descriptions = map(self.extract_description, incoming)
+            ids = range(1, len(incoming) + 1)
+            options = [f"{id} - {desc}" for id, desc in zip(ids, descriptions)]
+            choices = fzf.prompt(options, "--multi --no-sort --marker=* --ansi")
+            indexes = [int(c[0:c.index(" ")]) - 1 for c in choices]
+            self.cache.value(cache_path, indexes)
+
+        return [incoming[i] for i in indexes]
 
 
 def process_query(args, cache):
-    with open(args.query) as fh:
-        query = yaml.safe_load(fh)
+    if args.query == "default":
+        query = {
+            "artifact": "live_backing.log",
+            "metric": {
+                "output": {
+                    "style": "formatted",
+                    "format": "{filename}",
+                }
+            }}
+    else:
+        with open(args.query) as fh:
+            query = yaml.safe_load(fh)
 
-    filter_name = "all jobs"
-    job_filter = lambda j: True
-    filter_state = {"njobs": 0}
+    job_filter = BaseFilter(None, "jobs")
 
     if local_artifacts := query.get("artifacts"):
         for push_id, a in enumerate(local_artifacts):
@@ -912,23 +1006,21 @@ def process_query(args, cache):
 
     artifact_match = query["artifact"]
 
-    if job_query := query.get("jobs"):
-        if sym := job_query.get("symbol"):
-            job_filter = lambda j: job_symbol(j, cache) == sym
-            filter_name = f"jobs matching {sym}"
-        if limit := job_query.get("limit-per-push"):
-            filter_state["job_limit"] = limit
-            job_filter = limited_filter(job_filter, limit, filter_state)
-            filter_name = f"first {limit} of {filter_name}"
-
-    setattr(job_filter, "state", filter_state)
-    setattr(job_filter, "name", filter_name)
+    job_query = query.get("jobs", {"choose-from": 0})
+    if sym := job_query.get("symbol"):
+        job_filter = MatchFilter(job_filter, lambda j: job_symbol(j, cache) == sym, f"symbol is {sym}")
+    if (choices := job_query.get("choose-from")) is not None:
+        job_filter = ChooseFilter(LimitFilter(job_filter, choices),
+                                  cache,
+                                  "jobs" in args.again,
+                                  lambda j: job_symbol(j, cache))
+    elif limit := job_query.get("limit-per-push"):
+        job_filter = LimitFilter(job_filter, limit)
 
     pushes = resolve_pushes(query.get("pushes") or {"choose-from": 20}, cache)
     logger.info("Pushes: " + "+".join(str(p) for p in pushes))
-    if cache:
-        history = cache.setdefault("history", {})
-        history.setdefault("pushes", []).append(pushes)
+    history = cache.value(("history", "pushes"), [])
+    history.append(pushes)
 
     push_table = {}
     for push_id in pushes:
@@ -938,7 +1030,7 @@ def process_query(args, cache):
         push_result = {
             "push": push,
             "push_id": push_id,
-            # Associate each push with an "index" set to an autoincrementing value associated with its push_id.
+            # Give each push an "index" set to an autoincrementing value associated with its push_id.
             "push_idx": push_table.setdefault(push_id, len(push_table)),
             "push_desc": summarize_push(push, cache),
             "revision": push['revision'],
@@ -946,15 +1038,16 @@ def process_query(args, cache):
         }
         push_result["push_url"] = PUSH_URL.format(**push_result)
 
-        job_filter.state["njobs"] = 0
         for job in get_jobs(push["id"]):
             logger.debug(f"checking job {job_symbol(job, cache)} against {job_filter.name}")
-        for job in filter(job_filter, reversed(get_jobs(push["id"]))):
+        found = 0
+        for job in job_filter(reversed(get_jobs(push["id"]))):
+            found += 1
             for a in get_job_artifacts(job["id"], cache):
                 if match_key(artifact_match, a):
                     process_artifact(a, job, push_result, query, cache)
 
-        if job_filter.state["njobs"] == 0:
+        if found == 0:
             logger.warning(f"no jobs matching: '{job_filter.name}' for push {push['desc']}")
 
 
@@ -965,9 +1058,7 @@ if args.record:
 # just set it to None if --no-cache is given. This is laziness; I ought to have
 # a "real" data store and let the cache be a pure backing store.
 cache = Cache(args.cache_root, args.refresh, args.no_cache)
-cache = EMPTY_CACHE
-if not args.no_cache:
-    cache = load_cache(CACHE)
+cache.load()
 
 if args.query:
     process_query(args, cache)
