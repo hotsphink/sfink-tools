@@ -639,7 +639,7 @@ def match_key(key : str, val):
         return key == val
 
 
-PrevPush = None
+PreviousOutput = {}
 
 
 def get_repository(repo_id, cache):
@@ -655,22 +655,32 @@ def get_repository(repo_id, cache):
 
 
 def output_metric(result, added, output={}, cache=None):
-    global PrevPush
+    global PreviousOutput
     global PushDescriptions
 
     style = output.get("style", "formatted")
     format = output.get("format", "{push_idx} {value}")
-    header_format = output.get("job-header", "# {desc}" if "desc" in result else False)
+    job_header = output.get("job-header", "# {desc}" if "desc" in result else False)
+    push_header = output.get("push-header", False)
 
     if style not in ("gnuplot", "formatted"):
         raise Exception(f"unsupported output format {output}")
 
-    if header_format != False:
-        if result["push_id"] != PrevPush:
-            if PrevPush is not None:
+    if push_header != False:
+        prev_push = PreviousOutput.get("push")
+        if result["push_id"] != prev_push:
+            if prev_push is not None:
                 print("", file=OutFile)
-            print(header_format.format(**result), file=OutFile)
-        PrevPush = result["push_id"]
+            print(push_header.format(**result), file=OutFile)
+        PreviousOutput["push"] = result["push_id"]
+
+    if job_header != False:
+        prev_job = PreviousOutput.get("job")
+        if result["job_id"] != prev_job:
+            if prev_job is not None:
+                print("", file=OutFile)
+            print(job_header.format(**result), file=OutFile)
+        PreviousOutput["job"] = result["job_id"]
 
     # Every time a new index is generated, output the label-header format so the index can be mapped to the data it corresponds to.
     for label, idx, label_value in added:
@@ -979,6 +989,7 @@ def process_query(args, cache):
             "metric": {
                 "output": {
                     "style": "formatted",
+                    "push-header": "# from push {push_id} - {push_desc}",
                     "format": "{filename}",
                 }
             }}
