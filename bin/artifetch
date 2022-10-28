@@ -39,7 +39,7 @@ parser.add_argument("--cache-root", default=str(DEFAULT_CACHE_ROOT), help="Root 
 
 parser.add_argument("--json", action="store_true", help="Dump out raw JSON output")
 parser.add_argument("--output", "-o", help="File to save output to, default stdout")
-parser.add_argument("--again", nargs="?", const="all", action="store",
+parser.add_argument("--again", nargs="?", const="all", default="", action="store",
                     help="Repeat last query")
 parser.add_argument("--refresh", action="store_true", help="Do not use cached results")
 parser.add_argument("--no-cache", action="store_true", help="Do not load from or save to cache")
@@ -47,7 +47,6 @@ parser.add_argument("--user", "-u", default=None, help="User to use for filterin
 parser.add_argument("--branch", default="try",
                     help="The branch to use for commands that do not use a specific URL")
 
-parser.add_argument("--query", help="Query YAML file")
 parser.add_argument("--list-pushes",
                     nargs="?", const=10, action="store",
                     help="List out N most recent try pushes")
@@ -62,11 +61,19 @@ parser.add_argument("--push", help="Push ID to query")
 parser.add_argument("--pushes", help="List of push IDs to query, or !n for the nth newest history item, counting from zero")
 
 parser.add_argument("--test", action="store_true", help="enable extra options for testing")
-
 parser.add_argument("--record", type=str, help=iftest("directory to record into"))
 parser.add_argument("--replay", type=str, help=iftest("directory to replay from"))
 
+parser.add_argument("--query", help="Query YAML file")
+parser.add_argument("_query", nargs="?", default="default", help="Query YAML file")
+
 args = parser.parse_args()
+
+if args.query is None:
+    args.query = args._query
+if args.query != args._query and args._query != "default":
+    print("Do not give both --query and positional query", file=sys.stderr)
+    sys.exit(1)
 
 if args.verbose == 1:
     logger.setLevel(logging.INFO)
@@ -379,14 +386,12 @@ def get_push(push_id, cache):
 
 
 def choose_pushes(cache, n=10):
-    import pyfzf
-    fzf = pyfzf.FzfPrompt()
     user = require_user()
     pushes = get_results("push", project=args.branch,
                          author=user, count=n)
-    options = [f"{p['id']} - {summarize_push(p, cache)}" for p in pushes]
-    choices = fzf.prompt(options, "--multi --no-sort --marker=* --ansi")
-    return [c[0:c.index(" ")] for c in choices]
+    push_filter = ChooseFilter(None, cache, "pushes" in args.again,
+                               lambda p: summarize_push(p, cache))
+    return [push["id"] for push in push_filter(pushes)]
 
 
 def get_jobs(push_id):
@@ -941,9 +946,11 @@ class ChooseFilter(BaseFilter):
     def __call__(self, incoming):
         incoming = list(incoming)  # flatten iterator
 
+        # TODO: history stores just the indexes of the choices. It should really give the id
+        # or something persistent about the selections.
         ChooseFilter.count += 1
         n = ChooseFilter.count
-        # Ugh.
+        # TODO: key these with the type of history item. This could easily mix things up.
         cache_path = ("history", "choose", f"choose-{n}")
 
         indexes = None
