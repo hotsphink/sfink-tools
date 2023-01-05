@@ -110,7 +110,7 @@ class Cache(object):
     }
 
     def __init__(self, cache_root, refresh, no_cache):
-        self.path = Path(cache_root) / "artifetch/jobs.json"
+        self.path = Path(cache_root) / "artifetch/cache.json"
         self.refresh = refresh
         self.no_cache = no_cache
         self.data = None
@@ -165,7 +165,7 @@ class Cache(object):
 
 def require_user():
     if args.user is not None:
-        if args.user == "" or args.user.lower() == "none":
+        if args.user.lower() in ("any", ""):
             return None
         return args.user
     import subprocess
@@ -327,7 +327,7 @@ class TreeHerder(object):
         try:
             data = gzip.GzipFile(fileobj=io.BytesIO(raw_data)).read().decode()
             if not str(cache_file).endswith(".gz"):
-                cache_file = str(cache_file) + ".gz"
+                cache_file = cache_file.with_name(cache_file.name + ".gz")
             cache_file.write_bytes(raw_data)
         except gzip.BadGzipFile:
             data = raw_data.decode()
@@ -336,15 +336,63 @@ class TreeHerder(object):
         return (data, cache_file)
 
 
+# I'm sure there are many better solutions for this already. I wrote this as a
+# learning project to better understand the space.
+#
+# One particularly weird thing is that if you have the same query multiple
+# times, this won't even notice. If replaying, it will always use the last
+# result. If recording, it will create a new file and overwrite the mapping
+# table with the latest result.
+#
+# I probably ought to do something about that. This is a bug even if the
+# results are deterministic, because if during replay you request more entries
+# than during the original recording, the last one will be reused.
+#
+# Note that this allows replaying from one directory and recording into
+# another. This allows extending partial recordings: part of the run is
+# replayed, then the rest will do actual fetches. When replaying without
+# recording, missing keys will error.
 class Recorder(object):
     def __init__(self, replay_dir, record_dir):
         self.replay_dir = Path(replay_dir) if replay_dir else None
         self.record_dir = Path(record_dir) if record_dir else None
         self.autoincrement = defaultdict(int)
+        self.mapping = self.load()
 
-    def get_filename(self, endpoint):
+    def load(self):
+        if not self.replay_dir:
+            return {}
+
+        try:
+            data = json.loads((self.replay_dir / "mapping.json").read_text())
+            return {tuple(dict(key).items()): v for key, v in data}
+        except IOError:
+            return {}
+
+    def save(self):
+        if self.record_dir:
+            mapping = [[list(k), v] for k, v in self.mapping.items()]
+            (self.record_dir / "mapping.json").write_text(json.dumps(mapping))
+
+    def get_filename(self, params):
+        endpoint = params["endpoint"]
         self.autoincrement[endpoint] += 1
-        return endpoint + "-" + str(self.autoincrement[endpoint])
+
+        key = tuple(params.items())  # Does not recurse!
+        if self.replay_dir:
+            try:
+                return self.mapping[key]
+            except KeyError:
+                if self.record_dir:
+                    logger.info("Extending a replay with new data")
+                else:
+                    logger.error("Replay diverged! Requested a key that does not exist in the recording.")
+                    logger.error(json.dumps(params))
+                    raise
+
+        filename = endpoint + "-" + str(self.autoincrement[endpoint])
+        self.mapping[key] = filename
+        return filename
 
     def record(self, filename, data, format):
         if format == 'json':
@@ -365,11 +413,11 @@ class PersistentTreeHerder(TreeHerder):
         self.record = record
         self.recorder = Recorder(self.replay, self.record)
 
-    def do(self, endpoint, func, format):
+    def do(self, key, func, format):
         if not self.replay and not self.record:
             return func()
 
-        filename = self.recorder.get_filename(endpoint)
+        filename = self.recorder.get_filename(key)
 
         if self.replay:
             data = self.recorder.replay(filename, format)
@@ -377,28 +425,36 @@ class PersistentTreeHerder(TreeHerder):
             data = func()
 
         if self.record:
-            self.recorder.record(filename, format)
+            self.recorder.record(filename, data, format)
 
         return data
 
     def get_results(self, endpoint, project=None, **params):
         sup = super()
-        return self.do(endpoint, lambda: sup.get_results(endpoint, project=project, **params), format='json')
+        key = dict(params)
+        key.update({"endpoint": endpoint, "project": project})
+        return self.do(key, lambda: sup.get_results(endpoint, project=project, **params), format='json')
 
     # We only have a single graphql query, hence the stupid name here.
     def graphql(self, task_id):
         sup = super()
-        return self.do('graphql', func=lambda: sup.graphql(task_id), format='json')
+        key = {"endpoint": "graphql", "task_id": task_id}
+        return self.do(key, func=lambda: sup.graphql(task_id), format='json')
 
     def fetch_artifact(self, url):
         sup = super()
         cache_file = None
 
+        # fetch_artifact returns the data along with the Path to the data file,
+        # which is not JSON serializable, so strip it out for self.do() and add
+        # it back when returning.
         def call_super():
+            nonlocal cache_file
             (data, cache_file) = sup.fetch_artifact(url)
             return data
 
-        data = self.do('artifact', call_super, 'text')
+        key = {"endpoint": "artifact", "url": url}
+        data = self.do(key, call_super, 'text')
         return (data, cache_file)
 
 
@@ -521,13 +577,12 @@ def get_job_artifacts(job_id, cache=None):
     if cjob := cache.lookup(("job", job_id)):
         if artifacts := cjob.get("artifacts"):
             if "job_group_symbol" in cjob:
-                logger.info(f"loaded job {job_id} {describe_job_id(job_id, cache)} from cache: {len(artifacts)} artifacts")
+                logger.info(f"loaded job {job_id} {describe_job_id(job_id, cache)} for push {cjob['push_id']} from cache: {len(artifacts)} artifacts")
                 return artifacts
 
     job = server.get_results('jobs', project=args.branch, id=job_id)[-1]
-
-    for k in ("job_group_symbol", "job_group_name", "job_type_name", "job_type_symbol", "result", "state"):
-        cache.value(("job", job_id, k), job.get(k))
+    for k in job.keys():
+        cache.value(("job", job_id, k), job[k])
 
     task = job["task_id"]
     data = server.graphql(task)["data"]
@@ -753,7 +808,7 @@ def output_metric(result, added, output={}, cache=None):
     if style not in ("gnuplot", "formatted"):
         raise Exception(f"unsupported output format {output}")
 
-    if push_header != False:
+    if push_header is not False:
         prev_push = PreviousOutput.get("push")
         if result["push_id"] != prev_push:
             if prev_push is not None:
@@ -761,7 +816,7 @@ def output_metric(result, added, output={}, cache=None):
             print(push_header.format(**result), file=OutFile)
         PreviousOutput["push"] = result["push_id"]
 
-    if job_header != False:
+    if job_header is not False:
         prev_job = PreviousOutput.get("job")
         if result["job_id"] != prev_job:
             if prev_job is not None:
@@ -1132,7 +1187,7 @@ def process_query(args, cache):
     push_table = {}
     for push_id in pushes:
         push = get_push(push_id, cache)
-        logger.info(f"Scanning push {push['desc']}")
+        logger.info(f"Scanning push {push['desc']} id {push['id']}")
 
         push_result = {
             "push": push,
@@ -1145,12 +1200,11 @@ def process_query(args, cache):
         }
         push_result["push_url"] = PUSH_URL.format(**push_result)
 
-        for job in get_jobs(push["id"]):
-            logger.debug(f"checking job {job_symbol(job)} against {job_filter.name}")
         found = 0
-        all_jobs = get_jobs(push["id"])
-        all_jobs = list(all_jobs)  # reversed and length taken below
-        for job in job_filter(reversed(all_jobs)):
+
+        # Get the latest run if there are multiple runs, to ignore retried jobs.
+        jobs = job_filter(get_jobs(push["id"]))
+        for job in reversed(jobs):
             found += 1
             for a in get_job_artifacts(job["id"], cache):
                 if match_key(artifact_match, a):
@@ -1158,9 +1212,6 @@ def process_query(args, cache):
 
         if found == 0:
             logger.warning(f"no jobs matching: '{job_filter.name}' for push {push['desc']}")
-            logger.warning(f"  out of {len(all_jobs)} jobs found")
-            for job in sorted(all_jobs, key=describe_job):
-                logger.warning("  " + describe_job(job, {"id": True}))
 
 
 if args.record:
@@ -1193,3 +1244,4 @@ else:
     process_query(args, cache)
 
 cache.save()
+server.recorder.save()
