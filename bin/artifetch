@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_CACHE_ROOT = Path(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")))
-SITE = "https://treeherder.mozilla.org"
+TREEHERDER_SERVER = "https://treeherder.mozilla.org"
 VERSION = 0.1
 HEADERS = {"User-Agent": f"artifetch {VERSION} by sfink@mozilla.com"}
 
@@ -25,7 +25,6 @@ PUSH_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}"
 JOB_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
 
 logger = logging.getLogger("artifetch")
-autoincrement = defaultdict(int)
 
 if "--test" in sys.argv:
     iftest = lambda t: t
@@ -34,8 +33,10 @@ else:
 
 parser = argparse.ArgumentParser(prog='artifetch', usage="artifetch [options]")
 parser.add_argument("--version", action='version', version=f'%(prog)s {VERSION}')
-parser.add_argument("--verbose", "-v", default=0, action="count", help="Verbose output")
-parser.add_argument("--cache-root", default=str(DEFAULT_CACHE_ROOT), help="Root of cache dir, useful to override for testing")
+parser.add_argument("--verbose", "-v", default=0, action="count",
+                    help="Verbose output")
+parser.add_argument("--cache-root", default=str(DEFAULT_CACHE_ROOT),
+                    help="Root of cache dir, useful to override for testing")
 
 parser.add_argument("--json", action="store_true", help="Dump out raw JSON output")
 parser.add_argument("--output", "-o", help="File to save output to, default stdout")
@@ -65,13 +66,13 @@ parser.add_argument("--record", type=str, help=iftest("directory to record into"
 parser.add_argument("--replay", type=str, help=iftest("directory to replay from"))
 
 parser.add_argument("--query", help="Query YAML file")
-parser.add_argument("_query", nargs="?", default="default", help="Query YAML file")
+parser.add_argument("_query", nargs="?", default=None, help="Query YAML file")
 
 args = parser.parse_args()
 
 if args.query is None:
     args.query = args._query
-if args.query != args._query and args._query != "default":
+if args.query != args._query and args._query is not None:
     print("Do not give both --query and positional query", file=sys.stderr)
     sys.exit(1)
 
@@ -93,8 +94,9 @@ if args.again == "all":
 else:
     args.again = args.again.split(",")
 
+
 class Cache(object):
-# Anything here can be guaranteed to exist.
+    # Anything here can be guaranteed to exist.
     EMPTY_CACHE = {
         "pushes": {
             # "spec=<spec>" for resolve_push_range a+b::c+d+e syntax (b::c ranges are looked up).
@@ -109,7 +111,6 @@ class Cache(object):
 
     def __init__(self, cache_root, refresh, no_cache):
         self.path = Path(cache_root) / "artifetch/jobs.json"
-        self.artifact_path = Path(cache_root) / "artifetch/artifacts/"
         self.refresh = refresh
         self.no_cache = no_cache
         self.data = None
@@ -162,6 +163,133 @@ class Cache(object):
             cache[path[-1]] = value
         return value
 
+def require_user():
+    if args.user is not None:
+        if args.user == "" or args.user.lower() == "none":
+            return None
+        return args.user
+    import subprocess
+    try:
+        output = subprocess.check_output(["hg", "config", "ui.username"], text=True)
+        # Extract just the email address from `My Name <myname@nowhere.com>`.
+        if m := re.search(r'<(.*?)>', output):
+            args.user = m.group(1)
+        else:
+            args.user = output.strip()
+    except subprocess.CalledProcessError:
+        output = subprocess.check_output(["git", "config", "--get", "user.email"], text=True)
+        args.user = output.strip()
+
+    return args.user
+
+
+class TreeHerder(object):
+    def __init__(self, cache_root):
+        self.server = TREEHERDER_SERVER
+        self.headers = HEADERS
+        self.artifact_path = Path(cache_root) / "artifetch/artifacts/"
+
+    # I should be using thclient, but the pip-installed version is out of date, and
+    # the in-tree treeherder one is missing some endpoints that I need. And it
+    # doesn't really add much portability or backwards compatibility afaict.
+    def get(self, endpoint, project=None, **params):
+        if project is not None:
+            url = f"{self.server}/api/project/{project}/{endpoint}/"
+        else:
+            url = f"{self.server}/api/{endpoint}/"
+        return requests.get(url, params=params, headers=self.headers)
+
+    def get_results(self, endpoint, project=None, **params):
+        response = self.get(endpoint, project=project, **params)
+        if not response.ok:
+            logger.error(f"API request failed: {response.status_code} {response.reason}")
+            logger.error(response.text)
+            sys.exit(1)
+        data = response.json()
+
+        return data["results"] if endpoint != "repository" else data
+
+    def graphql(self, task_id):
+        headers = self.headers
+        headers.update({"Content-Type": "application/json"})
+        response = requests.post(
+            "https://firefox-ci-tc.services.mozilla.com/graphql",
+            json={
+                "operationName": "Task",
+                "variables": {
+                    "taskId": task_id,
+                    "artifactsConnection": {
+                        "limit": 1000
+                    },
+                },
+                "query": """\
+    query Task(
+        $taskId: ID!,
+        $artifactsConnection: PageConnection
+    ) {
+      task(taskId: $taskId) {
+        taskId
+        taskGroupId
+        routes
+        extra
+        metadata {
+          name
+          description
+          owner
+          __typename
+        }
+        status {
+          state
+          runs {
+            taskId
+            runId
+            state
+            artifacts(connection: $artifactsConnection) {
+              ...Artifacts
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+    }
+
+    fragment Artifacts on ArtifactsConnection {
+      pageInfo {
+        hasNextPage
+        hasPreviousPage
+        cursor
+        previousCursor
+        nextCursor
+        __typename
+      }
+      edges {
+        node {
+          name
+          contentType
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }"""
+            },
+            headers=headers
+        )
+
+        if not response.ok:
+            logger.error(f"graphql request failed: {response.status_code} {response.reason}")
+            logger.error(response.text)
+            sys.exit(1)
+        data = response.json()
+        if errors := data.get("errors"):
+            for error in errors:
+                logger.error("{code}: {message}".format(**error))
+            raise Exception(",".join(e["code"] for e in errors))
+        return data
+
     def fetch_artifact(self, url):
         if url.startswith("file://"):
             # requests doesn't seem to handle file: URLs.
@@ -208,133 +336,73 @@ class Cache(object):
         return (data, cache_file)
 
 
-def require_user():
-    if args.user:
-        return args.user
-    import subprocess
-    try:
-        output = subprocess.check_output(["hg", "config", "ui.username"], text=True)
-        # Extract just the email address from `My Name <myname@nowhere.com>`.
-        if m := re.search(r'<(.*?)>', output):
-            args.user = m.group(1)
+class Recorder(object):
+    def __init__(self, replay_dir, record_dir):
+        self.replay_dir = Path(replay_dir) if replay_dir else None
+        self.record_dir = Path(record_dir) if record_dir else None
+        self.autoincrement = defaultdict(int)
+
+    def get_filename(self, endpoint):
+        self.autoincrement[endpoint] += 1
+        return endpoint + "-" + str(self.autoincrement[endpoint])
+
+    def record(self, filename, data, format):
+        if format == 'json':
+            data = json.dumps(data)
+        (self.record_dir / filename).write_text(data)
+
+    def replay(self, filename, format):
+        text = (self.replay_dir / filename).read_text()
+        if format == 'json':
+            return json.loads(text)
+        return text
+
+
+class PersistentTreeHerder(TreeHerder):
+    def __init__(self, cache_root, replay, record):
+        super().__init__(cache_root)
+        self.replay = replay
+        self.record = record
+        self.recorder = Recorder(self.replay, self.record)
+
+    def do(self, endpoint, func, format):
+        if not self.replay and not self.record:
+            return func()
+
+        filename = self.recorder.get_filename(endpoint)
+
+        if self.replay:
+            data = self.recorder.replay(filename, format)
         else:
-            args.user = output.strip()
-    except subprocess.CalledProcessError:
-        output = subprocess.check_output(["git", "config", "--get", "user.email"], text=True)
-        args.user = output.strip()
+            data = func()
 
-    return args.user
+        if self.record:
+            self.recorder.record(filename, format)
+
+        return data
+
+    def get_results(self, endpoint, project=None, **params):
+        sup = super()
+        return self.do(endpoint, lambda: sup.get_results(endpoint, project=project, **params), format='json')
+
+    # We only have a single graphql query, hence the stupid name here.
+    def graphql(self, task_id):
+        sup = super()
+        return self.do('graphql', func=lambda: sup.graphql(task_id), format='json')
+
+    def fetch_artifact(self, url):
+        sup = super()
+        cache_file = None
+
+        def call_super():
+            (data, cache_file) = sup.fetch_artifact(url)
+            return data
+
+        data = self.do('artifact', call_super, 'text')
+        return (data, cache_file)
 
 
-# I should be using thclient, but the pip-installed version is out of date, and
-# the in-tree treeherder one is missing some endpoints that I need. And it
-# doesn't really add much portability or anything.
-def get(endpoint, project=None, **params):
-    if project is not None:
-        url = f"{SITE}/api/project/{project}/{endpoint}/"
-    else:
-        url = f"{SITE}/api/{endpoint}/"
-    return requests.get(url, params=params, headers=HEADERS)
-
-
-def get_results(endpoint, project=None, **params):
-    if args.replay or args.record:
-        autoincrement[endpoint] += 1
-        filename = endpoint + "-" + str(autoincrement[endpoint])
-
-    if args.replay:
-        text = (Path(args.replay) / filename).read_text()
-        data = json.loads(text)
-    else:
-        response = get(endpoint, project=project, **params)
-        if not response.ok:
-            logger.error(f"API request failed: {response.status_code} {response.reason}")
-            logger.error(response.text)
-            sys.exit(1)
-        data = response.json()
-
-    if args.record:
-        (Path(args.record) / filename).write_text(json.dumps(data))
-
-    return data["results"] if endpoint != "repository" else data
-
-def graphql(task_id):
-    headers = HEADERS
-    headers.update({"Content-Type": "application/json"})
-    response = requests.post(
-        "https://firefox-ci-tc.services.mozilla.com/graphql",
-        json={
-            "operationName": "Task",
-            "variables": {
-                "taskId": task_id,
-                "artifactsConnection": {
-                    "limit": 1000
-                },
-            },
-            "query": """\
-query Task(
-    $taskId: ID!,
-    $artifactsConnection: PageConnection
-) {
-  task(taskId: $taskId) {
-    taskId
-    taskGroupId
-    routes
-    extra
-    metadata {
-      name
-      description
-      owner
-      __typename
-    }
-    status {
-      state
-      runs {
-        taskId
-        runId
-        state
-        artifacts(connection: $artifactsConnection) {
-          ...Artifacts
-          __typename
-        }
-        __typename
-      }
-      __typename
-    }
-    __typename
-  }
-}
-
-fragment Artifacts on ArtifactsConnection {
-  pageInfo {
-    hasNextPage
-    hasPreviousPage
-    cursor
-    previousCursor
-    nextCursor
-    __typename
-  }
-  edges {
-    node {
-      name
-      contentType
-      __typename
-    }
-    __typename
-  }
-  __typename
-}"""
-        },
-        headers=headers
-    )
-
-    data = response.json()
-    if errors := data.get("errors"):
-        for error in errors:
-            logger.error("{code}: {message}".format(**error))
-        raise Exception(",".join(e["code"] for e in errors))
-    return data
-
+server = PersistentTreeHerder(args.cache_root, args.replay, args.record)
 
 # Global variable because I am bad.
 PushDescriptions = {}
@@ -350,6 +418,7 @@ def summarize_push(push, cache):
     desc = re.sub(r'\n+\s*', ' ; ', rev["comments"])
     if len(desc) >= 76:
         desc = desc[0:76] + "..."
+    desc = f"{push['revision'][0:12]} - {desc}"
     PushDescriptions[push["id"]] = desc
     push["desc"] = desc
     cache.value(cache_path, push)
@@ -358,7 +427,13 @@ def summarize_push(push, cache):
 
 def list_pushes(args):
     user = require_user()
-    pushes = get_results("push", project=args.branch, author=user, count=args.list_pushes)
+    params = {
+        "project": args.branch,
+        "count": args.list_pushes,
+    }
+    if user is not None:
+        params["user"] = user
+    pushes = server.get_results("push", **params)
     if args.json:
         print(json.dumps(pushes, indent=4), file=OutFile)
         return
@@ -373,21 +448,21 @@ def list_pushes(args):
 def get_push_summary(push_id, cache):
     if desc := cache.lookup(("push", push_id, "desc")):
         return desc
-    push = get_results("push", project=args.branch, id=push_id)[0]
+    push = server.get_results("push", project=args.branch, id=push_id)[0]
     return summarize_push(push, cache)
 
 
 def get_push(push_id, cache):
     if push := cache.lookup(("push", push_id)):
         return push
-    push = get_results("push", project=args.branch, id=push_id)[0]
+    push = server.get_results("push", project=args.branch, id=push_id)[0]
     summarize_push(push, cache)
     return push
 
 
 def choose_pushes(cache, n=10):
     user = require_user()
-    pushes = get_results("push", project=args.branch,
+    pushes = server.get_results("push", project=args.branch,
                          author=user, count=n)
     push_filter = ChooseFilter(None, cache, "pushes" in args.again,
                                lambda p: summarize_push(p, cache))
@@ -395,7 +470,14 @@ def choose_pushes(cache, n=10):
 
 
 def get_jobs(push_id):
-    return get_results("jobs", project=args.branch, push_id=push_id, count=1000)
+    offset = 0
+    while True:
+        chunk = server.get_results("jobs", project=args.branch, push_id=push_id, offset=offset, count=1000)
+        offset += len(chunk)
+        for job in chunk:
+            yield job
+        if len(chunk) < 1000:
+            break
 
 
 def list_jobs(args):
@@ -409,15 +491,10 @@ def list_jobs(args):
         return
 
     for j in jobs:
-        group = j["job_group_symbol"]
-        symbol = j["job_type_symbol"]
-        job_symbol = symbol if group == "?" else f"{group}({symbol})"
-        print("  {id} - {job_symbol} ({state}: {result}) task {task_id}".format(
-            **j, job_symbol=job_symbol), file=OutFile)
-        print("    {job_type_name} - {job_guid}".format(**j), file=OutFile)
+        print(describe_job(j, {"id": True}))
 
 
-def job_symbol(job, cache):
+def job_symbol(job):
     if job is None:
         return "?"
     if job["job_group_symbol"] == "?":
@@ -425,25 +502,35 @@ def job_symbol(job, cache):
     return "{job_group_symbol}({job_type_symbol})".format(**job)
 
 
-def describe_job(job_id, cache):
+def describe_job_id(job_id, cache):
     job = cache.lookup(("job", job_id))
-    return job_symbol(job, cache)
+    return job_symbol(job)
+
+
+def describe_job(job, detail={"id": False}):
+    template = "{job_symbol} - {job_type_name} ({state}: {result})"
+    if detail.get("id"):
+        template = "{id} " + template
+    return template.format(
+        **job,
+        job_symbol=job_symbol(job)
+    )
 
 
 def get_job_artifacts(job_id, cache=None):
     if cjob := cache.lookup(("job", job_id)):
         if artifacts := cjob.get("artifacts"):
             if "job_group_symbol" in cjob:
-                logger.info(f"loaded job {job_id} {describe_job(job_id, cache)} from cache: {len(artifacts)} artifacts")
+                logger.info(f"loaded job {job_id} {describe_job_id(job_id, cache)} from cache: {len(artifacts)} artifacts")
                 return artifacts
 
-    job = get_results('jobs', project=args.branch, id=job_id)[-1]
+    job = server.get_results('jobs', project=args.branch, id=job_id)[-1]
 
     for k in ("job_group_symbol", "job_group_name", "job_type_name", "job_type_symbol", "result", "state"):
         cache.value(("job", job_id, k), job.get(k))
 
     task = job["task_id"]
-    data = graphql(task)["data"]
+    data = server.graphql(task)["data"]
     runs = data["task"]["status"]["runs"]
     lastrun = runs[-1]
     edges = lastrun["artifacts"]["edges"]
@@ -457,7 +544,7 @@ def get_job_artifacts(job_id, cache=None):
             artifact=urllib.parse.quote(name, safe=''),
         ))
     cache.value(("job", job_id, "artifacts"), artifacts)
-    logger.debug(f"job {job_id} {describe_job(job_id, cache)}: {len(artifacts)} artifacts")
+    logger.debug(f"job {job_id} {describe_job_id(job_id, cache)}: {len(artifacts)} artifacts")
     return artifacts
 
 
@@ -480,7 +567,7 @@ def show_job(args):
     if not args.job:
         raise Exception("--job ID required")
 
-    job = get_results('jobs', project=args.branch, id=args.job)
+    job = server.get_results('jobs', project=args.branch, id=args.job)
 
     if args.json:
         print(json.dumps(job, indent=4), file=OutFile)
@@ -490,7 +577,7 @@ def get_pushes(start, end):
     result = []
 
     user = require_user()
-    pushes = get_results("push", project=args.branch, author=user, count=50)
+    pushes = server.get_results("push", project=args.branch, author=user, count=50)
     for p in reversed(pushes):
         id = p["id"]
         if id == start:
@@ -506,7 +593,7 @@ def get_pushes(start, end):
 
 def get_pushes_matching(filter):
     user = require_user()
-    pushes = get_results("push", project=args.branch, author=user, count=20)
+    pushes = server.get_results("push", project=args.branch, author=user, count=20)
     return [p["id"] for p in reversed(pushes) if filter(p)]
 
 
@@ -647,8 +734,8 @@ def get_repository(repo_id, cache):
     if repo:
         return repo
 
-    results = get_results("repository")
-    cached = cache.value(("repository"), {})
+    results = server.get_results("repository")
+    cached = cache.value(("repository",), {})
     retrieved = {str(r["id"]): r["name"] for r in results}
     cached.update(retrieved)
     return cached[str(repo_id)]
@@ -842,7 +929,7 @@ class GroupBy(object):
 
 def process_artifact(url, job, push_result, query, cache):
     logger.info(f"process artifact {url}")
-    raw, filename = cache.fetch_artifact(url)
+    raw, filename = server.fetch_artifact(url)
     metric = query["metric"]
     extractor = parse_metric_extractor(metric)
     if extractor["type"] == "json":
@@ -866,7 +953,7 @@ def process_artifact(url, job, push_result, query, cache):
         "filename": filename,
         "job": job,
         "job_id": job["id"],
-        "job_desc": describe_job(job["id"], cache),
+        "job_desc": describe_job_id(job["id"], cache),
         "task_id": job["task_id"],
     })
     job_result["job_url"] = JOB_URL.format(**job_result)
@@ -930,7 +1017,7 @@ class LimitFilter(BaseFilter):
         results = []
         for item in self.base(incoming):
             results.append(item)
-            if self.limit and len(results) >= limit:
+            if self.limit and len(results) >= self.limit:
                 return results
         return results
 
@@ -942,7 +1029,7 @@ class MatchFilter(BaseFilter):
         self.matcher = matcher
 
     def __call__(self, incoming):
-        return filter(self.match, incoming)
+        return filter(self.matcher, incoming)
 
 
 class ChooseFilter(BaseFilter):
@@ -960,7 +1047,9 @@ class ChooseFilter(BaseFilter):
         # or something persistent about the selections.
         ChooseFilter.count += 1
         n = ChooseFilter.count
-        # TODO: key these with the type of history item. This could easily mix things up.
+        # TODO: key these with the type of history item. This could easily mix things up. It
+        # should also follow the hierarchy, probably (so job history would be specific to the
+        # relevant push.)
         cache_path = ("history", "choose", f"choose-{n}")
 
         indexes = None
@@ -975,7 +1064,7 @@ class ChooseFilter(BaseFilter):
             descriptions = map(self.extract_description, incoming)
             ids = range(1, len(incoming) + 1)
             options = [f"{id} - {desc}" for id, desc in zip(ids, descriptions)]
-            choices = fzf.prompt(options, "--multi --no-sort --marker=* --ansi")
+            choices = fzf.prompt(options, "--multi --no-sort --marker=* --ansi --bind=ctrl-a:select-all")
             indexes = [int(c[0:c.index(" ")]) - 1 for c in choices]
             self.cache.value(cache_path, indexes)
 
@@ -1026,12 +1115,12 @@ def process_query(args, cache):
 
     job_query = query.get("jobs", {"choose-from": 0})
     if sym := job_query.get("symbol"):
-        job_filter = MatchFilter(job_filter, lambda j: job_symbol(j, cache) == sym, f"symbol is {sym}")
+        job_filter = MatchFilter(job_filter, lambda j: job_symbol(j) == sym, f"symbol is {sym}")
     if (choices := job_query.get("choose-from")) is not None:
         job_filter = ChooseFilter(LimitFilter(job_filter, choices),
                                   cache,
                                   "jobs" in args.again,
-                                  lambda j: job_symbol(j, cache))
+                                  describe_job)
     elif limit := job_query.get("limit-per-push"):
         job_filter = LimitFilter(job_filter, limit)
 
@@ -1057,9 +1146,11 @@ def process_query(args, cache):
         push_result["push_url"] = PUSH_URL.format(**push_result)
 
         for job in get_jobs(push["id"]):
-            logger.debug(f"checking job {job_symbol(job, cache)} against {job_filter.name}")
+            logger.debug(f"checking job {job_symbol(job)} against {job_filter.name}")
         found = 0
-        for job in job_filter(reversed(get_jobs(push["id"]))):
+        all_jobs = get_jobs(push["id"])
+        all_jobs = list(all_jobs)  # reversed and length taken below
+        for job in job_filter(reversed(all_jobs)):
             found += 1
             for a in get_job_artifacts(job["id"], cache):
                 if match_key(artifact_match, a):
@@ -1067,6 +1158,9 @@ def process_query(args, cache):
 
         if found == 0:
             logger.warning(f"no jobs matching: '{job_filter.name}' for push {push['desc']}")
+            logger.warning(f"  out of {len(all_jobs)} jobs found")
+            for job in sorted(all_jobs, key=describe_job):
+                logger.warning("  " + describe_job(job, {"id": True}))
 
 
 if args.record:
@@ -1085,6 +1179,8 @@ elif args.list_pushes:
 elif args.list_jobs:
     if not isinstance(args.list_jobs, bool):
         args.push = args.list_jobs
+    elif args.push is None:
+        args.push = choose_pushes(cache, 20)
     list_jobs(args)
 elif args.list_artifacts:
     list_artifacts(args)
@@ -1093,7 +1189,7 @@ elif args.artifacts:
 elif args.job:
     show_job(args)
 else:
-    print(json.dumps(choose_pushes(cache, 20)))
-    print("Do what, now?")
+    args.query = "default"
+    process_query(args, cache)
 
 cache.save()
