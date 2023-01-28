@@ -2,9 +2,9 @@
 ###merge = kdiff3
 #merge = meld
 #merge = :merge3
-#merge = diffmerge
+merge = diffmerge
 #merge = :vscode
-merge = code
+#merge = code
 #traceback = True
 #verbose = True
 #debug = True
@@ -102,10 +102,6 @@ cmdconvert = ~/lib/hg/cmdconvert
 [alias]
 ##################### aliases I actually use #####################
 
-ts = treestatus
-view = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -p -r "$r"
-s = qseries -v
-
 ls = ![[ -n "$1" ]] && r="$1" || r=.; $HG log -r "with_parents(not public() and ::$r)" --template list
 sl = ls
 
@@ -113,10 +109,6 @@ lg = log --template list --graph
 lgt = lg -r 'topobranch(.)'
 lgtopic = !if [[ -n  "$1" ]]; then $HG lg -r "topic('$1')"; else $HG lg -r 'topic(.)'; fi
 lgtt = lgtopic
-#lgtt = lg -r 'topic(.)'
-#lgtt($1) = lg -r 'topic("$1")'
-
-lsb = log -r 'bookmark() and not public()' -T '{pad("{bookmarks}", 30)} {desc|firstline}\n'
 
 lst = topics --age
 
