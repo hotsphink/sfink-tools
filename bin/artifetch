@@ -1,5 +1,8 @@
 #!/usr/bin/python
 
+# [ ] When recording, there are a number of duplicate recorded files. Are we
+#     re-fetching the same data multiple times?
+
 import argparse
 import gzip
 import io
@@ -1187,7 +1190,7 @@ def process_query(args, cache):
     push_table = {}
     for push_id in pushes:
         push = get_push(push_id, cache)
-        logger.info(f"Scanning push {push['desc']} id {push['id']}")
+        logger.info(f"Scanning push #{push['id']} {push['desc']}")
 
         push_result = {
             "push": push,
