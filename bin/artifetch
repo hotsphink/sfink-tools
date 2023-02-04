@@ -34,42 +34,49 @@ if "--test" in sys.argv:
 else:
     iftest = lambda t: argparse.SUPPRESS
 
-parser = argparse.ArgumentParser(prog='artifetch', usage="artifetch [options]")
+parser = argparse.ArgumentParser(prog='artifetch')
 parser.add_argument("--version", action='version', version=f'%(prog)s {VERSION}')
 parser.add_argument("--verbose", "-v", default=0, action="count",
                     help="Verbose output")
-parser.add_argument("--cache-root", default=str(DEFAULT_CACHE_ROOT),
-                    help="Root of cache dir, useful to override for testing")
 
-parser.add_argument("--json", action="store_true", help="Dump out raw JSON output")
-parser.add_argument("--output", "-o", help="File to save output to, default stdout")
-parser.add_argument("--again", nargs="?", const="all", default="", action="store",
+g_input = parser.add_argument_group(title="Specifying input")
+g_input.add_argument("--user", "-u", default=None, help="User to use for filtering pushes")
+g_input.add_argument("--branch", default="try",
+                    help="Treeherder branch (eg 'try', 'mozilla-central')")
+g_input.add_argument("--artifacts", metavar="PATTERN", help="Restrict artifacts to those matching PATTERN")
+g_input.add_argument("--pushes", help="List of push IDs to query, or !n for the nth newest history item, counting from zero")
+
+g_output = parser.add_argument_group(title="Output")
+g_output.add_argument("--json", action="store_true", help="Dump out raw JSON output (overridden if using a query)")
+g_output.add_argument("--output", "-o", help="File to save output to (default stdout)")
+
+g_action = parser.add_argument_group(title="Actions")
+g_action.add_argument("--again", nargs="?", const="all", default="", action="store", metavar="INDEX",
                     help="Repeat last query")
-parser.add_argument("--refresh", action="store_true", help="Do not use cached results")
-parser.add_argument("--no-cache", action="store_true", help="Do not load from or save to cache")
-parser.add_argument("--user", "-u", default=None, help="User to use for filtering pushes")
-parser.add_argument("--branch", default="try",
-                    help="The branch to use for commands that do not use a specific URL")
-
-parser.add_argument("--list-pushes",
-                    nargs="?", const=10, action="store",
+g_action.add_argument("--list-pushes",
+                    nargs="?", const=10, action="store", metavar="N",
                     help="List out N most recent try pushes")
-parser.add_argument("--list-jobs",
-                    nargs="?", action="store", const=True,
-                    help="List out jobs for a push (optional value, or use --push=PUSH)")
-parser.add_argument("--list-artifacts", help="List out artifacts for a given JOB id")
-parser.add_argument("--artifacts", help="List out artifacts matching ARTIFACT")
-parser.add_argument("--show-job", dest="job", help="Display info for a given JOB id")
+g_action.add_argument("--list-jobs",
+                    nargs="?", action="store", const=True, metavar="MATCH",
+                    help="List out jobs for a push")
+g_action.add_argument("--list-artifacts", nargs="?", const="//", action="store", metavar="MATCH",
+                    help="List out artifacts (default: all)")
+g_action.add_argument("--show-job", dest="job", help="Display info for a given JOB id")
+g_action.add_argument("--query", help="Query YAML file (may also be given as a plain argument)")
+g_action.add_argument("_query", nargs="?", default=None, help=argparse.SUPPRESS)
 
-parser.add_argument("--push", help="Push ID to query")
-parser.add_argument("--pushes", help="List of push IDs to query, or !n for the nth newest history item, counting from zero")
+g_test = parser.add_argument_group(title="Testing")
 
-parser.add_argument("--test", action="store_true", help="enable extra options for testing")
-parser.add_argument("--record", type=str, help=iftest("directory to record into"))
-parser.add_argument("--replay", type=str, help=iftest("directory to replay from"))
+g_test.add_argument("--test", action="store_true", help="enable extra options for testing")
+g_test.add_argument("--record", type=str, help=iftest("directory to record into"))
+g_test.add_argument("--replay", type=str, help=iftest("directory to replay from"))
 
-parser.add_argument("--query", help="Query YAML file")
-parser.add_argument("_query", nargs="?", default=None, help="Query YAML file")
+g_cache = parser.add_argument_group(title="Cache control")
+g_cache.add_argument("--cache-root", default=str(DEFAULT_CACHE_ROOT),
+                    help=f"Root of cache dir (default: {DEFAULT_CACHE_ROOT})")
+g_cache.add_argument("--refresh", action="store_true", help="Do not use cached results")
+g_cache.add_argument("--no-cache", action="store_true", help="Do not load from or save to cache")
+
 
 args = parser.parse_args()
 
@@ -519,13 +526,17 @@ def get_push(push_id, cache):
     return push
 
 
-def choose_pushes(cache, n=10):
+def choose_pushes(cache, n=10, single=False):
     user = require_user()
     pushes = server.get_results("push", project=args.branch,
                          author=user, count=n)
-    push_filter = ChooseFilter(None, cache, "pushes" in args.again,
-                               lambda p: summarize_push(p, cache))
+    push_filter = ChooseFilter(None, cache, "pushes" in args.again, single=single,
+                               extract_description=lambda p: summarize_push(p, cache))
     return [push["id"] for push in push_filter(pushes)]
+
+
+def choose_push(cache, n=10):
+    return choose_pushes(cache, n, single=True)[0]
 
 
 def get_jobs(push_id):
@@ -539,14 +550,16 @@ def get_jobs(push_id):
             break
 
 
-def list_jobs(args):
-    if not args.push:
-        raise Exception("--push ID required")
-
-    jobs = get_jobs(args.push)
+def list_jobs(args, push_id, job_pattern, cache):
+    if job_pattern is True:
+        job_query = {}
+    else:
+        job_query = {"symbol": job_pattern}
+    job_filter = make_job_filter(job_query, cache)
+    jobs = job_filter(get_jobs(push_id))
 
     if args.json:
-        print(json.dumps(jobs, indent=4), file=OutFile)
+        print(json.dumps(list(jobs), indent=4), file=OutFile)
         return
 
     for j in jobs:
@@ -576,7 +589,7 @@ def describe_job(job, detail={"id": False}):
     )
 
 
-def get_job_artifacts(job_id, cache=None):
+def get_job_artifacts(job_id, cache):
     if cjob := cache.lookup(("job", job_id)):
         if artifacts := cjob.get("artifacts"):
             if "job_group_symbol" in cjob:
@@ -606,18 +619,18 @@ def get_job_artifacts(job_id, cache=None):
     return artifacts
 
 
-def list_artifacts(args):
-    for a in get_job_artifacts(args.list_artifacts):
-        print(a, file=OutFile)
+def list_artifacts(args, cache):
+    if args.pushes is None:
+        push = choose_push(cache, 20)
+    else:
+        push = args.pushes[0]
+    match = args.list_artifacts
 
-
-def list_matching_artifacts(args):
-    match = args.artifacts
-    push = args.push
-    for job in get_jobs(push):
+    job_filter = make_job_filter({"choose-from": 0}, cache)
+    for job in job_filter(get_jobs(push)):
         logger.debug(f"Fetching artifacts for push {push} job {job['id']}")
-        for a in get_job_artifacts(job["id"]):
-            if match in a:
+        for a in get_job_artifacts(job["id"], cache):
+            if match_string(a, match):
                 print(a, file=OutFile)
 
 
@@ -671,10 +684,11 @@ def resolve_push_range(spec, cache):
     return cache.value(cache_path, pushes)
 
 
-def resolve_pushes(spec, cache):
+def resolve_pushes(spec, cache, single=False):
     if args.pushes:
         if args.pushes.startswith("!"):
-            spec = {"ids": "+".join(cache.lookup(("history", "pushes", -int(args.pushes[1:]))))}
+            histdepth = int(args.pushes[1:])
+            spec = {"ids": "+".join(cache.lookup(("history", "pushes", -histdepth)))}
         else:
             spec = {"ids": args.pushes}
 
@@ -777,7 +791,7 @@ def lookup_values_g(extractor, match, data, labels):
 
 
 def match_string(input, selector):
-    if selector.startswith("/") and selector.endwith("/"):
+    if selector.startswith("/") and selector.endswith("/"):
         matcher = re.compile(selector[1:-1])
         return matcher.search(input)
     return input == selector
@@ -1080,7 +1094,7 @@ class LimitFilter(BaseFilter):
 
     def __call__(self, incoming):
         results = []
-        for item in self.base(incoming):
+        for item in super().__call__(incoming):
             results.append(item)
             if self.limit and len(results) >= self.limit:
                 return results
@@ -1094,19 +1108,20 @@ class MatchFilter(BaseFilter):
         self.matcher = matcher
 
     def __call__(self, incoming):
-        return filter(self.matcher, incoming)
+        return filter(self.matcher, super().__call__(incoming))
 
 
 class ChooseFilter(BaseFilter):
-    def __init__(self, base_filter, cache, again, extract_description=lambda s: s):
+    def __init__(self, base_filter, cache, again, single=False, extract_description=lambda s: s):
         super().__init__(base_filter)
         self.extract_description = extract_description
         self.cache = cache
         self.again = again
+        self.single = single
         setattr(ChooseFilter, "count", 0)
 
     def __call__(self, incoming):
-        incoming = list(incoming)  # flatten iterator
+        incoming = list(super().__call__(incoming))  # flatten iterator
 
         # TODO: history stores just the indexes of the choices. It should really give the id
         # or something persistent about the selections.
@@ -1129,11 +1144,34 @@ class ChooseFilter(BaseFilter):
             descriptions = map(self.extract_description, incoming)
             ids = range(1, len(incoming) + 1)
             options = [f"{id} - {desc}" for id, desc in zip(ids, descriptions)]
-            choices = fzf.prompt(options, "--multi --no-sort --marker=* --ansi --bind=ctrl-a:select-all")
+            cmd_args = "--no-sort --marker=* --ansi"
+            if not self.single:
+                cmd_args += " --multi --bind=ctrl-a:select-all"
+            choices = fzf.prompt(options, cmd_args)
             indexes = [int(c[0:c.index(" ")]) - 1 for c in choices]
             self.cache.value(cache_path, indexes)
 
         return [incoming[i] for i in indexes]
+
+
+def make_job_filter(job_query, cache):
+    job_filter = BaseFilter(None, "jobs")
+
+    if sym := job_query.get("symbol"):
+        job_filter = MatchFilter(job_filter, lambda j: match_string(job_symbol(j), sym), f"symbol is {sym}")
+    if name := job_query.get("group_name"):
+        job_filter = MatchFilter(job_filter, lambda j: match_string(j["job_group_name"], name), f"group name is {name}")
+    state = job_query.get("state", "completed")
+    job_filter = MatchFilter(job_filter, lambda j: match_string(j["state"], state), f"state is {state}")
+    if (choices := job_query.get("choose-from")) is not None:
+        job_filter = ChooseFilter(LimitFilter(job_filter, choices),
+                                  cache,
+                                  "jobs" in args.again,
+                                  extract_description=describe_job)
+    elif limit := job_query.get("limit-per-push"):
+        job_filter = LimitFilter(job_filter, limit)
+
+    return job_filter
 
 
 def process_query(args, cache):
@@ -1151,7 +1189,8 @@ def process_query(args, cache):
         with open(args.query) as fh:
             query = yaml.safe_load(fh)
 
-    job_filter = BaseFilter(None, "jobs")
+    job_query = query.get("jobs", {"choose-from": 0})
+    job_filter = make_job_filter(job_query, cache)
 
     if local_artifacts := query.get("artifacts"):
         for push_id, a in enumerate(local_artifacts):
@@ -1177,21 +1216,6 @@ def process_query(args, cache):
         return
 
     artifact_match = query["artifact"]
-
-    job_query = query.get("jobs", {"choose-from": 0})
-    if sym := job_query.get("symbol"):
-        job_filter = MatchFilter(job_filter, lambda j: match_string(job_symbol(j), sym), f"symbol is {sym}")
-    if name := job_query.get("group_name"):
-        job_filter = MatchFilter(job_filter, lambda j: match_string(j["job_group_name"], name), f"group name is {name}")
-    state = job_query.get("state", "completed")
-    job_filter = MatchFilter(job_filter, lambda j: match_string(j["state"], state), f"state is {state}")
-    if (choices := job_query.get("choose-from")) is not None:
-        job_filter = ChooseFilter(LimitFilter(job_filter, choices),
-                                  cache,
-                                  "jobs" in args.again,
-                                  describe_job)
-    elif limit := job_query.get("limit-per-push"):
-        job_filter = LimitFilter(job_filter, limit)
 
     pushes = resolve_pushes(query.get("pushes") or {"choose-from": 20}, cache)
     logger.info("Pushes: " + "+".join(str(p) for p in pushes))
@@ -1242,15 +1266,13 @@ if args.query:
 elif args.list_pushes:
     list_pushes(args)
 elif args.list_jobs:
-    if not isinstance(args.list_jobs, bool):
-        args.push = args.list_jobs
-    elif args.push is None:
-        args.push = choose_pushes(cache, 20)
-    list_jobs(args)
+    if args.pushes is None:
+        push = choose_push(cache, 20)
+    else:
+        push = resolve_pushes(None, cache, single=True)
+    list_jobs(args, push, args.list_jobs, cache)
 elif args.list_artifacts:
-    list_artifacts(args)
-elif args.artifacts:
-    list_matching_artifacts(args)
+    list_artifacts(args, cache)
 elif args.job:
     show_job(args)
 else:
