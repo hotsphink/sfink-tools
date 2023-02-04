@@ -25,7 +25,9 @@ VERSION = 0.1
 HEADERS = {"User-Agent": f"artifetch {VERSION} by sfink@mozilla.com"}
 
 PUSH_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}"
-JOB_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
+JOB_URL = (
+    "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
+)
 
 logger = logging.getLogger("artifetch")
 
@@ -34,33 +36,67 @@ if "--test" in sys.argv:
 else:
     iftest = lambda t: argparse.SUPPRESS
 
-parser = argparse.ArgumentParser(prog='artifetch')
-parser.add_argument("--version", action='version', version=f'%(prog)s {VERSION}')
-parser.add_argument("--verbose", "-v", default=0, action="count",
-                    help="Verbose output")
+parser = argparse.ArgumentParser(prog="artifetch")
+parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+parser.add_argument("--verbose", "-v", default=0, action="count", help="Verbose output")
 
 g_input = parser.add_argument_group(title="Specifying input")
 g_input.add_argument("--user", "-u", default=None, help="User to use for filtering pushes")
-g_input.add_argument("--branch", default="try",
-                    help="Treeherder branch (eg 'try', 'mozilla-central')")
-g_input.add_argument("--artifacts", metavar="PATTERN", help="Restrict artifacts to those matching PATTERN")
-g_input.add_argument("--pushes", help="List of push IDs to query, or !n for the nth newest history item, counting from zero")
+g_input.add_argument(
+    "--branch", default="try", help="Treeherder branch (eg 'try', 'mozilla-central')"
+)
+g_input.add_argument(
+    "--artifacts",
+    metavar="PATTERN",
+    help="Restrict artifacts to those matching PATTERN",
+)
+g_input.add_argument(
+    "--pushes",
+    help="List of push IDs to query, or !n for the nth newest history item, counting from zero",
+)
 
 g_output = parser.add_argument_group(title="Output")
-g_output.add_argument("--json", action="store_true", help="Dump out raw JSON output (only valid for --list-jobs, --list-pushes, --show-job)")
+g_output.add_argument(
+    "--json",
+    action="store_true",
+    help="Dump out raw JSON output (only valid for --list-jobs, --list-pushes, --show-job)",
+)
 g_output.add_argument("--output", "-o", help="File to save output to (default stdout)")
 
 g_action = parser.add_argument_group(title="Actions")
-g_action.add_argument("--again", nargs="?", const="all", default="", action="store", metavar="INDEX",
-                    help="Repeat last query")
-g_action.add_argument("--list-pushes",
-                    nargs="?", const=10, action="store", metavar="N",
-                    help="List out N most recent try pushes")
-g_action.add_argument("--list-jobs",
-                    nargs="?", action="store", const=True, metavar="MATCH",
-                    help="List out jobs for a push")
-g_action.add_argument("--list-artifacts", nargs="?", const="//", action="store", metavar="MATCH",
-                    help="List out artifacts (default: all)")
+g_action.add_argument(
+    "--again",
+    nargs="?",
+    const="all",
+    default="",
+    action="store",
+    metavar="INDEX",
+    help="Repeat last query",
+)
+g_action.add_argument(
+    "--list-pushes",
+    nargs="?",
+    const=10,
+    action="store",
+    metavar="N",
+    help="List out N most recent try pushes",
+)
+g_action.add_argument(
+    "--list-jobs",
+    nargs="?",
+    action="store",
+    const=True,
+    metavar="MATCH",
+    help="List out jobs for a push",
+)
+g_action.add_argument(
+    "--list-artifacts",
+    nargs="?",
+    const="//",
+    action="store",
+    metavar="MATCH",
+    help="List out artifacts (default: all)",
+)
 g_action.add_argument("--show-job", dest="job", help="Display info for a given JOB id")
 g_action.add_argument("--query", help="Query YAML file (may also be given as a plain argument)")
 g_action.add_argument("_query", nargs="?", default=None, help=argparse.SUPPRESS)
@@ -72,8 +108,11 @@ g_test.add_argument("--record", type=str, help=iftest("directory to record into"
 g_test.add_argument("--replay", type=str, help=iftest("directory to replay from"))
 
 g_cache = parser.add_argument_group(title="Cache control")
-g_cache.add_argument("--cache-root", default=str(DEFAULT_CACHE_ROOT),
-                    help=f"Root of cache dir (default: {DEFAULT_CACHE_ROOT})")
+g_cache.add_argument(
+    "--cache-root",
+    default=str(DEFAULT_CACHE_ROOT),
+    help=f"Root of cache dir (default: {DEFAULT_CACHE_ROOT})",
+)
 g_cache.add_argument("--refresh", action="store_true", help="Do not use cached results")
 g_cache.add_argument("--no-cache", action="store_true", help="Do not load from or save to cache")
 
@@ -165,7 +204,7 @@ class Cache(object):
         return cache
 
     def value(self, path, value):
-        '''Insert a value at a path in the cache, and return the value.'''
+        """Insert a value at a path in the cache, and return the value."""
         cache = self.data
         if cache:
             for segment in path[:-1]:
@@ -173,16 +212,18 @@ class Cache(object):
             cache[path[-1]] = value
         return value
 
+
 def require_user():
     if args.user is not None:
         if args.user.lower() in ("any", ""):
             return None
         return args.user
     import subprocess
+
     try:
         output = subprocess.check_output(["hg", "config", "ui.username"], text=True)
         # Extract just the email address from `My Name <myname@nowhere.com>`.
-        if m := re.search(r'<(.*?)>', output):
+        if m := re.search(r"<(.*?)>", output):
             args.user = m.group(1)
         else:
             args.user = output.strip()
@@ -228,9 +269,7 @@ class TreeHerder(object):
                 "operationName": "Task",
                 "variables": {
                     "taskId": task_id,
-                    "artifactsConnection": {
-                        "limit": 1000
-                    },
+                    "artifactsConnection": {"limit": 1000},
                 },
                 "query": """\
     query Task(
@@ -284,9 +323,9 @@ class TreeHerder(object):
         __typename
       }
       __typename
-    }"""
+    }""",
             },
-            headers=headers
+            headers=headers,
         )
 
         if not response.ok:
@@ -306,7 +345,7 @@ class TreeHerder(object):
             filename = url[7:]
             return (Path(filename).read_text(), filename)
 
-        cache_file_base = self.artifact_path / urllib.parse.quote(url, safe='')
+        cache_file_base = self.artifact_path / urllib.parse.quote(url, safe="")
         data = None
         for cache_file in (cache_file_base, Path(str(cache_file_base) + ".gz")):
             try:
@@ -396,7 +435,9 @@ class Recorder(object):
                 if self.record_dir:
                     logger.info("Extending a replay with new data")
                 else:
-                    logger.error("Replay diverged! Requested a key that does not exist in the recording.")
+                    logger.error(
+                        "Replay diverged! Requested a key that does not exist in the recording."
+                    )
                     logger.error(json.dumps(params))
                     raise
 
@@ -405,13 +446,13 @@ class Recorder(object):
         return filename
 
     def record(self, filename, data, format):
-        if format == 'json':
+        if format == "json":
             data = json.dumps(data)
         (self.record_dir / filename).write_text(data)
 
     def replay(self, filename, format):
         text = (self.replay_dir / filename).read_text()
-        if format == 'json':
+        if format == "json":
             return json.loads(text)
         return text
 
@@ -443,13 +484,17 @@ class PersistentTreeHerder(TreeHerder):
         sup = super()
         key = dict(params)
         key.update({"endpoint": endpoint, "project": project})
-        return self.do(key, lambda: sup.get_results(endpoint, project=project, **params), format='json')
+        return self.do(
+            key,
+            lambda: sup.get_results(endpoint, project=project, **params),
+            format="json",
+        )
 
     # We only have a single graphql query, hence the stupid name here.
     def graphql(self, task_id):
         sup = super()
         key = {"endpoint": "graphql", "task_id": task_id}
-        return self.do(key, func=lambda: sup.graphql(task_id), format='json')
+        return self.do(key, func=lambda: sup.graphql(task_id), format="json")
 
     def fetch_artifact(self, url):
         sup = super()
@@ -464,7 +509,7 @@ class PersistentTreeHerder(TreeHerder):
             return data
 
         key = {"endpoint": "artifact", "url": url}
-        data = self.do(key, call_super, 'text')
+        data = self.do(key, call_super, "text")
         return (data, cache_file)
 
 
@@ -481,7 +526,7 @@ def summarize_push(push, cache):
         return desc
 
     rev = push["revisions"][0]
-    desc = re.sub(r'\n+\s*', ' ; ', rev["comments"])
+    desc = re.sub(r"\n+\s*", " ; ", rev["comments"])
     if len(desc) >= 76:
         desc = desc[0:76] + "..."
     desc = f"{push['revision'][0:12]} - {desc}"
@@ -507,7 +552,7 @@ def list_pushes(args):
     for p in pushes:
         print(f"{p['id']} - {len(p['revisions'])} revs", file=OutFile)
         for rev in p["revisions"]:
-            desc = re.sub(r'\n.*', '', rev["comments"])
+            desc = re.sub(r"\n.*", "", rev["comments"])
             print(f"  {rev['revision']} {desc}", file=OutFile)
 
 
@@ -528,10 +573,14 @@ def get_push(push_id, cache):
 
 def choose_pushes(cache, n=10, single=False):
     user = require_user()
-    pushes = server.get_results("push", project=args.branch,
-                         author=user, count=n)
-    push_filter = ChooseFilter(None, cache, "pushes" in args.again, single=single,
-                               extract_description=lambda p: summarize_push(p, cache))
+    pushes = server.get_results("push", project=args.branch, author=user, count=n)
+    push_filter = ChooseFilter(
+        None,
+        cache,
+        "pushes" in args.again,
+        single=single,
+        extract_description=lambda p: summarize_push(p, cache),
+    )
     return [push["id"] for push in push_filter(pushes)]
 
 
@@ -542,7 +591,9 @@ def choose_push(cache, n=10):
 def get_jobs(push_id):
     offset = 0
     while True:
-        chunk = server.get_results("jobs", project=args.branch, push_id=push_id, offset=offset, count=1000)
+        chunk = server.get_results(
+            "jobs", project=args.branch, push_id=push_id, offset=offset, count=1000
+        )
         offset += len(chunk)
         for job in chunk:
             yield job
@@ -583,20 +634,19 @@ def describe_job(job, detail={"id": False}):
     template = "{job_symbol} - {job_type_name} ({state}: {result})"
     if detail.get("id"):
         template = "{id} " + template
-    return template.format(
-        **job,
-        job_symbol=job_symbol(job)
-    )
+    return template.format(**job, job_symbol=job_symbol(job))
 
 
 def get_job_artifacts(job_id, cache):
     if cjob := cache.lookup(("job", job_id)):
         if artifacts := cjob.get("artifacts"):
             if "job_group_symbol" in cjob:
-                logger.info(f"loaded job {job_id} {describe_job_id(job_id, cache)} for push {cjob['push_id']} from cache: {len(artifacts)} artifacts")
+                logger.info(
+                    f"loaded job {job_id} {describe_job_id(job_id, cache)} for push {cjob['push_id']} from cache: {len(artifacts)} artifacts"
+                )
                 return artifacts
 
-    job = server.get_results('jobs', project=args.branch, id=job_id)[-1]
+    job = server.get_results("jobs", project=args.branch, id=job_id)[-1]
     for k in job.keys():
         cache.value(("job", job_id, k), job[k])
 
@@ -608,12 +658,14 @@ def get_job_artifacts(job_id, cache):
     names = [e["node"]["name"] for e in edges]
     artifacts = []
     for name in names:
-        artifacts.append("{site}/api/queue/v1/task/{task}/runs/{run}/artifacts/{artifact}".format(
-            site="https://firefox-ci-tc.services.mozilla.com",
-            task=task,
-            run=lastrun["runId"],
-            artifact=urllib.parse.quote(name, safe=''),
-        ))
+        artifacts.append(
+            "{site}/api/queue/v1/task/{task}/runs/{run}/artifacts/{artifact}".format(
+                site="https://firefox-ci-tc.services.mozilla.com",
+                task=task,
+                run=lastrun["runId"],
+                artifact=urllib.parse.quote(name, safe=""),
+            )
+        )
     cache.value(("job", job_id, "artifacts"), artifacts)
     logger.debug(f"job {job_id} {describe_job_id(job_id, cache)}: {len(artifacts)} artifacts")
     return artifacts
@@ -638,7 +690,7 @@ def show_job(args):
     if not args.job:
         raise Exception("--job ID required")
 
-    job = server.get_results('jobs', project=args.branch, id=args.job)
+    job = server.get_results("jobs", project=args.branch, id=args.job)
 
     if args.json:
         print(json.dumps(job, indent=4), file=OutFile)
@@ -699,14 +751,17 @@ def resolve_pushes(spec, cache, single=False):
         # Do not cache, because we may be rerunning to pick up newer pushes.
         def push_has_comment(p):
             return any([comment in r["comments"] for r in p["revisions"]])
+
         return get_pushes_matching(filter=push_has_comment)
 
     if revision := spec.get("rev"):
         # Do not cache, because we may be rerunning to pick up newer pushes.
         def rev_matches(rev, pattern):
             return rev in pattern.split("+")
+
         def push_has_rev(p):
             return any([rev_matches(r["revision"], revision) for r in p["revisions"]])
+
         return get_pushes_matching(filter=push_has_rev)
 
     if nchoices := spec.get("choose-from"):
@@ -720,15 +775,15 @@ PathT = list[str | int]
 ResultPathsT = list[PathT]
 
 
-def parse_path(k : str) -> PathT:
-    return [p for p in re.findall(r'\[\]|[^.\[]+|\.', k) if p != '.']
+def parse_path(k: str) -> PathT:
+    return [p for p in re.findall(r"\[\]|[^.\[]+|\.", k) if p != "."]
 
 
-def find_path_matches(data : DataT, path : PathT, sofar : PathT=[]) -> list[tuple[PathT, Any]]:
+def find_path_matches(data: DataT, path: PathT, sofar: PathT = []) -> list[tuple[PathT, Any]]:
     if not path:
         return [(sofar, data)]
     results = []
-    if path[0] == '[]':
+    if path[0] == "[]":
         for i in range(len(data)):
             results += find_path_matches(data[i], path[1:], sofar + [i])
     else:
@@ -739,11 +794,11 @@ def find_path_matches(data : DataT, path : PathT, sofar : PathT=[]) -> list[tupl
     return results
 
 
-def resolve_path(path : PathT, bases : ResultPathsT):
+def resolve_path(path: PathT, bases: ResultPathsT):
     result = []
     for segment in path:
         if segment.startswith("$"):
-            i = int(segment[1:] or '1')
+            i = int(segment[1:] or "1")
             # $n converts to the *parent* of match-key-n.
             result.extend(bases[i][:-1])
         elif segment == "__parent__":
@@ -753,13 +808,13 @@ def resolve_path(path : PathT, bases : ResultPathsT):
     return result
 
 
-def lookup(path : PathT, data):
+def lookup(path: PathT, data):
     for segment in path:
         data = data[segment]
     return data
 
 
-def lookup_json_values_g(extractor, match : ResultPathsT, data, labels):
+def lookup_json_values_g(extractor, match: ResultPathsT, data, labels):
     path = parse_path(extractor["values"])
     path = resolve_path(path, match)
 
@@ -772,14 +827,15 @@ def lookup_json_values_g(extractor, match : ResultPathsT, data, labels):
 
 def lookup_text_values_g(extractor, data, labels):
     pattern = extractor["keys"][1]
-    assert(pattern.startswith("/") and pattern.endswith("/"))
+    assert pattern.startswith("/") and pattern.endswith("/")
     matcher = re.compile(pattern[1:-1])
     for line in data.splitlines():
         if m := re.search(matcher, line):
             result = {}
             for lname, lvalue in [("value", extractor["values"])] + labels:
-                result[lname] = re.sub(r'\$(\d+)', lambda lm: m.group(int(lm.group(1))), lvalue)
+                result[lname] = re.sub(r"\$(\d+)", lambda lm: m.group(int(lm.group(1))), lvalue)
             yield result
+
 
 def lookup_values_g(extractor, match, data, labels):
     if extractor["type"] == "json":
@@ -797,11 +853,11 @@ def match_string(input, selector):
     return input == selector
 
 
-def match_key(key : str, val):
+def match_key(key: str, val):
     if key.startswith("/"):
         return bool(re.search(key[1:-1], val))
     else:
-        val = re.sub(r'.*%2F', "", val)
+        val = re.sub(r".*%2F", "", val)
         return key == val
 
 
@@ -893,8 +949,14 @@ def parse_text_metric_extractor(metric):
     spec = metric["text"]
     return {
         "type": "text",
-        "keys": (None, spec["match-key"],),
-        "targets": (None, True,),
+        "keys": (
+            None,
+            spec["match-key"],
+        ),
+        "targets": (
+            None,
+            True,
+        ),
         "values": spec["value"],
         "labels": spec.get("label", ()),
     }
@@ -913,29 +975,25 @@ def parse_metric_extractor(metric):
     }
 
 
-def match_remaining(matchers, paths: ResultPathsT, data : DataT) -> list[ResultPathsT]:
+def match_remaining(matchers, paths: ResultPathsT, data: DataT) -> list[ResultPathsT]:
     if not matchers:
         return [paths]
 
-    i, keypath, target =  matchers[0]
+    i, keypath, target = matchers[0]
     keypath = resolve_path(keypath, paths)
 
-    result : list[ResultPathsT] = []
+    result: list[ResultPathsT] = []
     for path, keyval in find_path_matches(data, keypath):
         if match_key(target, keyval):
             result.append(paths + [path])
     return result
 
 
-def extract_matches_g(extractor, data : DataT):
-    matchers = list(zip(
-        range(len(extractor["keys"])),
-        extractor["keys"],
-        extractor["targets"]
-    ))
+def extract_matches_g(extractor, data: DataT):
+    matchers = list(zip(range(len(extractor["keys"])), extractor["keys"], extractor["targets"]))
     matchers.pop(0)  # Matchers are 1-based indexes. Sorry.
 
-    matches : list[ResultPathsT] = []
+    matches: list[ResultPathsT] = []
 
     if extractor["type"] == "files":
         yield from lookup_values_g(extractor, None, data, {})
@@ -968,7 +1026,7 @@ class GroupBy(object):
         self.expr = expr
         self.cache = cache
         self.aggregates = []
-        for m in re.finditer(r'{(\w+)\((\w+)\)}', expr):
+        for m in re.finditer(r"{(\w+)\((\w+)\)}", expr):
             self.aggregates.append((m.group(1), m.group(2)))
         self.sums = defaultdict(lambda: defaultdict(int))
         self.counts = defaultdict(int)
@@ -991,7 +1049,7 @@ class GroupBy(object):
         for key in self.sums.keys():
             # This is a complete mess.
             result = dict(self.proto_result[key])
-            for m in re.finditer(r'{(\w+)\((\w+)\)}', self.expr):
+            for m in re.finditer(r"{(\w+)\((\w+)\)}", self.expr):
                 func, field = m.groups()
                 call = m.group(0)[1:-1]
                 if func == "sum":
@@ -1012,11 +1070,11 @@ def process_artifact(url, job, push_result, query, cache):
     metric = query["metric"]
     extractor = parse_metric_extractor(metric)
     if extractor["type"] == "json":
-        data : DataT = json.loads(raw)
+        data: DataT = json.loads(raw)
     elif extractor["type"] == "text":
-        data : DataT = raw
+        data: DataT = raw
     else:
-        data : DataT = None
+        data: DataT = None
     output = metric.get("output", {})
 
     if groupby := output.get("groupby"):
@@ -1028,13 +1086,15 @@ def process_artifact(url, job, push_result, query, cache):
     labeled_values = defaultdict(dict)
 
     job_result = dict(push_result)
-    job_result.update({
-        "filename": filename,
-        "job": job,
-        "job_id": job["id"],
-        "job_desc": describe_job_id(job["id"], cache),
-        "task_id": job["task_id"],
-    })
+    job_result.update(
+        {
+            "filename": filename,
+            "job": job,
+            "job_id": job["id"],
+            "job_desc": describe_job_id(job["id"], cache),
+            "task_id": job["task_id"],
+        }
+    )
     job_result["job_url"] = JOB_URL.format(**job_result)
 
     indexes = {}
@@ -1070,7 +1130,7 @@ def process_artifact(url, job, push_result, query, cache):
 
 
 class BaseFilter(object):
-    def __init__(self, base_filter = None, desc = None):
+    def __init__(self, base_filter=None, desc=None):
         self.base = base_filter
         if desc is None:
             self.name = base_filter.name if base_filter else "all items"
@@ -1140,6 +1200,7 @@ class ChooseFilter(BaseFilter):
 
         if indexes is None:
             import pyfzf
+
             fzf = pyfzf.FzfPrompt()
             descriptions = map(self.extract_description, incoming)
             ids = range(1, len(incoming) + 1)
@@ -1148,7 +1209,7 @@ class ChooseFilter(BaseFilter):
             if not self.single:
                 cmd_args += " --multi --bind=ctrl-a:select-all"
             choices = fzf.prompt(options, cmd_args)
-            indexes = [int(c[0:c.index(" ")]) - 1 for c in choices]
+            indexes = [int(c[0 : c.index(" ")]) - 1 for c in choices]
             self.cache.value(cache_path, indexes)
 
         return [incoming[i] for i in indexes]
@@ -1158,16 +1219,26 @@ def make_job_filter(job_query, cache):
     job_filter = BaseFilter(None, "jobs")
 
     if sym := job_query.get("symbol"):
-        job_filter = MatchFilter(job_filter, lambda j: match_string(job_symbol(j), sym), f"symbol is {sym}")
+        job_filter = MatchFilter(
+            job_filter, lambda j: match_string(job_symbol(j), sym), f"symbol is {sym}"
+        )
     if name := job_query.get("group_name"):
-        job_filter = MatchFilter(job_filter, lambda j: match_string(j["job_group_name"], name), f"group name is {name}")
+        job_filter = MatchFilter(
+            job_filter,
+            lambda j: match_string(j["job_group_name"], name),
+            f"group name is {name}",
+        )
     state = job_query.get("state", "completed")
-    job_filter = MatchFilter(job_filter, lambda j: match_string(j["state"], state), f"state is {state}")
+    job_filter = MatchFilter(
+        job_filter, lambda j: match_string(j["state"], state), f"state is {state}"
+    )
     if (choices := job_query.get("choose-from")) is not None:
-        job_filter = ChooseFilter(LimitFilter(job_filter, choices),
-                                  cache,
-                                  "jobs" in args.again,
-                                  extract_description=describe_job)
+        job_filter = ChooseFilter(
+            LimitFilter(job_filter, choices),
+            cache,
+            "jobs" in args.again,
+            extract_description=describe_job,
+        )
     elif limit := job_query.get("limit-per-push"):
         job_filter = LimitFilter(job_filter, limit)
 
@@ -1184,7 +1255,8 @@ def process_query(args, cache):
                     "push-header": "# from push {push_id} - {push_desc}",
                     "format": "{filename}",
                 }
-            }}
+            },
+        }
     else:
         with open(args.query) as fh:
             query = yaml.safe_load(fh)
@@ -1233,8 +1305,8 @@ def process_query(args, cache):
             # Give each push an "index" set to an autoincrementing value associated with its push_id.
             "push_idx": push_table.setdefault(push_id, len(push_table)),
             "push_desc": summarize_push(push, cache),
-            "revision": push['revision'],
-            "repo": get_repository(push['repository_id'], cache),
+            "revision": push["revision"],
+            "repo": get_repository(push["repository_id"], cache),
         }
         push_result["push_url"] = PUSH_URL.format(**push_result)
 
