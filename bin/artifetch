@@ -47,7 +47,7 @@ g_input.add_argument("--artifacts", metavar="PATTERN", help="Restrict artifacts 
 g_input.add_argument("--pushes", help="List of push IDs to query, or !n for the nth newest history item, counting from zero")
 
 g_output = parser.add_argument_group(title="Output")
-g_output.add_argument("--json", action="store_true", help="Dump out raw JSON output (overridden if using a query)")
+g_output.add_argument("--json", action="store_true", help="Dump out raw JSON output (only valid for --list-jobs, --list-pushes, --show-job)")
 g_output.add_argument("--output", "-o", help="File to save output to (default stdout)")
 
 g_action = parser.add_argument_group(title="Actions")
