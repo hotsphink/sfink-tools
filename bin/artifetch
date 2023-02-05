@@ -29,6 +29,17 @@ JOB_URL = (
     "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
 )
 
+DEFAULT_QUERY = {
+    "artifact": "live_backing.log",
+    "metric": {
+        "output": {
+            "style": "formatted",
+            "push-header": "# from push {push_id} - {push_desc}",
+            "format": "{filename}",
+        }
+    },
+}
+
 logger = logging.getLogger("artifetch")
 
 if "--test" in sys.argv:
@@ -861,9 +872,6 @@ def match_key(key: str, val):
         return key == val
 
 
-PreviousOutput = {}
-
-
 def get_repository(repo_id, cache):
     repo = cache.lookup(("repository", repo_id))
     if repo:
@@ -877,8 +885,10 @@ def get_repository(repo_id, cache):
 
 
 def output_metric(result, added, output={}, cache=None):
-    global PreviousOutput
     global PushDescriptions
+
+    if not hasattr(output_metric, "PreviousOutput"):
+        output_metric.PreviousOutput = {}
 
     style = output.get("style", "formatted")
     format = output.get("format", "{push_idx} {value}")
@@ -889,20 +899,20 @@ def output_metric(result, added, output={}, cache=None):
         raise Exception(f"unsupported output format {output}")
 
     if push_header is not False:
-        prev_push = PreviousOutput.get("push")
+        prev_push = output_metric.PreviousOutput.get("push")
         if result["push_id"] != prev_push:
             if prev_push is not None:
                 print("", file=OutFile)
             print(push_header.format(**result), file=OutFile)
-        PreviousOutput["push"] = result["push_id"]
+        output_metric.PreviousOutput["push"] = result["push_id"]
 
     if job_header is not False:
-        prev_job = PreviousOutput.get("job")
+        prev_job = output_metric.PreviousOutput.get("job")
         if result["job_id"] != prev_job:
             if prev_job is not None:
                 print("", file=OutFile)
             print(job_header.format(**result), file=OutFile)
-        PreviousOutput["job"] = result["job_id"]
+        output_metric.PreviousOutput["job"] = result["job_id"]
 
     # Every time a new index is generated, output the label-header format so the index can be mapped to the data it corresponds to.
     for label, idx, label_value in added:
@@ -1247,16 +1257,7 @@ def make_job_filter(job_query, cache):
 
 def process_query(args, cache):
     if args.query == "default":
-        query = {
-            "artifact": "live_backing.log",
-            "metric": {
-                "output": {
-                    "style": "formatted",
-                    "push-header": "# from push {push_id} - {push_desc}",
-                    "format": "{filename}",
-                }
-            },
-        }
+        query = DEFAULT_QUERY
     else:
         with open(args.query) as fh:
             query = yaml.safe_load(fh)
