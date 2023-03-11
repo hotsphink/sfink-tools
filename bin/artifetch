@@ -357,7 +357,7 @@ class TreeHerder(object):
 
         cache_file_base = self.artifact_path / urllib.parse.quote(url, safe="")
         data = None
-        for cache_file in (cache_file_base, Path(str(cache_file_base) + ".gz")):
+        for cache_file in (Path(str(cache_file_base) + ".gz"), cache_file_base):
             try:
                 with gzip.open(cache_file.open("rb"), "rt") as fh:
                     data = fh.read()
