@@ -30,7 +30,6 @@ JOB_URL = (
 )
 
 DEFAULT_QUERY = {
-    "artifact": "live_backing.log",
     "metric": {
         "output": {
             "style": "formatted",
@@ -363,7 +362,11 @@ class TreeHerder(object):
                 with gzip.open(cache_file.open("rb"), "rt") as fh:
                     data = fh.read()
             except gzip.BadGzipFile:
-                data = cache_file.read_text()
+                try:
+                    data = cache_file.read_text()
+                except UnicodeDecodeError:
+                    logger.info(f"used un-decodable cached file {cache_file}")
+                    return (None, cache_file)
             except OSError:
                 pass
 
@@ -390,8 +393,12 @@ class TreeHerder(object):
                 cache_file = cache_file.with_name(cache_file.name + ".gz")
             cache_file.write_bytes(raw_data)
         except gzip.BadGzipFile:
-            data = raw_data.decode()
-            cache_file.write_text(data)
+            try:
+                data = raw_data.decode()
+                cache_file.write_text(data)
+            except UnicodeDecodeError:
+                cache_file.write_bytes(raw_data)
+                data = None
 
         return (data, cache_file)
 
@@ -594,6 +601,15 @@ def choose_pushes(cache, n=10, single=False):
     )
     return [push["id"] for push in push_filter(pushes)]
 
+
+def choose_artifacts(cache, choices):
+    filter = ChooseFilter(
+        None,
+        cache,
+        False,
+        single=False,
+    )
+    return filter(choices)
 
 def choose_push(cache, n=10):
     return choose_pushes(cache, n, single=True)[0]
@@ -1082,6 +1098,8 @@ def process_artifact(url, job, push_result, query, cache):
     if extractor["type"] == "json":
         data: DataT = json.loads(raw)
     elif extractor["type"] == "text":
+        if raw is None:
+            raise Exception("text expected by extractor")
         data: DataT = raw
     else:
         data: DataT = None
@@ -1288,7 +1306,7 @@ def process_query(args, cache):
             process_artifact(a, job, push_result, query, cache)
         return
 
-    artifact_match = query["artifact"]
+    artifact_match = query.get("artifact", "choose")
 
     pushes = resolve_pushes(query.get("pushes") or {"choose-from": 20}, cache)
     logger.info("Pushes: " + "+".join(str(p) for p in pushes))
@@ -1317,9 +1335,14 @@ def process_query(args, cache):
         jobs = job_filter(get_jobs(push["id"]))
         for job in reversed(list(jobs)):
             found += 1
-            for a in get_job_artifacts(job["id"], cache):
-                if match_key(artifact_match, a):
+            artifacts = get_job_artifacts(job["id"], cache)
+            if artifact_match == "choose":
+                for a in choose_artifacts(cache, artifacts):
                     process_artifact(a, job, push_result, query, cache)
+            else:
+                for a in artifacts:
+                    if match_key(artifact_match, a):
+                        process_artifact(a, job, push_result, query, cache)
 
         if found == 0:
             logger.warning(f"no jobs matching: '{job_filter.name}' for push {push['desc']}")
