@@ -1237,6 +1237,9 @@ class ChooseFilter(BaseFilter):
             if not self.single:
                 cmd_args += " --multi --bind=ctrl-a:select-all"
             choices = fzf.prompt(options, cmd_args)
+            if not choices:
+                print("Nothing selected. fzf may have been cancelled. Stopping.", file=sys.stderr)
+                sys.exit(1)
             indexes = [int(c[0 : c.index(" ")]) - 1 for c in choices]
             self.cache.value(cache_path, indexes)
 
