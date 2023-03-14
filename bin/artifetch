@@ -1192,7 +1192,7 @@ class LimitFilter(BaseFilter):
 class MatchFilter(BaseFilter):
     def __init__(self, base_filter, matcher, desc):
         super().__init__(base_filter)
-        self.name = f"({base_filter.name} with {desc}"
+        self.name = f"({base_filter.name} with {desc})"
         self.matcher = matcher
 
     def __call__(self, incoming):
@@ -1286,6 +1286,9 @@ def process_query(args, cache):
     job_query = query.get("jobs", {"choose-from": 0})
     job_filter = make_job_filter(job_query, cache)
 
+    # Mostly for testing/development, process local files
+    # in place of downloaded artifacts. Create a dummy push
+    # and job.
     if local_artifacts := query.get("artifacts"):
         for push_id, a in enumerate(local_artifacts):
             push = {
