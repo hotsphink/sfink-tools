@@ -1309,7 +1309,7 @@ def process_query(args, cache):
             process_artifact(a, job, push_result, query, cache)
         return
 
-    artifact_match = query.get("artifact", "choose")
+    artifact_match = query.get("artifact", args.artifacts or "choose")
 
     pushes = resolve_pushes(query.get("pushes") or {"choose-from": 20}, cache)
     logger.info("Pushes: " + "+".join(str(p) for p in pushes))
