@@ -19,15 +19,15 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-DEFAULT_CACHE_ROOT = Path(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")))
+DEFAULT_CACHE_ROOT = Path(
+    os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
+)
 TREEHERDER_SERVER = "https://treeherder.mozilla.org"
 VERSION = 0.1
 HEADERS = {"User-Agent": f"artifetch {VERSION} by sfink@mozilla.com"}
 
 PUSH_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}"
-JOB_URL = (
-    "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
-)
+JOB_URL = "https://treeherder.mozilla.org/jobs?repo={repo}&revision={revision}&selectedTaskRun={task_id}"
 
 DEFAULT_QUERY = {
     "metric": {
@@ -51,7 +51,9 @@ parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}"
 parser.add_argument("--verbose", "-v", default=0, action="count", help="Verbose output")
 
 g_input = parser.add_argument_group(title="Specifying input")
-g_input.add_argument("--user", "-u", default=None, help="User to use for filtering pushes")
+g_input.add_argument(
+    "--user", "-u", default=None, help="User to use for filtering pushes"
+)
 g_input.add_argument(
     "--branch", default="try", help="Treeherder branch (eg 'try', 'mozilla-central')"
 )
@@ -108,12 +110,16 @@ g_action.add_argument(
     help="List out artifacts (default: all)",
 )
 g_action.add_argument("--show-job", dest="job", help="Display info for a given JOB id")
-g_action.add_argument("--query", help="Query YAML file (may also be given as a plain argument)")
+g_action.add_argument(
+    "--query", help="Query YAML file (may also be given as a plain argument)"
+)
 g_action.add_argument("_query", nargs="?", default=None, help=argparse.SUPPRESS)
 
 g_test = parser.add_argument_group(title="Testing")
 
-g_test.add_argument("--test", action="store_true", help="enable extra options for testing")
+g_test.add_argument(
+    "--test", action="store_true", help="enable extra options for testing"
+)
 g_test.add_argument("--record", type=str, help=iftest("directory to record into"))
 g_test.add_argument("--replay", type=str, help=iftest("directory to replay from"))
 
@@ -124,7 +130,9 @@ g_cache.add_argument(
     help=f"Root of cache dir (default: {DEFAULT_CACHE_ROOT})",
 )
 g_cache.add_argument("--refresh", action="store_true", help="Do not use cached results")
-g_cache.add_argument("--no-cache", action="store_true", help="Do not load from or save to cache")
+g_cache.add_argument(
+    "--no-cache", action="store_true", help="Do not load from or save to cache"
+)
 
 
 args = parser.parse_args()
@@ -238,7 +246,9 @@ def require_user():
         else:
             args.user = output.strip()
     except subprocess.CalledProcessError:
-        output = subprocess.check_output(["git", "config", "--get", "user.email"], text=True)
+        output = subprocess.check_output(
+            ["git", "config", "--get", "user.email"], text=True
+        )
         args.user = output.strip()
 
     return args.user
@@ -263,7 +273,9 @@ class TreeHerder(object):
     def get_results(self, endpoint, project=None, **params):
         response = self.get(endpoint, project=project, **params)
         if not response.ok:
-            logger.error(f"API request failed: {response.status_code} {response.reason}")
+            logger.error(
+                f"API request failed: {response.status_code} {response.reason}"
+            )
             logger.error(response.text)
             sys.exit(1)
         data = response.json()
@@ -339,7 +351,9 @@ class TreeHerder(object):
         )
 
         if not response.ok:
-            logger.error(f"graphql request failed: {response.status_code} {response.reason}")
+            logger.error(
+                f"graphql request failed: {response.status_code} {response.reason}"
+            )
             logger.error(response.text)
             sys.exit(1)
         data = response.json()
@@ -611,6 +625,7 @@ def choose_artifacts(cache, choices):
     )
     return filter(choices)
 
+
 def choose_push(cache, n=10):
     return choose_pushes(cache, n, single=True)[0]
 
@@ -694,7 +709,9 @@ def get_job_artifacts(job_id, cache):
             )
         )
     cache.value(("job", job_id, "artifacts"), artifacts)
-    logger.debug(f"job {job_id} {describe_job_id(job_id, cache)}: {len(artifacts)} artifacts")
+    logger.debug(
+        f"job {job_id} {describe_job_id(job_id, cache)}: {len(artifacts)} artifacts"
+    )
     return artifacts
 
 
@@ -806,7 +823,9 @@ def parse_path(k: str) -> PathT:
     return [p for p in re.findall(r"\[\]|[^.\[]+|\.", k) if p != "."]
 
 
-def find_path_matches(data: DataT, path: PathT, sofar: PathT = []) -> list[tuple[PathT, Any]]:
+def find_path_matches(
+    data: DataT, path: PathT, sofar: PathT = []
+) -> list[tuple[PathT, Any]]:
     if not path:
         return [(sofar, data)]
     results = []
@@ -860,7 +879,9 @@ def lookup_text_values_g(extractor, data, labels):
         if m := re.search(matcher, line):
             result = {}
             for lname, lvalue in [("value", extractor["values"])] + labels:
-                result[lname] = re.sub(r"\$(\d+)", lambda lm: m.group(int(lm.group(1))), lvalue)
+                result[lname] = re.sub(
+                    r"\$(\d+)", lambda lm: m.group(int(lm.group(1))), lvalue
+                )
             yield result
 
 
@@ -1016,7 +1037,9 @@ def match_remaining(matchers, paths: ResultPathsT, data: DataT) -> list[ResultPa
 
 
 def extract_matches_g(extractor, data: DataT):
-    matchers = list(zip(range(len(extractor["keys"])), extractor["keys"], extractor["targets"]))
+    matchers = list(
+        zip(range(len(extractor["keys"])), extractor["keys"], extractor["targets"])
+    )
     matchers.pop(0)  # Matchers are 1-based indexes. Sorry.
 
     matches: list[ResultPathsT] = []
@@ -1200,7 +1223,9 @@ class MatchFilter(BaseFilter):
 
 
 class ChooseFilter(BaseFilter):
-    def __init__(self, base_filter, cache, again, single=False, extract_description=lambda s: s):
+    def __init__(
+        self, base_filter, cache, again, single=False, extract_description=lambda s: s
+    ):
         super().__init__(base_filter)
         self.extract_description = extract_description
         self.cache = cache
@@ -1238,7 +1263,10 @@ class ChooseFilter(BaseFilter):
                 cmd_args += " --multi --bind=ctrl-a:select-all"
             choices = fzf.prompt(options, cmd_args)
             if not choices:
-                print("Nothing selected. fzf may have been cancelled. Stopping.", file=sys.stderr)
+                print(
+                    "Nothing selected. fzf may have been cancelled. Stopping.",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
             indexes = [int(c[0 : c.index(" ")]) - 1 for c in choices]
             self.cache.value(cache_path, indexes)
@@ -1351,7 +1379,9 @@ def process_query(args, cache):
                         process_artifact(a, job, push_result, query, cache)
 
         if found == 0:
-            logger.warning(f"no jobs matching: '{job_filter.name}' for push {push['desc']}")
+            logger.warning(
+                f"no jobs matching: '{job_filter.name}' for push {push['desc']}"
+            )
 
 
 if args.record:
