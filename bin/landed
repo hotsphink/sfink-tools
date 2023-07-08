@@ -301,11 +301,13 @@ for i in range(len(oldv)):
     olddesc = re.sub(r' r=\S+', '', old.desc)
     newdesc = re.sub(r' r=\S+', '', new.desc)
     if olddesc != newdesc:
-        print(f"For now, cowardly refusing to obsolete\n  {display(old.desc, 2)}\nwith\n  {display(new.desc, 2)}\nbecause the descriptions are not identical.")
+        print(f"\nCowardly refusing to obsolete\n  {display(old.desc, 2)}\nwith\n  {display(new.desc, 2)}\nbecause the descriptions are not identical.")
+        if input("Use it anyway? (y/n) ").startswith("y"):
+            continue
         failed = True
 
 if failed:
-    sys.exit(1)
+    sys.exit("Exiting due to mismatch")
 
 
 def vec2revset(vec):
