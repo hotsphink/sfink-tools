@@ -26,7 +26,13 @@ function mc () {
     fi
 
     local mozconfig
-    mozconfig="$(hg root)/mozconfig.$1"
+
+    if [[ $1 = "-s" ]] || [[ $1 = "." ]]; then
+      mozconfig="$(hg root)/"$(ls "$root" | fgrep mozconfig. | fgrep -v '~' | fzf)
+    else
+      mozconfig="$(hg root)/mozconfig.$1"
+    fi
+
     if ! [ -f "$mozconfig" ]; then
         echo "Warning: $mozconfig does not exist" >&2
         local tmp
@@ -47,7 +53,10 @@ function mc () {
 
     local _objdir
     _objdir=$(env topsrcdir="$root" perl -lne 'if (/MOZ_OBJDIR\s*=\s*(.*)/) { $_ = $1; s!\@TOPSRCDIR\@!$ENV{topsrcdir}!; print }' "$mozconfig")
-    if [ -n "$_objdir" ]; then export objdir="$_objdir"; fi
+    if [ -n "$_objdir" ]; then
+      export objdir="$_objdir"
+      export JS="$objdir/dist/bin/js"
+    fi
 
     export MOZCONFIG="$mozconfig"
     { echo -n "MOZCONFIG is now " >&2; echo "$MOZCONFIG" }
