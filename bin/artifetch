@@ -42,9 +42,9 @@ DEFAULT_QUERY = {
 logger = logging.getLogger("artifetch")
 
 if "--test" in sys.argv:
-    iftest = lambda t: t
+    def iftest(t): t
 else:
-    iftest = lambda t: argparse.SUPPRESS
+    def iftest(t): argparse.SUPPRESS
 
 parser = argparse.ArgumentParser(prog="artifetch")
 parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
@@ -951,7 +951,8 @@ def output_metric(result, added, output={}, cache=None):
             print(job_header.format(**result), file=OutFile)
         output_metric.PreviousOutput["job"] = result["job_id"]
 
-    # Every time a new index is generated, output the label-header format so the index can be mapped to the data it corresponds to.
+    # Every time a new index is generated, output the label-header format so
+    # the index can be mapped to the data it corresponds to.
     for label, idx, label_value in added:
         if label_format := output.get("label-header", {}).get(label):
             print(label_format.format(**result), file=OutFile)
@@ -1236,8 +1237,8 @@ class ChooseFilter(BaseFilter):
     def __call__(self, incoming):
         incoming = list(super().__call__(incoming))  # flatten iterator
 
-        # TODO: history stores just the indexes of the choices. It should really give the id
-        # or something persistent about the selections.
+        # TODO: history stores just the indexes of the choices. It should
+        # really use something persistent like the id.
         ChooseFilter.count += 1
         n = ChooseFilter.count
         # TODO: key these with the type of history item. This could easily mix things up. It
@@ -1304,6 +1305,10 @@ def make_job_filter(job_query, cache):
     return job_filter
 
 
+def autoincrement(table, key):
+    table.setdefault(key, len(table))
+
+
 def process_query(args, cache):
     if args.query == "default":
         query = DEFAULT_QUERY
@@ -1356,7 +1361,7 @@ def process_query(args, cache):
             "push": push,
             "push_id": push_id,
             # Give each push an "index" set to an autoincrementing value associated with its push_id.
-            "push_idx": push_table.setdefault(push_id, len(push_table)),
+            "push_idx": autoincrement(push_table, push_id),
             "push_desc": summarize_push(push, cache),
             "revision": push["revision"],
             "repo": get_repository(push["repository_id"], cache),
