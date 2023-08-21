@@ -24,7 +24,8 @@ except ImportError:
     from urllib import quote
     from urlparse import urljoin
 
-SYMBOL_SERVER_URL = 'https://symbols.mozilla.org'
+SYMBOL_SERVER_URL = 'https://s3-us-west-2.amazonaws.com/org.mozilla.crash-stats.symbols-public/v1/'
+#SYMBOL_SERVER_URL = 'https://symbolication.services.mozilla.com/symbolication/'
 
 debug_dir = os.path.join(os.environ['HOME'], '.cache', 'gdb')
 cache_dir = os.path.join(debug_dir, '.build-id')
