@@ -22,6 +22,7 @@ qdiff = -U 8 -p
 qnew = -U
 qexport = -v
 qbackout = -U
+purge = --no-confirm
 
 [phases]
 publishing = False
@@ -51,7 +52,6 @@ relink =
 graphlog =
 convert =
 transplant =
-purge =
 share =
 histedit =
 shelve =
