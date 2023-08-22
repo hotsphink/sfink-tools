@@ -2,14 +2,16 @@
 # $_when functions
 # set rrprompt on
 # now
-# set logfile /tmp/mylog.txt
+# set logfile /tmp/mylog.json
 # log some message
 # log -unsorted
 # log -sorted
 # log -edit
 
 import gdb
+import json
 import os
+import random
 import re
 import tempfile
 
@@ -18,6 +20,7 @@ from os import environ as env
 
 gdb.execute("source {}/gdbinit.rr".format(abspath(expanduser(dirname(__file__)))))
 
+RUN_ID = "RRSESSION-" + str(random.random())
 RUNNING_RR = None
 
 def running_rr():
@@ -47,12 +50,14 @@ def setup_log_dir():
 
 DEFAULT_LOG_DIR = setup_log_dir()
 
+
 def when():
     when = gdb.execute("when", False, True)
     m = re.search(r'(\d+)', when)
     if not m:
         raise Exception("when returned invalid string")
     return int(m.group(1))
+
 
 def when_ticks():
     when = gdb.execute("when-ticks", False, True)
@@ -61,14 +66,18 @@ def when_ticks():
         raise Exception("when-ticks returned invalid string")
     return int(m.group(1))
 
+
 def now():
     return "%s/%s" % (when(), when_ticks())
+
 
 def nowTuple():
     return (when(), when_ticks())
 
+
 def rrprompt(current_prompt):
     return ("(rr %d/%d) " % (when(), when_ticks()))
+
 
 class ParameterRRPrompt(gdb.Parameter):
     def __init__(self):
@@ -89,7 +98,6 @@ class ParameterRRPrompt(gdb.Parameter):
     def get_show_string(self, svalue):
         return svalue
 
-ParameterRRPrompt()
 
 class PythonWhenTicks(gdb.Function):
     """$_when_ticks - return the numeric output of rr's 'when-ticks' command
@@ -103,7 +111,6 @@ Usage:
     def invoke(self):
         return str(when_ticks())
 
-PythonWhenTicks()
 
 class PythonWhen(gdb.Function):
     """$_when - return the numeric output of rr's 'when' command
@@ -117,7 +124,6 @@ Usage:
     def invoke(self):
         return when()
 
-PythonWhen()
 
 class PythonNow(gdb.Command):
     """Output <when>/<when-ticks>"""
@@ -130,7 +136,6 @@ class PythonNow(gdb.Command):
         except gdb.error:
             gdb.write("?? when/when-ticks unavailable (not running under rr?)\n")
 
-PythonNow()
 
 class SharedFile(io.TextIOWrapper):
     def __init__(self, filename):
@@ -148,6 +153,18 @@ class SharedFile(io.TextIOWrapper):
         nbytes = super(SharedFile, self).write(buffer)
         self.record_end()
         return nbytes
+
+
+# Generator that yields a sequence of actions read from the given log file.
+# Each line must be a valid JSON document.
+def log_actions(fh):
+    lineno = 0
+    for line in fh:
+        lineno += 1
+        data = json.loads(line)
+        data['lineno'] = lineno
+        yield data
+
 
 class PythonLog(gdb.Command):
     """Append current event/tick-count with message to log file"""
@@ -175,19 +192,10 @@ class PythonLog(gdb.Command):
 
         self.LogFile.seek(0)
 
-        for lineno, line in enumerate(self.LogFile):
-            if not line.startswith("! "):
-                continue
-
-            rest = line[2:].rstrip()
-            cmd = rest.split(" ", 1)[0]
-            rest = rest[len(cmd)+1:]
-            if cmd == "replace":
-                k, v, t = rest.split(" ", 2)
-                labels.label(k, v, t)
-                continue
-
-            gdb.write("Unhandled log command: {}\n".format(line))
+        # Load all 'label' actions in the log.
+        for action in log_actions(self.LogFile):
+            if action['type'] == 'label':
+                labels.label(action['key'], action['value'], action['datatype'])
 
         labels.flush_added()
         self.LogFile.record_end()
@@ -198,7 +206,7 @@ class PythonLog(gdb.Command):
 
     def default_log_filename(self):
         tid = gdb.selected_thread().ptid[0]
-        return os.path.join(DEFAULT_LOG_DIR, "rr-session-%s.log" % (tid,))
+        return os.path.join(DEFAULT_LOG_DIR, "rr-session-%s.json" % (tid,))
 
     def thread_id(self, fs_base=None):
         '''Return the thread id in the format "T<num>" for the given fs_base, or the current value of that register if not given. This is a hack that is not guaranteed to work -- when rr starts a new process under the hood, gdb may shift the thread numbers around. This is a heuristic to grab an id the first time a thread is encountered; there is no guarantee that it won't map multiple threads to the same ID. (That could be fixed, but I haven't bothered yet.)'''
@@ -220,7 +228,8 @@ class PythonLog(gdb.Command):
         #print("grabbing new labels: {}".format([v for k, (v, t) in added]))
         for k, (v, t) in added:
             #print("writing {} -> ({}) {} to log".format(k, t, v))
-            self.LogFile.write("! replace {} {} {}\n".format(k, v, t))
+            json.dump({'type': 'label', 'key': k, 'value': v, 'datatype': t}, self.LogFile)
+            self.LogFile.write("\n")
 
         if self.LogFile.changed():
             #print("Checking changed: yes (or dirty)")
@@ -287,11 +296,12 @@ class PythonLog(gdb.Command):
                 do_print = True
             if self.LogFile:
                 gdb_out = gdb.execute("checkpoint", to_string=True)
-                m = re.search(r'Checkpoint (\d+)', gdb_out)
-                if m:
-                    checkpoint = m.group(1)
-                    out = "[c{}] ".format(checkpoint) + out
-                self.LogFile.write("%s %s\n" % (now(), out))
+                action = {'type': 'log', 'event': when(), 'ticks': when_ticks(), 'message': out}
+                if m := re.search(r'Checkpoint (\d+)', gdb_out):
+                    action['checkpoint'] = m.group(1)
+                    action['session'] = RUN_ID
+                json.dump(action, self.LogFile)
+                self.LogFile.write("\n")
 
         if do_dump:
             self.dump(**dump_args)
@@ -312,6 +322,15 @@ class PythonLog(gdb.Command):
         # Let gdb handle other $ vars.
         return re.sub(r'(\$\w+)', lambda m: util.evaluate(m.group(1)), out)
 
+    def write_message(self, message, verbose=False):
+        (event, ticks, lineno, msg, checkpoint, session) = message
+        if verbose:
+            gdb.write(f"{event}/{ticks} ")
+        if checkpoint is not None:
+            if RUN_ID == session:
+                gdb.write(f"[c{checkpoint}] ")
+        gdb.write(msg + "\n")
+
     def dump(self, sort=False, replace=True, verbose=False):
         if not self.LogFile:
             gdb.write("No log file open\n")
@@ -320,18 +339,15 @@ class PythonLog(gdb.Command):
         self.LogFile.seek(0)
 
         messages = []
-        for lineno, line in enumerate(self.LogFile):
-            if line.startswith("! "):
+        for action in log_actions(self.LogFile):
+            if action['type'] != 'log':
                 continue
-            line = line.strip()
 
-            (timestamp, message) = line.split(" ", 1)
-            (event, ticks) = timestamp.split("/", 1)
-
+            message = action['message']
             if replace:
-                line = labels.apply(line, verbose)
+                message = labels.apply(message, verbose)
 
-            messages.append((int(event), int(ticks), lineno, line))
+            messages.append((action['event'], action['ticks'], action['lineno'], message, action.get('checkpoint'), action.get('session')))
 
         now = nowTuple()
         place = -1
@@ -343,10 +359,11 @@ class PythonLog(gdb.Command):
                     place = i - 1
                     break
             for i, message in enumerate(messages):
-                gdb.write("%s%s\n" % ("=> " if i == place else "   ", message[3]))
+                gdb.write("=> " if i == place else "   ")
+                self.write_message(message, verbose=verbose)
         else:
             for message in messages:
-                gdb.write(message[3] + "\n")
+                self.write_message(message, verbose=verbose)
 
     def edit(self):
         if not self.LogFile:
@@ -355,8 +372,11 @@ class PythonLog(gdb.Command):
 
         filename = self.LogFile.name
         self.LogFile.close()
+        if os.environ.get("INSIDE_EMACS"):
+            pass  # Use emacsclient if possible.
         os.system(os.environ.get('EDITOR', 'emacs') + " " + filename)
         self.openlog(filename, quiet=True)
+
 
 class ParameterLogFile(gdb.Parameter):
     def __init__(self, logger):
@@ -375,5 +395,11 @@ class ParameterLogFile(gdb.Parameter):
             return "<no logfile active>"
         return self.logger.LogFile.name
 
+
+# Create gdb commands.
+ParameterLogFile(PythonLog())
 if running_rr():
-    ParameterLogFile(PythonLog())
+    ParameterRRPrompt()
+    PythonWhenTicks()
+    PythonWhen()
+    PythonNow()
