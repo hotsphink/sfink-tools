@@ -21,7 +21,6 @@ jobs:
   limit-per-push: 1
 
 # Substring match on the artifact URL.
-# Uh... the talos jobs have perfherder-data. awsy has perfherder_data.
 artifact: /perfherder.data/
 
 metric:

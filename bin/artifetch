@@ -3,6 +3,12 @@
 # [ ] When recording, there are a number of duplicate recorded files. Are we
 #     re-fetching the same data multiple times?
 
+import sys
+import urllib
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
 import argparse
 import gzip
 import io
@@ -11,13 +17,7 @@ import logging
 import os
 import re
 import requests
-import sys
-import urllib
 import yaml
-
-from collections import defaultdict
-from pathlib import Path
-from typing import Any
 
 DEFAULT_CACHE_ROOT = Path(
     os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
@@ -55,7 +55,7 @@ g_input.add_argument(
     "--user", "-u", default=None, help="User to use for filtering pushes"
 )
 g_input.add_argument(
-    "--branch", default="try", help="Treeherder branch (eg 'try', 'mozilla-central')"
+    "--branch", default="try", help="Treeherder branch (eg 'try', 'mozilla-central', default: 'try')"
 )
 g_input.add_argument(
     "--artifacts",
@@ -110,6 +110,10 @@ g_action.add_argument(
     help="List out artifacts (default: all)",
 )
 g_action.add_argument("--show-job", dest="job", help="Display info for a given JOB id")
+g_action.add_argument(
+    "--repl", action="store_true",
+    help="Interactively develop processing"
+)
 g_action.add_argument(
     "--query", help="Query YAML file (may also be given as a plain argument)"
 )
@@ -396,8 +400,8 @@ class TreeHerder(object):
         r = requests.get(url, stream=True)
         raw_data = r.raw.read()
 
-        # Further hacks: the URL may not have a .gz extension even though the
-        # data is compressed. Adjust the cache_file name to reflect the compression or lack thereof.
+        # Further hacks: the URL may not have a .gz extension even though the data is compressed.
+        # Adjust the cache_file name to reflect the compression or lack thereof.
 
         self.artifact_path.mkdir(parents=True, exist_ok=True)
 
@@ -734,10 +738,25 @@ def show_job(args):
     if not args.job:
         raise Exception("--job ID required")
 
-    job = server.get_results("jobs", project=args.branch, id=args.job)
+    job = server.get_results("jobs", project=args.branch, id=args.job)[0]
 
     if args.json:
         print(json.dumps(job, indent=4), file=OutFile)
+        return
+
+    push_result = {
+        "push": None,
+        "push_id": 0,
+        "push_idx": 1,
+        "push_desc": '<synthetic>',
+        "revision": None,
+        "repo": None,
+    }
+    push_result["push_url"] = PUSH_URL.format(**push_result)
+
+    query = DEFAULT_QUERY
+    artifact_match = query.get("artifact", args.artifacts or "choose")
+    process_job(job, push_result, query, artifact_match, cache)
 
 
 def get_pushes(start, end):
@@ -801,7 +820,7 @@ def resolve_pushes(spec, cache, single=False):
     if revision := spec.get("rev"):
         # Do not cache, because we may be rerunning to pick up newer pushes.
         def rev_matches(rev, pattern):
-            return rev in pattern.split("+")
+            return any(rev.startswith(p) for p in pattern.split("+"))
 
         def push_has_rev(p):
             return any([rev_matches(r["revision"], revision) for r in p["revisions"]])
@@ -995,12 +1014,26 @@ def parse_json_metric_extractor(metric):
 
 def parse_text_metric_extractor(metric):
     spec = metric["text"]
+
+    # UNUSED: Currently, text files still can only use a single match-key.
+    # For JSON files, the match-keys are ANDed together, and later ones can
+    # refer to the results of earlier ones. You can't AND some and OR others.
+    # So it's an open question what to do with text stuff. This probably mostly
+    # shows up in the context of aggregation, where you want an overall view of
+    # multiple different matches.
+    keys = [None]
+    if key := spec.get("match-key"):
+        keys.append(key)
+    else:
+        for entry in spec.keys():
+            if entry.startswith("match-key-"):
+                index = int(entry[10:])
+                while len(keys) <= index:
+                    keys.append(None)
+                keys[index] = spec[entry]
     return {
         "type": "text",
-        "keys": (
-            None,
-            spec["match-key"],
-        ),
+        "keys": keys,
         "targets": (
             None,
             True,
@@ -1075,9 +1108,11 @@ class GroupBy(object):
         self.groupby = groupby
         self.expr = expr
         self.cache = cache
-        self.aggregates = []
-        for m in re.finditer(r"{(\w+)\((\w+)\)}", expr):
-            self.aggregates.append((m.group(1), m.group(2)))
+        self.aggregate_fields = set()
+        for m in re.finditer(r"{(\w+)\(([\w,]+)\)}", expr):
+            operator, params = m.groups()
+            for field in params.split(","):
+                self.aggregate_fields.add(field)
         self.sums = defaultdict(lambda: defaultdict(int))
         self.counts = defaultdict(int)
         self.proto_result = {}
@@ -1090,7 +1125,7 @@ class GroupBy(object):
         rawkey = (result[k] for k in self.groupby)
         # Allow `groupby: ["push"]`` for example (objects will be distinguished by their "id" values.)
         key = tuple(k["id"] if isinstance(k, dict) else k for k in rawkey)
-        for func, field in self.aggregates:
+        for field in self.aggregate_fields:
             self.sums[key][field] += int(result[field])
             self.counts[key] += 1
         self.proto_result.setdefault(key, {}).update(result)
@@ -1099,11 +1134,14 @@ class GroupBy(object):
         for key in self.sums.keys():
             # This is a complete mess.
             result = dict(self.proto_result[key])
-            for m in re.finditer(r"{(\w+)\((\w+)\)}", self.expr):
-                func, field = m.groups()
+            for m in re.finditer(r"{(\w+)\((.*?)\)}", self.expr):
+                func, fields = m.groups()
+                fields = fields.split(",")
                 call = m.group(0)[1:-1]
                 if func == "sum":
-                    result[call] = self.sums[key][field]
+                    result[call] = 0
+                    for field in fields:
+                        result[call] += self.sums[key][field]
                 elif func == "count":
                     result[call] = self.counts[key]
                 elif func == "mean":
@@ -1224,6 +1262,8 @@ class MatchFilter(BaseFilter):
 
 
 class ChooseFilter(BaseFilter):
+    count = 0
+
     def __init__(
         self, base_filter, cache, again, single=False, extract_description=lambda s: s
     ):
@@ -1232,7 +1272,6 @@ class ChooseFilter(BaseFilter):
         self.cache = cache
         self.again = again
         self.single = single
-        setattr(ChooseFilter, "count", 0)
 
     def __call__(self, incoming):
         incoming = list(super().__call__(incoming))  # flatten iterator
@@ -1269,7 +1308,7 @@ class ChooseFilter(BaseFilter):
                     file=sys.stderr,
                 )
                 sys.exit(1)
-            indexes = [int(c[0 : c.index(" ")]) - 1 for c in choices]
+            indexes = [int(c[0:c.index(" ")]) - 1 for c in choices]
             self.cache.value(cache_path, indexes)
 
         return [incoming[i] for i in indexes]
@@ -1281,6 +1320,10 @@ def make_job_filter(job_query, cache):
     if sym := job_query.get("symbol"):
         job_filter = MatchFilter(
             job_filter, lambda j: match_string(job_symbol(j), sym), f"symbol is {sym}"
+        )
+    if id := args.job:
+        job_filter = MatchFilter(
+            job_filter, lambda j: str(j["id"]) == str(id), f"id is {id}"
         )
     if name := job_query.get("group_name"):
         job_filter = MatchFilter(
@@ -1305,8 +1348,19 @@ def make_job_filter(job_query, cache):
     return job_filter
 
 
-def autoincrement(table, key):
-    table.setdefault(key, len(table))
+def process_job(job, push_result, query, artifact_match, cache):
+    artifacts = get_job_artifacts(job["id"], cache)
+    if artifact_match == "choose":
+        for a in choose_artifacts(cache, artifacts):
+            process_artifact(a, job, push_result, query, cache)
+    else:
+        for a in artifacts:
+            if match_key(artifact_match, a):
+                process_artifact(a, job, push_result, query, cache)
+
+
+def autoincrement(table, key) -> int:
+    return table.setdefault(key, len(table))
 
 
 def process_query(args, cache):
@@ -1360,7 +1414,7 @@ def process_query(args, cache):
         push_result = {
             "push": push,
             "push_id": push_id,
-            # Give each push an "index" set to an autoincrementing value associated with its push_id.
+            # Give each push an autoincrementing "index" associated with its push_id.
             "push_idx": autoincrement(push_table, push_id),
             "push_desc": summarize_push(push, cache),
             "revision": push["revision"],
@@ -1374,14 +1428,7 @@ def process_query(args, cache):
         jobs = job_filter(get_jobs(push["id"]))
         for job in reversed(list(jobs)):
             found += 1
-            artifacts = get_job_artifacts(job["id"], cache)
-            if artifact_match == "choose":
-                for a in choose_artifacts(cache, artifacts):
-                    process_artifact(a, job, push_result, query, cache)
-            else:
-                for a in artifacts:
-                    if match_key(artifact_match, a):
-                        process_artifact(a, job, push_result, query, cache)
+            process_job(job, push_result, query, artifact_match, cache)
 
         if found == 0:
             logger.warning(
