@@ -166,6 +166,21 @@ def log_actions(fh):
         yield data
 
 
+class ParameterLogQuiet(gdb.Parameter):
+    quiet = False
+
+    def __init__(self):
+        # FIXME: Rename from 'logging', try to use nested command stuff?
+        super(ParameterLogQuiet, self).__init__('logquiet', gdb.COMMAND_SUPPORT, gdb.PARAM_BOOLEAN)
+
+    def get_set_string(self):
+        ParameterLogQuiet.quiet = self.value
+        return "logging is " + ("quiet" if ParameterLogQuiet.quiet else "noisy")
+
+    def get_show_string(self, svalue):
+        return "logging is " + ("quiet" if ParameterLogQuiet.quiet else "noisy")
+
+
 class PythonLog(gdb.Command):
     """Append current event/tick-count with message to log file"""
     def __init__(self):
@@ -292,6 +307,7 @@ class PythonLog(gdb.Command):
             if not raw:
                 out = labels.apply(out, verbose=False)
             # If any substitutions were made, display the resulting log message.
+            do_print = not ParameterLogQuiet.quiet
             if out != arg:
                 do_print = True
             if self.LogFile:
@@ -398,6 +414,7 @@ class ParameterLogFile(gdb.Parameter):
 
 # Create gdb commands.
 ParameterLogFile(PythonLog())
+ParameterLogQuiet()
 if running_rr():
     ParameterRRPrompt()
     PythonWhenTicks()
