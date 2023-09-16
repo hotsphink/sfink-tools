@@ -144,12 +144,12 @@ class Labels(dict):
         #print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
         if gdbval is None:
             try:
-                m = re.match(r'(.*?)(  *\**)$', typestr)
-                if m:
+                # Look for a pointer type, eg in `(JSObject *) 0xdeadbeef`
+                if m := re.match(r'(.*?)(  *\**)$', typestr):
                     t, ptrs = m.groups()
                 else:
                     t, ptrs = (typestr, '')
-                gdbval = gdb.parse_and_eval("('{}'{}) {}".format(t, ptrs, token))
+                gdbval = gdb.parse_and_eval(f"('{t}'{ptrs}) {token}")
             except gdb.error as e:
                 # This can happen if we load in a set of labels before the type
                 # exists.
@@ -284,7 +284,8 @@ class LabelCmd(gdb.Command):
 
         pos = index_of_first(arg, [' ', '='])
         if pos is not None:
-            self.set_label(arg[0:pos], arg[pos+1:])
+            name, val = (arg[0:pos], arg[pos+1:])
+            self.set_label(name, val.lstrip())
             return
 
         self.get_label(arg)
@@ -315,7 +316,6 @@ class LabelCmd(gdb.Command):
             valstr = str(v.cast(gdb.lookup_type('void').pointer()))
         except Exception as e:
             # Fall back on the (possibly prettyprinted) output.
-            #print("Failed to cast: " + str(e))
             valstr = str(v)
 
         m = re.search(r'0x[0-9a-fA-F]+', valstr)
