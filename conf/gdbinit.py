@@ -141,7 +141,10 @@ class Labels(dict):
         self.pending_labels = []
 
     def label(self, token, name, typestr, gdbval=None):
-        #print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
+        """Set a label named `name` to the value `token` (probably a numeric
+        value) cast according to `typestr`, which is a raw cast expression.
+        gdbval is... figuring that out now."""
+        print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
         if gdbval is None:
             try:
                 # Look for a pointer type, eg in `(JSObject *) 0xdeadbeef`
@@ -296,6 +299,9 @@ class LabelCmd(gdb.Command):
         else:
             gdb.write("Label '{}' not found\n".format(name))
 
+    def prefer_prettyprinted(self, t):
+        return str(t).startswith("JS::Handle")
+
     def set_label(self, name, value):
         if re.fullmatch(r'0x[0-9a-fA-F]+', value) or value.lstrip('-').isdecimal():
             if int(value) != 0:
@@ -309,12 +315,16 @@ class LabelCmd(gdb.Command):
         # (Example: Symbol displays its desc address, though in the 0x0 case we
         # will now skip that..)
 
-        # First, attempt to cast to void*.
+        # First, attempt to cast to void*, unless the special case code says this
+        # type should prefer prettyprinting.
         valstr = None
         try:
-            # Cannot cache the type lookup; cast fails, and type does not compare equal??
-            valstr = str(v.cast(gdb.lookup_type('void').pointer()))
+            if not self.prefer_prettyprinted(v.type):
+                valstr = str(v.cast(gdb.lookup_type('void').pointer()))
         except Exception as e:
+            pass
+
+        if valstr is None:
             # Fall back on the (possibly prettyprinted) output.
             valstr = str(v)
 
