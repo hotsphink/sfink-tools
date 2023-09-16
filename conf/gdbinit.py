@@ -14,13 +14,14 @@ import re
 
 class PythonPrint(gdb.Command):
     """Print the value of the python expression given"""
-    def __init__(self):
-        gdb.Command.__init__(self, "pp", gdb.COMMAND_USER)
+    def __init__(self, name="pp"):
+        gdb.Command.__init__(self, name, gdb.COMMAND_USER)
 
     def invoke(self, arg, from_tty):
         print(eval(arg))
 
-PythonPrint()
+PythonPrint("pp")
+PythonPrint("pprint")
 
 ######################################################################
 
@@ -80,8 +81,8 @@ PDo("pdo")
 # Example: reappend "p obj->shape" "->parent" 3
 class RepeatedAppend(gdb.Command):
   """Run a command, appending a "tail" to the command on every iteration, until an error or [limit] is reached"""
-  def __init__(self):
-    gdb.Command.__init__(self, "reappend", gdb.COMMAND_USER)
+  def __init__(self, name="reappend"):
+    gdb.Command.__init__(self, name, gdb.COMMAND_USER)
 
   def invoke(self, arg, from_tty):
     args = gdb.string_to_argv(arg)
@@ -93,7 +94,7 @@ class RepeatedAppend(gdb.Command):
       gdb.execute(cmd)
       cmd = cmd + tail
 
-RepeatedAppend()
+RepeatedAppend("reappend")
 
 ######################################################################
 
