@@ -138,17 +138,20 @@ class Labels(dict):
         # reset.)
         self.added = []
 
+        # When initially loading a log file, we might have labels with types
+        # that have not been loaded yet. Keep these labels in a pending list
+        # and try to apply them again every time we load a new objfile.
         self.pending_labels = []
 
-    def label(self, token, name, typestr, gdbval=None):
+    def label(self, token, name, typestr, gdbval=None, report=True):
         """Set a label named `name` to the value `token` (probably a numeric
         value) cast according to `typestr`, which is a raw cast expression.
         gdbval is... figuring that out now."""
-        print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
+        #print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
         if gdbval is None:
             try:
                 # Look for a pointer type, eg in `(JSObject *) 0xdeadbeef`
-                if m := re.match(r'(.*?)(  *\**)$', typestr):
+                if m := re.match(r'(.*?)( *\**)$', typestr):
                     t, ptrs = m.groups()
                 else:
                     t, ptrs = (typestr, '')
@@ -157,18 +160,28 @@ class Labels(dict):
                 # This can happen if we load in a set of labels before the type
                 # exists.
                 gdb.write("unknown type: " + str(e) + "\n")
+                #gdb.write(" -->" + f"('{t}'{ptrs}) {token}" + "<--\n")
                 self.pending_labels.append((token, name, typestr))
                 return False
         self[token] = (name, typestr)
+        if report:
+            print(f"all occurrences of {token} will be replaced with ${name} of type {typestr}")
         gdb.set_convenience_variable(name, gdbval)
         return True
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, pair):
         key = self.canon(key)
-        if dict.get(self, key) == value:
+        if dict.get(self, key) == pair:
             return
-        # print("setting {} : {} -> {}".format(key, self.get(key), value))
-        dict.__setitem__(self, key, value)
+        #print(f"all occurrences of {key} will be replaced with ${pair[0]} of type {pair[1]}")
+        
+        # Remove all old keys referring to $name so that the old key will not be replaced
+        # with the updated $name.
+        deadkeys = {key for key, (name, t) in labels.items() if name == pair[0]}
+        for deadkey in deadkeys:
+            del self[deadkey]
+
+        dict.__setitem__(self, key, pair)
         self.added.append(key)
         self.dirty = True
 
@@ -188,7 +201,7 @@ class Labels(dict):
 
     def flush_added(self):
         '''Retrieve the list of entries added since the last call to this method.'''
-        ret = [(k, self[k]) for k in self.added]
+        ret = [(k, self[k]) for k in self.added if k in self]
         self.added = []
         return ret
 
@@ -227,7 +240,7 @@ class Labels(dict):
                 for key in self.keys():
                     reps.append(key)
                     reps.append(str(int(key, 16)))
-                self.repPattern = re.compile(r'\b(?<!\$)(?:' + '|'.join(reps) + r')\b')
+                self.repPattern = re.compile(r'\b(?<![\$\-])(?:' + '|'.join(reps) + r')\b')
             self.dirty = False
 
         return self.repPattern
@@ -294,8 +307,10 @@ class LabelCmd(gdb.Command):
         self.get_label(arg)
 
     def get_label(self, name):
-        if name in labels:
-            gdb.write(labels[name][0] + "\n")
+        for key, (n, t) in labels.items():
+            if n == name:
+                gdb.write(f"{name} = ({t}) {key}\n")
+                break
         else:
             gdb.write("Label '{}' not found\n".format(name))
 
@@ -341,10 +356,12 @@ class LabelCmd(gdb.Command):
         # should set $SOMETHING to the actual value of $3
         labels.label(m.group(0), name, str(v.type), gdbval=v)
 
-    # FIXME! Getting duplicate labels
     def show_all_labels(self):
-        for name, (value, t) in labels.items():
-            gdb.write("${} = ({}) {}\n".format(value, t, name))
+        seen = set()
+        for key, (name, t) in labels.items():
+            if name not in seen:
+                seen.add(name)
+                gdb.write(f"${name} = ({t}) {key}\n")
 
 LabelCmd('label')
 
@@ -352,9 +369,11 @@ class UnlabelCmd(gdb.Command):
     def __init__(self, name):
         super(UnlabelCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_NONE)
 
-    # FIXME! Gtting KeyError, yet 'label' still shows
     def invoke(self, arg, from_tty):
-        del labels[arg]
+        deadname = arg
+        deadkeys = {k: name for k, (name, t) in labels.items() if name == deadname}
+        for key in deadkeys.keys():
+            del labels[key]
 
 UnlabelCmd('unlabel')
 

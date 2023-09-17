@@ -210,7 +210,7 @@ class PythonLog(gdb.Command):
         # Load all 'label' actions in the log.
         for action in log_actions(self.LogFile):
             if action['type'] == 'label':
-                labels.label(action['key'], action['value'], action['datatype'])
+                labels.label(action['key'], action['value'], action['datatype'], report=False)
 
         labels.flush_added()
         self.LogFile.record_end()
