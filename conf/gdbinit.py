@@ -281,6 +281,34 @@ def index_of_first(s, tokens, start=0):
     return bestpos
 
 class LabelCmd(gdb.Command):
+    """Replace numeric values in the output with their labels.
+
+    Usage: label [NAME=[VALUE]]
+
+    With no arguments, display all current labels.
+
+    With one argument, display the named label.
+
+    With two arguments, evaluate VALUE and then extract the first numeric value seen
+    from it. All further `p` command output will have that numeric value replaced
+    with $<NAME>. Also, the convenience variable $<NAME> will be set to VALUE.
+
+    Example:
+
+      label GLOBAL=cx->global()
+
+    will evalute the expression `cx->global()` to something like
+
+      (JSObject*) 0xabcd0123efef0800
+
+    and now later on when the expression `obj` happens to evaluate to the same object,
+
+      gdb> p obj
+      $1 = (JSObject *) $GLOBAL
+      gdb> p $GLOBAL
+      $2 = (JSObject *) $GLOBAL
+   """
+
     def __init__(self, name):
         super(LabelCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_NONE)
 
