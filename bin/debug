@@ -63,6 +63,7 @@ my $debugger;
 my $jorendb;
 my $rrpid;
 my $rr_args = '';
+my $rr_cpu;
 my $rr_at;
 my $verbose;
 
@@ -97,6 +98,12 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
     $debugger = 'rr';
   } elsif ($_ =~ /--rr(?:-?args)?=(.*)/) {
     $rr_args = $1;
+    $debugger = 'rr';
+  } elsif ($_ eq '--rr(?:-?)cpu') {
+    $rr_cpu = shift(@ARGV);
+    $debugger = 'rr';
+  } elsif ($_ =~ /--rr(?:-?)cpu=(.*)/) {
+    $rr_cpu = $1;
     $debugger = 'rr';
   } elsif ($_ eq '--rrat' || $_ eq '--rr-at') {
     $rr_at = shift(@ARGV);
@@ -685,7 +692,12 @@ END
 }
 
 if ($debugger eq 'rr') {
-    exec(@EMACS, "--eval", "(progn (gud-gdb \"rr replay -p $rrpid $rr_args\") $init_eval)");
+    my $taskset = "";
+    if (defined $rr_cpu) {
+        $taskset = "taskset -c $rr_cpu ";
+        $rr_args .= " -u";
+    }
+    exec(@EMACS, "--eval", "(progn (gud-gdb \"${taskset}rr replay -p $rrpid $rr_args\") $init_eval)");
 } elsif ($debugger eq 'record') {
     print "Running " . join(" ", 'rr', 'record', @rr_args, $COMMAND, @args) . "\n";
     system('rr', 'record', @rr_args, $COMMAND, @args);
