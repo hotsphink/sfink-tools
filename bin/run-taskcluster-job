@@ -94,26 +94,30 @@ parser.add_argument("--mount", nargs="*",
                     "in the format /outer/path=/inner/path")
 parser.add_argument("--root-url", default=ROOT_URL,
                     help=f"taskcluster root url (default {ROOT_URL})")
+parser.add_argument("--verbose", "-v", default=0, action="count", help="Verbose output")
 args = parser.parse_args()
 
 if args.log_task_id:
     print("Grabbing the log file for a run of a task and extracting the docker image task ID")
     log_url = f"{ARTIFACT_URL}/{args.log_task_id}/0/public/logs/live_backing.log"
-    log = requests.get(log_url)
+    log = requests.get(log_url).text
     m = re.search(r'Downloading artifact "public/image.tar.zst" from task ID: (.*)\.\n', log)
     if not m:
-        print("Could not find image download line in log file")
-        sys.exit(1)
+        m = re.search(r"Image 'public/image.tar.zst' from task '(.*?)' loaded", log)
+        if not m:
+            print("Could not find image download line in log file")
+            sys.exit(1)
 
     args.load_task_id = m.group(1)
     args.task_id = args.log_task_id
 
 if args.load_task_id:
-    print("Loading taskcluster image")
+    print(f"Loading taskcluster image '{args.load_task_id}'")
     out = subprocess.check_output(["mach", "taskcluster-load-image",
-                                   "--task-id", args.load_task_id])
-    m = re.search(r'Loaded image: (\S+)', out)
-    if m:
+                                   "--task-id", args.load_task_id]).decode()
+    if m := re.search(r'Loaded image: (\S+)', out):
+        args.image = m.group(1)
+    if m := re.search(r'Found docker image: (\S+)', out):
         args.image = m.group(1)
 
 if args.task_id and not args.env_file:
@@ -155,7 +159,10 @@ def choose(prompt, descriptions):
 start_container = False
 if args.container == "infer":
     containers = []
-    for line in subprocess.check_output(["docker", "container", "ps", "-a", "--format", "{{json .}}"], text=True).splitlines():
+    cmd = ["docker", "container", "ps", "-a", "--format", "{{json .}}"]
+    if args.verbose > 0:
+        print(" ".join(cmd))
+    for line in subprocess.check_output(cmd, text=True).splitlines():
         containers.append(json.loads(line))
 
     def describe(c):
@@ -167,9 +174,10 @@ if args.container == "infer":
 
 if not args.container and args.image == "infer":
     images = []
-    for line in subprocess.check_output([
-            "docker", "images", "--format", "{{json .}}"
-    ], text=True).splitlines():
+    cmd = ["docker", "images", "--format", "{{json .}}"]
+    if args.verbose > 0:
+        print(" ".join(cmd))
+    for line in subprocess.check_output(cmd, text=True).splitlines():
         images.append(json.loads(line))
     idx = choose(
         "Choose from the following images:",
@@ -195,6 +203,8 @@ if args.image:
         outer, inner = mount.split("=")
         cmd += ["-v", f"{outer}:{inner}:z"]
     cmd += [args.image, "bash", "-l"]
+    if args.verbose > 0:
+        print(" ".join(cmd))
     subprocess.call(cmd)
 elif args.container:
     print(f"Running a shell in docker container {args.container}")
@@ -202,4 +212,6 @@ elif args.container:
         cmd = ["docker", "start", "-a", "-i", args.container]
     else:
         cmd = ["docker", "exec", "-ti", args.container, "bash", "-l"]
+    if args.verbose > 0:
+        print(" ".join(cmd))
     subprocess.call(cmd)
