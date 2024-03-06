@@ -13,7 +13,6 @@ import json
 import os
 import random
 import re
-import tempfile
 
 from os.path import abspath, dirname, expanduser
 from os import environ as env
@@ -30,6 +29,20 @@ def running_rr():
         return RUNNING_RR
     RUNNING_RR = os.environ.get('GDB_UNDER_RR', False)
     return RUNNING_RR
+
+
+def thread_id():
+    gtid = gdb.selected_thread().global_num
+    return f"T{gtid}"
+
+
+def thread_detail():
+    return gdb.selected_thread().details
+
+
+def target_id():
+    return gdb.selected_thread().ptid[0]
+
 
 def setup_log_dir():
     share_dir = None
@@ -68,15 +81,15 @@ def when_ticks():
 
 
 def now():
-    return "%s/%s" % (when(), when_ticks())
+    return "%s:%s/%s" % (thread_id(), when(), when_ticks())
 
 
 def nowTuple():
-    return (when(), when_ticks())
+    return (when(), thread_id(), when_ticks())
 
 
 def rrprompt(current_prompt):
-    return ("(rr %d/%d) " % (when(), when_ticks()))
+    return "rr " + now()
 
 
 class ParameterRRPrompt(gdb.Parameter):
@@ -126,7 +139,7 @@ Usage:
 
 
 class PythonNow(gdb.Command):
-    """Output <when>/<when-ticks>"""
+    """Output <thread>:<when>/<when-ticks>"""
     def __init__(self):
         gdb.Command.__init__(self, "now", gdb.COMMAND_USER)
 
@@ -186,7 +199,6 @@ class PythonLog(gdb.Command):
     def __init__(self):
         gdb.Command.__init__(self, "log", gdb.COMMAND_USER)
         self.LogFile = None
-        self.ThreadTable = {}
         self.ExpectedSize = None
         gdb.events.before_prompt.connect(lambda: self.sync_log())
 
@@ -220,14 +232,7 @@ class PythonLog(gdb.Command):
         self.LogFile = None
 
     def default_log_filename(self):
-        tid = gdb.selected_thread().ptid[0]
-        return os.path.join(DEFAULT_LOG_DIR, "rr-session-%s.json" % (tid,))
-
-    def thread_id(self, fs_base=None):
-        '''Return the thread id in the format "T<num>" for the given fs_base, or the current value of that register if not given. This is a hack that is not guaranteed to work -- when rr starts a new process under the hood, gdb may shift the thread numbers around. This is a heuristic to grab an id the first time a thread is encountered; there is no guarantee that it won't map multiple threads to the same ID. (That could be fixed, but I haven't bothered yet.)'''
-        if fs_base is None:
-            fs_base = gdb.parse_and_eval("$fs_base")
-        return self.ThreadTable.setdefault(fs_base, "T" + str(gdb.selected_thread().num))
+        return os.path.join(DEFAULT_LOG_DIR, f"rr-session-{target_id()}.json")
 
     def sync_log(self):
         '''Add any new labels to the log, and grab any updates if another process updated the file.'''
@@ -299,6 +304,10 @@ class PythonLog(gdb.Command):
                 # log/p : display the log message without logging it permanently
                 do_print = True
                 do_dump = False
+            elif 'goto'.startswith(opt):
+                # log/g : seek to the time of a log entry
+                self.goto(arg)
+                return
             else:
                 gdb.write("unknown log option '{}'\n".format(opt))
 
@@ -312,7 +321,7 @@ class PythonLog(gdb.Command):
                 do_print = True
             if self.LogFile:
                 gdb_out = gdb.execute("checkpoint", to_string=True)
-                action = {'type': 'log', 'event': when(), 'ticks': when_ticks(), 'message': out}
+                action = {'type': 'log', 'event': when(), 'thread': thread_id(), 'tname': thread_detail(), 'ticks': when_ticks(), 'message': out}
                 if m := re.search(r'Checkpoint (\d+)', gdb_out):
                     action['checkpoint'] = m.group(1)
                     action['session'] = RUN_ID
@@ -333,21 +342,28 @@ class PythonLog(gdb.Command):
                      message)
 
         # Replace $thread with "T3", where 3 is the gdb's notion of thread number.
-        out = out.replace("$thread", self.thread_id())
+        out = out.replace("$thread", thread_id())
 
         # Let gdb handle other $ vars.
         return re.sub(r'(\$\w+)', lambda m: util.evaluate(m.group(1)), out)
 
-    def write_message(self, message, verbose=False):
-        (event, ticks, lineno, msg, checkpoint, session) = message
+    def write_message(self, message, index=None, verbose=False):
+        if len(message) == 7:
+            (event, thread, ticks, lineno, msg, checkpoint, session) = message
+        elif len(message) == 6:
+            (event, ticks, lineno, msg, checkpoint, session) = message
+            thread = "T?"
+
         if verbose:
-            gdb.write(f"{event}/{ticks} ")
-        if checkpoint is not None:
-            if RUN_ID == session:
-                gdb.write(f"[c{checkpoint}] ")
+            gdb.write(f"{thread}:{event}/{ticks} ")
+        if checkpoint is not None and RUN_ID == session:
+            gdb.write(f"[c{checkpoint}] ")
+        elif index is not None:
+            gdb.write(f"[@{index}] ")
+
         gdb.write(msg + "\n")
 
-    def dump(self, sort=False, replace=True, verbose=False):
+    def build_messages(self, replace=True, verbose=False):
         if not self.LogFile:
             gdb.write("No log file open\n")
             return
@@ -362,21 +378,31 @@ class PythonLog(gdb.Command):
             message = action['message']
             if replace:
                 message = labels.apply(message, verbose)
+            action.setdefault('thread', 'T?')
 
-            messages.append((action['event'], action['ticks'], action['lineno'], message, action.get('checkpoint'), action.get('session')))
+            messages.append((action['event'], action['thread'], action['ticks'], action['lineno'], message, action.get('checkpoint'), action.get('session')))
+
+        return messages
+
+    def dump(self, sort=False, replace=True, verbose=False):
+        messages = self.build_messages(replace=replace, verbose=verbose)
+        if messages is None:
+            return
 
         now = nowTuple()
         place = -1
         if sort:
             messages.sort()
-            place = len(messages)
             for i, message in enumerate(messages):
-                if (message[0], message[1]) > now:
-                    place = i - 1
-                    break
-            for i, message in enumerate(messages):
-                gdb.write("=> " if i == place else "   ")
-                self.write_message(message, verbose=verbose)
+                when = message[0:3]
+                if when == now:
+                    gdb.write("=> ")
+                elif now is not None and when > now:
+                    gdb.write("=>\n   ")
+                    now = None
+                else:
+                    gdb.write("   ")
+                self.write_message(message, index=i, verbose=verbose)
         else:
             for message in messages:
                 self.write_message(message, verbose=verbose)
@@ -392,6 +418,25 @@ class PythonLog(gdb.Command):
             pass  # Use emacsclient if possible.
         os.system(os.environ.get('EDITOR', 'emacs') + " " + filename)
         self.openlog(filename, quiet=True)
+
+    def goto(self, where):
+        if where.startswith("@"):
+            index = int(where[1:])
+            messages = self.build_messages(replace=False, verbose=False)
+            if messages is None:
+                return
+            messages.sort()
+            event, thread, ticks = messages[index][0:3]
+            if thread_id() != thread:
+                gdb.execute(f"thread {thread[1:]}")
+            gdb.execute(f"seek {ticks}")
+            return
+
+        if where.startswith("c"):
+            checkpoint = int(where[1:])
+        else:
+            checkpoint = int(where)
+        gdb.execute(f"restart {checkpoint}")
 
 
 class ParameterLogFile(gdb.Parameter):
