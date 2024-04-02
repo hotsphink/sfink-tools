@@ -426,12 +426,21 @@ class util:
         return options, arg
 
     def evaluate(expr, replace=True, brieftype=True):
+        fmt = {}
+        if m := re.search(r':(\w+)$', expr):
+            expr = expr[:-len(m[0]):]
+            flags = m[1]
+            if 'r' in flags:
+                fmt['raw'] = True
+                flags = flags.replace('r', '')
+            if len(flags) == 1:
+                fmt['format'] = flags
         try:
             v = gdb.parse_and_eval(expr)
         except gdb.error as e:
             print("Invalid embedded expression «{}»".format(expr))
             raise e
-        s = str(v)
+        s = v.format_string(**fmt)
         t = v.type
         ts = str(t)
 
