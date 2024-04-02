@@ -399,10 +399,12 @@ class PythonLog(gdb.Command):
             messages.sort()
             for i, message in enumerate(messages):
                 when = message[0:3]
+                #gdb.write(f"((now={now} when={when})) ")
                 if when == now:
                     gdb.write("=> ")
+                    now = None
                 elif now is not None and when > now:
-                    gdb.write("=>\n   ")
+                    gdb.write("=> (now)\n   ")
                     now = None
                 else:
                     gdb.write("   ")
