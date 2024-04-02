@@ -296,6 +296,10 @@ class PythonLog(gdb.Command):
                 # log/e : edit the log in $EDITOR
                 self.edit()
                 do_dump = False
+            elif 'delete'.startswith(opt):
+                # log/d : delete log messages containing substring
+                self.delete(arg)
+                return
             elif 'raw'.startswith(opt):
                 # log/r : do not do any label replacements in message
                 dump_args['replace'] = False
@@ -418,6 +422,29 @@ class PythonLog(gdb.Command):
             pass  # Use emacsclient if possible.
         os.system(os.environ.get('EDITOR', 'emacs') + " " + filename)
         self.openlog(filename, quiet=True)
+
+    def delete(self, filter_out):
+        if not self.LogFile:
+            gdb.write("No log file open\n")
+            return
+
+        count = 0
+
+        filename = self.LogFile.name
+        self.LogFile.close()
+        tempfilename = filename + ".tmp"
+        with open(tempfilename, "wt") as outfh, open(filename, "rt") as infh:
+            for action in log_actions(infh):
+                if action['type'] == 'log' and filter_out in action['message']:
+                    count += 1
+                else:
+                    json.dump(action, outfh)
+                    outfh.write("\n")
+        os.rename(filename, filename + ".old")
+        os.rename(tempfilename, filename)
+        self.openlog(filename, quiet=True)
+
+        gdb.write(f"Deleted {count} {'entry' if count == 1 else 'entries'}\n")
 
     def goto(self, where):
         if where.startswith("@"):
