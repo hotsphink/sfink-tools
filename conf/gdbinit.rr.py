@@ -195,7 +195,16 @@ class ParameterLogQuiet(gdb.Parameter):
 
 
 class PythonLog(gdb.Command):
-    """Append current event/tick-count with message to log file"""
+    """Append current event/tick-count with message to log file
+
+    log MSG - append MSG to the log file
+    log/d PAT - delete log messages containing the substring PAT
+    log/p MSG - display the message (with replacements) without logging it
+    log/s - display log messages sorted by execution timestamp (default)
+    log/r - do not replace labels in the output (similar to p/r)
+    log/v - verbose mode, showing original text with label replacements
+    log/e - edit the log file and reload
+    log/g WHEN - seek to the time of the given log message (WHEN is @<n> or c<n>)"""
     def __init__(self):
         gdb.Command.__init__(self, "log", gdb.COMMAND_USER)
         self.LogFile = None
@@ -287,15 +296,10 @@ class PythonLog(gdb.Command):
                 # log/u : display log in entry order
                 dump_args['sort'] = False
                 do_dump = True
-            elif 'noreplace'.startswith(opt):
-                # log/n : display log in execution order, without processing replacements
-                dump_args['sort'] = True
-                dump_args['replace'] = False
-                do_dump = True
             elif 'edit'.startswith(opt):
                 # log/e : edit the log in $EDITOR
                 self.edit()
-                do_dump = False
+                return
             elif 'delete'.startswith(opt):
                 # log/d : delete log messages containing substring
                 self.delete(arg)
