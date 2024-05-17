@@ -355,8 +355,11 @@ experimental.inmemory = true
 [extdiff]
 # <mossop> adds a hg vsd command to open side by side diffs of individual files
 # in VS Code.
-cmd.vsd = code
-ops.vsd = --wait --diff
+vsd = code --wait --diff
+
+# difftastic, with paged colors
+df = difft
+df.paged-command-options = --color=always
 
 [experimental]
 graphshorten = true
