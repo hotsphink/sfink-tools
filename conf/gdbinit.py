@@ -159,7 +159,10 @@ class Labels(dict):
             except gdb.error as e:
                 # This can happen if we load in a set of labels before the type
                 # exists.
-                gdb.write("unknown type: " + str(e) + "\n")
+                #
+                # TODO: Report on unkonwn types at a reasonable time.
+
+                #gdb.write("unknown type: " + str(e) + "\n")
                 #gdb.write(" -->" + f"('{t}'{ptrs}) {token}" + "<--\n")
                 self.pending_labels.append((token, name, typestr))
                 return False
