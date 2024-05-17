@@ -140,7 +140,7 @@ recommit = !$HG uncommit --all && $HG amend -i
 interdiff = !set -x; $HG export --hidden $1 > /tmp/left.diff; $HG export --hidden $2 > /tmp/right.diff; interdiff /tmp/left.diff /tmp/right.diff
 
 # `hg diffpast 3 .` will look at the interdiff between the predecessor^4 and predecessor^3 of `.`
-diffpast = !set -x; n=$1; rev=$2; rrev=$2; while [[ $n -gt 0 ]]; do rrev="$rev"; rev="predecessors($rev)"; n=$(( $n - 1 )); done; $HG --hidden diff -r "$rev" -r "$$rrev"
+diffpast = !set -x; n=$1; rev=$2; rrev=$2; while [[ $n -gt 0 ]]; do rrev="$rev"; rev="predecessors($rev)"; n=$(( $n - 1 )); done; $HG --hidden diff --from "$rev" --to "$$rrev"
 
 ###### aliases for scenarios that I don't run into anymore ######
 
