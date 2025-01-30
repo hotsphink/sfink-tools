@@ -74,9 +74,9 @@ obj = r.json()
 with open("/tmp/mkgist.raw", "w") as fh:
     fh.write(r.text)
 
-if 'errors' in obj:
+if 'errors' in obj or not obj.get('status', '200').startswith('2'):
     print('Error: {}'.format(obj['message']), file=sys.stderr)
-    for error in obj['errors']:
+    for error in obj.get('errors', []):
         print('  {}'.format(json.dumps(error)))
     sys.exit(1)
 
