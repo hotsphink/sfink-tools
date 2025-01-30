@@ -66,6 +66,10 @@ g_input.add_argument(
     "--pushes",
     help="List of push IDs to query, or !n for the nth newest history item, counting from zero",
 )
+g_input.add_argument(
+    "--jobs",
+    help="Restrict jobs to those matching PATTERN",
+)
 
 g_output = parser.add_argument_group(title="Output")
 g_output.add_argument(
@@ -839,7 +843,7 @@ ResultPathsT = list[PathT]
 
 
 def parse_path(k: str) -> PathT:
-    return [p for p in re.findall(r"\[\]|[^.\[]+|\.", k) if p != "."]
+    return [p for p in re.findall(r"\[.*?\]|[^.\[]+|\.", k) if p != "."]
 
 
 def find_path_matches(
@@ -847,10 +851,14 @@ def find_path_matches(
 ) -> list[tuple[PathT, Any]]:
     if not path:
         return [(sofar, data)]
+
     results = []
     if path[0] == "[]":
         for i in range(len(data)):
             results += find_path_matches(data[i], path[1:], sofar + [i])
+    elif isinstance(path, str) and path[0].startswith("["):
+        import pdb; pdb.set_trace()
+        pass
     else:
         k = path[0]
         if isinstance(data, list):
@@ -865,6 +873,8 @@ def resolve_path(path: PathT, bases: ResultPathsT):
         if segment.startswith("$"):
             i = int(segment[1:] or "1")
             # $n converts to the *parent* of match-key-n.
+            if len(bases) <= i:
+                return []
             result.extend(bases[i][:-1])
         elif segment == "__parent__":
             result.pop()
@@ -1061,12 +1071,14 @@ def match_remaining(matchers, paths: ResultPathsT, data: DataT) -> list[ResultPa
         return [paths]
 
     i, keypath, target = matchers[0]
+    rest = matchers[1:]
     keypath = resolve_path(keypath, paths)
 
     result: list[ResultPathsT] = []
     for path, keyval in find_path_matches(data, keypath):
         if match_key(target, keyval):
-            result.append(paths + [path])
+            candidate = paths + [path]
+            result.extend(match_remaining(rest, candidate, data))
     return result
 
 
@@ -1192,7 +1204,7 @@ def process_artifact(url, job, push_result, query, cache):
         result.update(job_result)
         added = []
         for label, value in result.items():
-            if isinstance(value, dict):
+            if isinstance(value, dict) or isinstance(value, list):
                 # eg job will be skipped. job_idx will be based off of job_id.
                 continue
             if label.endswith("_idx"):
@@ -1321,6 +1333,12 @@ def make_job_filter(job_query, cache):
         job_filter = MatchFilter(
             job_filter, lambda j: match_string(job_symbol(j), sym), f"symbol is {sym}"
         )
+    if jname := job_query.get("name"):
+        # Python scoping is weird! The identifier 'name' will end up bound to something else
+        # when executed, something that in practice is None. Use 'jname' instead.
+        job_filter = MatchFilter(
+            job_filter, lambda j: match_string(describe_job(j), jname), f"name is {jname}"
+        )
     if id := args.job:
         job_filter = MatchFilter(
             job_filter, lambda j: str(j["id"]) == str(id), f"id is {id}"
@@ -1370,7 +1388,10 @@ def process_query(args, cache):
         with open(args.query) as fh:
             query = yaml.safe_load(fh)
 
-    job_query = query.get("jobs", {"choose-from": 0})
+    if args.jobs:
+        job_query = {"name": args.jobs}
+    else:
+        job_query = query.get("jobs") or {"choose-from": 0}
     job_filter = make_job_filter(job_query, cache)
 
     # Mostly for testing/development, process local files
