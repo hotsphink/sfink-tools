@@ -3,6 +3,7 @@
 my $pidof = "/bin/pidof";
 $pidof = "/sbin/pidof" if ! -x $pidof;
 
+# Find the ssh-agent pid.
 chomp(my $pids = `$pidof ssh-agent`);
 my @pids = split(/ /, $pids);
 if (@pids == 0) {
@@ -27,18 +28,10 @@ if (@socks == 1) {
 	    # Check for SSH-forwarded agent
 	    chomp(my $exe = qx(sudo readlink /proc/$sock_pid/exe/ 2>&1));
 	    if ($exe =~ /\bsshd$/) {
-		push @ssh_socks, $sock;
+		push @ssh_socks, $s;
 	    }
 	    next SOCKSEARCH;
 	}
-
-	# HACK! The pid recorded in the sock filename may be a parent
-	# or grandparent of the actual ssh-agent process (presumably
-	# because it forks or double-forks to daemonize).
-        if (abs($pid - $sock_pid) <= 2) {
-            $sock = $s;
-            last SOCKSEARCH;
-        }
 
 	# Check whether candidate socket pid is the process listed
 	# after --exit-with-session
@@ -53,6 +46,13 @@ if (@socks == 1) {
 		}
 	    }
 	}
+
+        # Find the agent socket from lsof output.
+        #my $self = $$;
+        #my ($shell) = `cat /proc/$self/status` =~ /PPid:\s*(\d+)/;
+        #my ($sshd) = `cat /proc/$shell/status` =~ /PPid:\s*(\d+)/;
+        ($sock) = `sudo lsof -p $sock_pid 2>/dev/null` =~ m!(/tmp/ssh-XXX\w+/agent\.\d+)!;
+        last SOCKSEARCH if ($sock);
 
 	# $sock_pid is ancestor of $pid?
 	my $p = $pid;
