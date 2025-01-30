@@ -66,6 +66,7 @@ my $rr_args = '';
 my $rr_cpu;
 my $rr_at;
 my $verbose;
+my $core_num;
 
 # Ugh... custom arg handling because this script is supposed to be a
 # transparent wrapper, and so can't use a standard getopt-ish handler.
@@ -111,6 +112,12 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
   } elsif ($_ =~ /--rr(?:-?at)?=(.*)/) {
     $rr_at = $1;
     $debugger = 'rr';
+  } elsif ($_ =~ /(--n$|--n=|-n)(.*)/) {
+    if ($core_num eq '') {
+      $core_num = shift(@ARGV);
+    }
+    $core_num = $2;
+    $debugger = 'rr';
   } elsif ($_ eq '--js' || $_ eq '-j') {
     die if $debugger;
     $debugger = 'jorendb';
@@ -143,6 +150,11 @@ if (defined $rr_at) {
   } else {
     die "invalid syntax for --rr-at option. Must be '[rr MMMM NNNN]'.\n";
   }
+}
+
+if (defined $core_num) {
+    # Do not bind to a core.
+    push @rr_args, "-u";
 }
 
 sub usage {
