@@ -346,7 +346,8 @@ class LabelCmd(gdb.Command):
             gdb.write("Label '{}' not found\n".format(name))
 
     def prefer_prettyprinted(self, t):
-        return str(t).startswith("JS::Handle")
+        s = str(t)
+        return s.startswith("JS::Handle") or s.startswith("JS::Value")
 
     def set_label(self, name, value):
         if re.fullmatch(r'0x[0-9a-fA-F]+', value) or value.lstrip('-').isdecimal():
@@ -380,12 +381,21 @@ class LabelCmd(gdb.Command):
         if not m or m.group(0) == '0' or m.group(0) == '0x0':
             gdb.write("No labelable value found in " + valstr + "\n")
             return
+        numeric = m.group(0)
 
         # gdb.write("gots %s, setting labels[%s] = %s\n" % (str(v), m.group(0), value))
 
         # label $3 SOMETHING
         # should set $SOMETHING to the actual value of $3
-        labels.label(m.group(0), name, str(v.type), gdbval=v)
+
+        # If the numeric value is preceded by something that looks like a cast to a pointer, use the cast as the type.
+        gdb.write("pattern = " + r'\(([\w:]+ *\*+)\) *' + numeric + "\n");
+        gdb.write("valstr = " + valstr + "\n");
+        if mm := re.search(r'\(([^\(\)]+ *\*+)\) *' + numeric, valstr):
+            gdb.write("  type = " + mm.group(1) + "\n")
+            labels.label(numeric, name, mm.group(1), gdbval=v)
+        else:
+            labels.label(m.group(0), name, str(v.type), gdbval=v)
 
     def show_all_labels(self):
         seen = set()
