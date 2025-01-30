@@ -16,3 +16,6 @@ set print static-members off
 set python print-stack full
 
 set debuginfod enabled on
+
+# Stolen from chromium gdbinit: multithreaded symbol loading.
+maint set worker-threads unlimited
