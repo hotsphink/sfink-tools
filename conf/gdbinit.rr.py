@@ -19,7 +19,9 @@ from os import environ as env
 
 gdb.execute("source {}/gdbinit.rr".format(abspath(expanduser(dirname(__file__)))))
 
-RUN_ID = "RRSESSION-" + str(random.random())
+# Cache the session ID in the environment to allow hot-reloading of this file.
+# It might be better to hang somewhere like `gdb.sessionkey` instead?
+RUN_ID = os.environ.setdefault("__RRSESSION", "RRSESSION-" + str(random.random()))
 RUNNING_RR = None
 
 def running_rr():
@@ -32,16 +34,25 @@ def running_rr():
 
 
 def thread_id():
-    gtid = gdb.selected_thread().global_num
+    thread = gdb.selected_thread()
+    if thread is None:
+        return None
+    gtid = thread.global_num
     return f"T{gtid}"
 
 
 def thread_detail():
-    return gdb.selected_thread().details
+    thread = gdb.selected_thread()
+    if thread is None:
+        return None
+    return thread.details
 
 
 def target_id():
-    return gdb.selected_thread().ptid[0]
+    thread = gdb.selected_thread()
+    if thread is None:
+        return None
+    return thread.ptid[0]
 
 
 def setup_log_dir():
@@ -89,7 +100,7 @@ def nowTuple():
 
 
 def rrprompt(current_prompt):
-    return "rr " + now()
+    return "(rr " + now() + ") "
 
 
 class ParameterRRPrompt(gdb.Parameter):
