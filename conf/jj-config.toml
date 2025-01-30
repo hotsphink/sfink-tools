@@ -1,0 +1,84 @@
+[user]
+name = "Steve Fink"
+email = "sphink@gmail.com"
+
+[ui.diff]
+format = "git"
+
+[revset-aliases]
+'withparents(x)' = 'x | parents(x)'
+
+[aliases]
+book = ["bookmark"]
+
+ls = ["log", "-r", "withparents(::@ ~ immutable())"]
+
+# FIXME: This only applies to @.
+reformat = ["util", "exec", "--", "bash", "-c", """
+cd $(jj root)
+mach clang-format -p $(jj diff | diffstat -p1 -l)
+""", ""]
+
+try = ["util", "exec", "--", "bash", "-c", """
+set -euo pipefail
+jj new --quiet
+mach try "$@" || true
+jj prev --edit --quiet
+""", ""]
+
+# Note to self: use `jj new` to make an empty commit first.
+#
+# Massively overcomplicated? Could this be done with template magic?
+# Oh, hm... it looks like this could be dropped in favor of
+# https://github.com/erichdongubler-mozilla/review/pull/1
+#
+# Use `jj yeet --dry-run` to see what would be executed.
+#
+# Extra command line options get passed to moz-phab. This only works
+# for a linear stack of patches ending in @-
+yeet = ["util", "exec", "--", "python", "-c", '''
+import re
+import sys
+from subprocess import run, Popen, PIPE
+
+# Skip -c and empty string, which probably should not be there.
+args = sys.argv[1:]
+dry_run = "--dry-run" in args
+args = [a for a in args if a != "--dry-run"]
+
+run(["git", "checkout", "-B", "moz-phab"])
+
+bug = False
+upstream = None
+cmd = ["jj", "log", "-r", "moz-phab | parents(::moz-phab ~ ::trunk())", "-T", "commit_id.short()++' '++description.first_line()++'\n'", "--no-graph"]
+process = Popen(cmd, stdout=PIPE, text=True)
+keep = []
+for line in process.stdout:
+    line = line.strip()
+    if dry_run:
+        print(f"line is <<{line}>>")
+    rev, desc = line.split(' ', 1)
+    upstream = rev
+    rev_bug = None
+    if m := re.match(r'[bB]ug (\d+)', desc):
+        rev_bug = m.group(1)
+
+    # If not grabbing the first rev, and either the bug number changed or
+    # we went from None (no bug) -> None, done.
+    if bug is not False and ((bug != rev_bug) or (rev_bug is None)):
+        break
+    bug = rev_bug
+    keep.append(line)
+
+if bug is None:
+    print(f"submitting rev with no bug number with upstream {upstream}")
+else:
+    print(f"submitting revs for bug {bug} with upstream {upstream}")
+for line in keep:
+    print(f"  {line}")
+
+cmd = ["moz-phab", "submit", "--upstream", upstream] + args
+print(cmd)
+if not dry_run:
+    run(cmd)
+''']
