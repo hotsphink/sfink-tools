@@ -7,7 +7,10 @@
 #
 function mc () {
     local root
-    root="$(hg root)"
+    root="$(jj root 2>/dev/null)"
+    if [ $? != 0 ]; then
+        root="$(hg root 2>/dev/null)"
+    fi
     if [ $# = 0 ]; then
         { echo -n "MOZCONFIG is " >&2; echo "${MOZCONFIG:-unset}" }
     fi
@@ -28,9 +31,9 @@ function mc () {
     local mozconfig
 
     if [[ $1 = "-s" ]] || [[ $1 = "." ]]; then
-      mozconfig="$(hg root)/"$(ls "$root" | fgrep mozconfig. | fgrep -v '~' | fzf)
+      mozconfig="$root/"$(ls "$root" | fgrep mozconfig. | fgrep -v '~' | fzf)
     else
-      mozconfig="$(hg root)/mozconfig.$1"
+      mozconfig="$root/mozconfig.$1"
     fi
 
     if ! [ -f "$mozconfig" ]; then
