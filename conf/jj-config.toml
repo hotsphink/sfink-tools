@@ -3,8 +3,30 @@ format = "git"
 
 [revset-aliases]
 'withparents(x)' = 'x | parents(x)'
+'topics' = 'visible_heads() ~ immutable()'
+
+[template-aliases]
+brief = 'brief_line ++ "\n"'
+
+brief_line = '''
+separate(" ",
+  format_short_change_id_with_hidden_and_divergent_info(self),
+  format_short_commit_id(commit_id),
+  self.bookmarks(),
+  self.tags(),
+  self.working_copies(),
+    if(description,
+      description.first_line(),
+      label(if(empty, "empty"), description_placeholder),
+    ),
+)
+'''
 
 [aliases]
+lg = ["log", "-T", "brief"]
+
+lst = ["log", "-T", "brief", "-r", "topics", "--no-graph"]
+
 book = ["bookmark"]
 
 ls = ["log", "-r", "withparents(::@ ~ immutable())"]
