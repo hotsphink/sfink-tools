@@ -1,7 +1,3 @@
-[user]
-name = "Steve Fink"
-email = "sphink@gmail.com"
-
 [ui.diff]
 format = "git"
 
