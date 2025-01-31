@@ -1,3 +1,9 @@
+# Note: this config file contains no user-specific config.
+# I put that in a separate user.toml file, and made my
+# ~/.config/jj/config.toml be a directory containing
+# user.toml and this file. A cleaner way would be to set
+# JJ_CONFIG=$HOME/.config/jj.d and put the files there.
+
 [ui.diff]
 format = "git"
 
