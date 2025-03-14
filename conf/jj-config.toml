@@ -71,6 +71,12 @@ lst = ["log", "-T", "brief", "-r", "topics", "--no-graph"]
 book = ["bookmark"]
 
 ls = ["log", "-r", "withparents(::@ ~ immutable())"]
+'show-' = ["show", "-r", "@-"]
+sho = ["show-"]
+
+"desc-" = ["describe", "-r", "@-"]
+des = ["desc-"]
+
 
 # FIXME: This only applies to @.
 reformat = ["util", "exec", "--", "bash", "-c", """
