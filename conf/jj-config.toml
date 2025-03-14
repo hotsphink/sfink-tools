@@ -82,6 +82,9 @@ sho = ["show-"]
 "desc-" = ["describe", "-r", "@-"]
 des = ["desc-"]
 
+bookmark.shove = ["bookmark", "move", "--allow-backwards"]
+
+shove = ["b", "--ignore-immutable", "shove", "--hard"]
 
 # FIXME: This only applies to @.
 reformat = ["util", "exec", "--", "bash", "-c", """
