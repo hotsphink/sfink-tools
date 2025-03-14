@@ -53,6 +53,16 @@ separate(" ",
 )
 '''
 
+'format_timestamp(timestamp)' = 'timestamp.ago()'
+
+'hyperlink(url, text)' = '''
+    concat(
+      raw_escape_sequence("\e]8;;" ++ url ++ "\e\\"),
+      text,
+      raw_escape_sequence("\e]8;;\e\\"),
+    )
+'''
+
 [aliases]
 lg = ["log", "-T", "brief"]
 
