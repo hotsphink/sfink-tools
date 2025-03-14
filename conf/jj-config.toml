@@ -14,8 +14,24 @@ subprocess = true
 enabled-branches = ["glob:T.*"]
 
 [revset-aliases]
-'withparents(x)' = 'x | parents(x)'
-'topics' = 'visible_heads() ~ immutable()'
+topics = 'visible_heads() ~ immutable()'
+current = 'latest((@ | @-) & ~empty())'
+'closest_bookmark(x)' = 'heads(::x & bookmarks())'
+
+branchroots = 'trunk()+ & trunk()::bookmarks(glob:"T.*")'
+'branchroot(x)' = 'trunk()+ & trunk()::bookmarks(x)'
+
+# non-trunk ancestors of T.foo
+'topic(x)' = 'trunk()+::x'
+
+# does not work! T.a ... T.b ... T.c ... trunk. xtopic(T.b) needs to exclude T.b+::T.a without excluding T.c::T.b.
+'other_topics(x)' = 'bookmarks(glob:"T.*") ~ x'
+'exclusive_topic(x)' = 'topic(x) ~ trunk()::other_topics(x)'
+'xtopic(x)' = 'exclusive_topic(x)'
+
+# These are not quite the same.
+'why_immutable(r)' = '(r & immutable()) | roots(r:: & immutable_heads())'
+'why_in(r, domain)' = '(r & domain) | roots(r:: & heads(domain))'
 
 [template-aliases]
 brief = 'brief_line ++ "\n"'
