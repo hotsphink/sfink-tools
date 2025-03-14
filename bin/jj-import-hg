@@ -146,8 +146,12 @@ def migrate(args):
     import_revs = resolve_hg_revset(args.hg_revset)
 
     hg2git = {}
-    for base in resolve_hg_revset(f"parents({'+'.join(import_revs)})"):
-        hg2git[base] = hg_to_git(base)
+    for base in resolve_hg_revset(f"parents(roots({'+'.join(import_revs)}))"):
+        git = hg_to_git(base)
+        if git == "0000000000000000000000000000000000000000":
+            logging.critical(f"parent revision {base} not found in jj checkout")
+            sys.exit(1)
+        hg2git[base] = git
 
     parents = {}
     for line in pipe_hg(["hg", "log", "-r", '+'.join(import_revs), "-T", "{node|short} {p1.node|short} {p2.node|short}\\n"]):
