@@ -212,6 +212,47 @@ END
 
 my ($COMMAND, @args) = @ARGV;
 
+sub choose_debugger_for_rr {
+  my ($pid) = @_;
+
+  my $rr_ps_cmd = rr_ps_cmd($rr_args);
+  open(my $fh, "$rr_ps_cmd |");
+  my @info;
+  while(<$fh>) {
+      chomp;
+      # Continuation lines end with \.
+      if (@info && $info[-1][-1] =~ /\\$/) {
+          chop($info[-1][-1]);
+          $info[-1][-1] .= "\n" . $_;
+      } else {
+          push @info, [ split(/\t/, $_, 4) ];
+      }
+  }
+  die "rr ps format changed!" if shift(@info)->[2] ne 'EXIT';
+
+  foreach (@info) {
+    if ($_->[0] == $pid) {
+      if ($_->[3] =~ m!/target/!) {
+        # Looks like a rust binary. Yes, this is a crappy test. Use rust-gdb.
+        return ('-d', 'rust-gdb');
+      } else {
+        last;
+      }
+    }
+  }
+
+  return ();
+}
+
+sub rr_ps_cmd {
+  my ($rr_args) = @_;
+  # Ugh. "-g 300" will confuse this. It wants "-g300". I need to rethink
+  # this. In the meantime...
+  $rr_args =~ s/-[gfpdhstxA] (\S+)/-$1$2/g;
+  my @plain_rr_args = grep !/^-/, split(/ /, $rr_args);
+  return "rr ps @plain_rr_args";
+}
+
 sub choose_pid_for_rr {
     my ($pattern) = @_;
 
@@ -233,12 +274,8 @@ sub choose_pid_for_rr {
     # errored (if any; if none did, use the erroring parent). Recursively.
     #
 
-    # Ugh. "-g 300" will confuse this. It wants "-g300". I need to rethink
-    # this. In the meantime...
-    $rr_args =~ s/-[gfpdhstxA] (\S+)/-$1$2/g;
-    my @plain_rr_args = grep !/^-/, split(/ /, $rr_args);
-
-    open(my $fh, "rr ps @plain_rr_args |");
+    my $rr_ps_cmd = rr_ps_cmd($rr_args);
+    open(my $fh, "$rr_ps_cmd |");
     my @info;
     while(<$fh>) {
         chomp;
@@ -524,9 +561,11 @@ if ($COMMAND && ! $debugger) {
 }
 
 $debugger //= ($COMMAND ? 'gdb' : 'rr');
+my @dbg_args;
 if ($debugger eq 'rr') {
     $debugger = 'rr';
     $rrpid = choose_pid_for_rr($rrpid);
+    @dbg_args = choose_debugger_for_rr($rrpid);
     die "no matching process found\n" if ! defined $rrpid;
     $COMMAND = '';
     $opt{interactive} = 1;
@@ -715,7 +754,7 @@ if ($debugger eq 'rr') {
         $taskset = "taskset -c $rr_cpu ";
         $rr_args .= " -u";
     }
-    exec(@EMACS, "--eval", "(progn (gud-gdb \"${taskset}rr replay -p $rrpid $rr_args\") $init_eval)");
+    exec(@EMACS, "--eval", "(progn (gud-gdb \"${taskset}rr replay @dbg_args -p $rrpid $rr_args\") $init_eval)");
 } elsif ($debugger eq 'record') {
     print "Running " . join(" ", 'rr', 'record', @rr_args, $COMMAND, @args) . "\n";
     system('rr', 'record', @rr_args, $COMMAND, @args);
