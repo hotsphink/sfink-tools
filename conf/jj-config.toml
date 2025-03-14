@@ -66,6 +66,8 @@ separate(" ",
 [aliases]
 lg = ["log", "-T", "brief"]
 
+tug = ["bookmark", "move", "--from", "closest_bookmark(@-)", "--to", "current"]
+
 lst = ["log", "-T", "brief", "-r", "topics", "--no-graph"]
 
 book = ["bookmark"]
