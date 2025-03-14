@@ -7,6 +7,9 @@
 [ui.diff]
 format = "git"
 
+[git]
+subprocess = true
+
 [revset-aliases]
 'withparents(x)' = 'x | parents(x)'
 'topics' = 'visible_heads() ~ immutable()'
