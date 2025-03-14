@@ -4,7 +4,7 @@
 # [ ] better solution to finding the base. (Can't avoid mapping base hg rev.)
 #     - in actual git repo for jj (not workspace), git cinnabar hg2git
 #     - use that as base
-# [ ] do a full tree:
+# [x] do a full tree:
 #     - grab a set of revisions
 #     - for any parents not in the set, hg2git and put into an "existing" set (I guess a map hg => git|change)
 #     - while there is a revision with all parents existing
@@ -13,6 +13,7 @@
 #       add resulting change to existing, where the id is the corresponding hg revision
 # [ ] expire or mark as imported the hg origination
 # [ ] also import any obsolete revs that descend from immutable revs? (optional!)
+# [ ] error out usefully when importing a changeset with unknown (non-trunk) parent
 
 import argparse
 from collections import defaultdict
