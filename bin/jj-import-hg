@@ -1,0 +1,243 @@
+#!/usr/bin/python
+
+# [x] handle single linear series
+# [ ] better solution to finding the base. (Can't avoid mapping base hg rev.)
+#     - in actual git repo for jj (not workspace), git cinnabar hg2git
+#     - use that as base
+# [ ] do a full tree:
+#     - grab a set of revisions
+#     - for any parents not in the set, hg2git and put into an "existing" set (I guess a map hg => git|change)
+#     - while there is a revision with all parents existing
+#       jj new <parents> # <-- will need changes
+#       import patch
+#       add resulting change to existing, where the id is the corresponding hg revision
+# [ ] expire or mark as imported the hg origination
+# [ ] also import any obsolete revs that descend from immutable revs? (optional!)
+
+import argparse
+from collections import defaultdict
+from datetime import datetime
+import logging
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import sys
+
+base_env = os.environ
+git_repo = None
+
+parser = argparse.ArgumentParser("migrate hg revisions to jj changes")
+parser.add_argument("--verbose", "-v", default=0, action="count",
+    help="verbose output")
+parser.add_argument("--bookmark", "--book", "--label",
+    help="create a bookmark pointing to the last new change created")
+parser.add_argument("--map", default="/tmp/hg-to-git.txt",
+    help="filename of hg rev -> jj (git) commit mapping")
+parser.add_argument("hg_revset", help="revset to migrate")
+parser.add_argument("dir", help="directory containing hg or jj checkout (current working directory will be used for the other)")
+
+args = parser.parse_args()
+
+logger = logging.getLogger("hg-to-jj")
+if args.verbose == 1:
+    logger.setLevel(logging.INFO)
+elif args.verbose > 1:
+    logger.setLevel(logging.DEBUG)
+
+cwd = Path.cwd()
+if (Path(args.dir) / ".hg").is_dir():
+    setattr(args, "hgdir", args.dir)
+    if not (cwd / ".jj").is_dir():
+        logger.critical("current working directory should be jj workspace root")
+    setattr(args, "jjdir", cwd)
+elif (Path(args.dir) / ".jj").is_dir():
+    setattr(args, "jjdir", args.dir)
+    if not (cwd / ".hg").is_dir():
+        logger.critical("current working directory should be hg root")
+    setattr(args, "hgdir", cwd)
+else:
+    logger.critical(f"directory {args.dir} does not appear to be either an hg nor jj checkout")
+    sys.exit(1)
+
+def run_jj(cmd, **kwargs):
+    logger.debug("RUNNING: " + shlex.join(cmd))
+    return subprocess.check_output(cmd, cwd=args.jjdir, text=True, **kwargs)
+
+def pipe_to_jj(cmd, **kwargs):
+    logger.debug("RUNNING: | " + shlex.join(cmd))
+    return subprocess.Popen(cmd, cwd=args.jjdir, text=True, stdin=subprocess.PIPE, **kwargs)
+
+def run_hg(cmd, **kwargs):
+    logger.debug("RUNNING: " + shlex.join(cmd))
+    return subprocess.check_output(cmd, cwd=args.hgdir, text=True, **kwargs)
+
+def pipe_hg(cmd, **kwargs):
+    logger.debug("RUNNING: " + shlex.join(cmd) + " |")
+    process = subprocess.Popen(cmd, cwd=args.hgdir, text=True, stdout=subprocess.PIPE, **kwargs)
+    return process.stdout
+
+def find_git_repo():
+    root = run_jj(["jj", "workspace", "root"]).rstrip()
+    root = Path(root)
+    logger.debug(f"Workspace root = {root}")
+    if (root / ".jj/repo").is_dir():
+        jj_repo = root / ".jj/repo"
+    else:
+        with open(root / ".jj/repo", "rt") as fh:
+            jj_repo = Path(fh.read())
+    logger.debug(f"{jj_repo=}")
+    with open(jj_repo / "store/git_target") as fh:
+        git_target = fh.read()
+    logger.debug(f"{git_target=}")
+    git_repo = (jj_repo / "store" / git_target).resolve()
+    logger.info(f"{git_repo=}")
+    return git_repo
+
+# Generator that parses hg commit into a stream of action events.
+def parse_rev(pipe):
+    line = pipe.readline()
+
+    def read_until(pattern, process=lambda s: None):
+        nonlocal line
+        while line != '':
+            m = re.match(pattern, line)
+            line = pipe.readline()
+            if m:
+                return m
+            else:
+                process(line)
+
+    topic = None
+
+    def grab_topic(line):
+        if m := re.match(r'# EXP-Topic (.*)', line):
+            nonlocal topic
+            topic = m.group(1)
+
+    if m := read_until(r'# User (.*?) <(.*?)>$'):
+        yield ('user', m.group(1), m.group(2))
+    if m := read_until(r'# Date \d+'):
+        m = re.match(r'# +(.*)', line)
+        line = pipe.readline()
+        yield ('date', m.group(1))
+    if m := read_until(r'(?s)([^#].*)', grab_topic):
+        if topic is not None:
+            yield('topic', topic)
+        desc = m.group(1)
+        while line != '' and not line.startswith("diff"):
+            desc += "\n" + line
+            line = pipe.readline()
+        yield('description', desc)
+    yield('patch', line, pipe)
+
+def hg_to_git(rev):
+    return subprocess.check_output(["git", "cinnabar", "hg2git", rev], cwd=git_repo, text=True).rstrip()
+
+def resolve_hg_revset(revset):
+    revs = []
+    for line in pipe_hg(["hg", "log", "-r", revset, "-T", "{node|short}\\n"]):
+        revs.append(line.rstrip())
+    return revs
+
+def migrate(args):
+    import_revs = resolve_hg_revset(args.hg_revset)
+
+    hg2git = {}
+    for base in resolve_hg_revset(f"parents({'+'.join(import_revs)})"):
+        hg2git[base] = hg_to_git(base)
+
+    parents = {}
+    for line in pipe_hg(["hg", "log", "-r", '+'.join(import_revs), "-T", "{node|short} {p1.node|short} {p2.node|short}\\n"]):
+        (node, p1, p2) = line.rstrip().split()
+        parents[node] = [p for p in [p1, p2] if p != "000000000000"]
+
+    print(f"Importing hg revs: {import_revs}")
+    topics = set()
+
+    N = len(import_revs)
+    while import_revs:
+        logging.info(f"Processing {N - len(import_revs) + 1}/{N}...")
+
+        # Find a rev whose parents are all known. Prefer going in the order of
+        # the list, because that will likely be entirely or partly
+        # ancestor-first.
+        chosen = None
+        for i, rev in enumerate(import_revs):
+            if all(p in hg2git for p in parents[rev]):
+                chosen = rev
+                import_revs.pop(i)
+                break
+        else:
+            raise Exception(f"(internal error) No revisions with all parents known! todo={import_revs}")
+
+        bases = [hg2git[p] for p in parents[chosen]]
+
+        logger.info(f"  importing patch from revision {rev} with existing parents {bases}")
+        run_jj(["jj", "new", *bases])
+        for item in parse_rev(pipe_hg(["hg", "export", rev])):
+            if item[0] == 'user':
+                (action, user, email) = item
+            elif item[0] == 'date':
+                (action, date) = item
+            elif item[0] == 'topic':
+                (action, topic) = item
+                topics.add(topic)
+            elif item[0] == 'description':
+                (action, description) = item
+                dt = datetime.strptime(date, "%a %b %d %H:%M:%S %Y %z")
+                iso_format = dt.strftime("%Y-%m-%dT%H:%M:%S%z")
+                timestamp = iso_format[:-2] + ":" + iso_format[-2:]
+                env = base_env.copy()
+                env.update({
+                    "JJ_USER": user,
+                    "JJ_EMAIL": email,
+                    "JJ_TIMESTAMP": timestamp
+                })
+                run_jj(["jj", "describe", "--reset-author", "-m", description.rstrip()], env=env)
+            elif item[0] == 'patch':
+                (action, line, input) = item
+                logger.debug(f"PATCHING hg rev={rev}")
+                process = subprocess.Popen(["patch", "-p1"],
+                                           cwd=args.jjdir, text=True,
+                                           stdin=subprocess.PIPE)
+                process.stdin.write(line)
+                for line in input:
+                    process.stdin.write(line)
+                process.stdin.close()
+                retcode = process.wait()
+                if retcode != 0:
+                    raise Exception("patch failed. Your base must be wrong?")
+            else:
+                raise Exception(f"wtf is {item[0]}??")
+
+        git_chosen = run_jj(["jj", "log", "-r", "@", "-T", "change_id.short(8)", "--no-graph"]).rstrip()
+        hg2git[chosen] = git_chosen
+
+    run_jj(["jj", "new"])
+
+    with Path(args.map).open(mode="w") as fh:
+        for hg, git in hg2git.items():
+            print(f"{hg} {git}", file=fh)
+    print(f"Wrote {args.map}")
+
+    topic = args.bookmark
+    if not topic:
+        if len(topics) == 1:
+            topic = list(topics)[0]
+        elif len(topics) > 1:
+            logger.warning("Multiple topics found, not creating a bookmark")
+            logger.warning(f"Topics found: {topics}")
+    if topic:
+        run_jj(["jj", "bookmark", "create", "-r", "@-", topic])
+
+git_repo = find_git_repo()
+start_op = run_jj(["jj", "op", "log", "-n1", "-T", "id.short(20)", "--no-graph"])
+
+try:
+    migrate(args)
+except Exception:
+    logger.exception(f"Restoring to op {start_op}")
+    run_jj(["jj", "op", "restore", start_op])
+    sys.exit(1)
