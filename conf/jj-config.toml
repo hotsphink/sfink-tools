@@ -72,7 +72,10 @@ lst = ["log", "-T", "brief", "-r", "topics", "--no-graph"]
 
 book = ["bookmark"]
 
-ls = ["log", "-r", "withparents(::@ ~ immutable())"]
+ls = ["log", "-r", "ancestors(::@ ~ immutable(), 2)", "-T", "brief"]
+
+view = ["show", "-r", "current"]
+
 'show-' = ["show", "-r", "@-"]
 sho = ["show-"]
 
