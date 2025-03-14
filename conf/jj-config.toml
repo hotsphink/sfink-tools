@@ -45,10 +45,11 @@ separate(" ",
   self.bookmarks(),
   self.tags(),
   self.working_copies(),
-    if(description,
-      description.first_line(),
-      label(if(empty, "empty"), description_placeholder),
-    ),
+  if(empty, label("empty", "(no changes)")),
+  if(description,
+    description.first_line(),
+    label(if(empty, "empty"), description_placeholder),
+  ),
 )
 '''
 
