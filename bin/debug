@@ -605,26 +605,32 @@ END
   my $cwd = Cwd::getcwd();
   print "setting default-directory = $cwd\n";
 
-  # Very basic quoting. Needs to be compatible with emacs's
-  # split-and-quote-strings, which you can check against
-  # combine-and-quote-strings. Basically, 'foo bar' -> '\"foo bar\"'.
-  @args = map { / / ? "\\\"$_\\\"" : $_ } @args;
+  # Quoting needs to be compatible with emacs's split-string-and-unquote, which
+  # is a PITA. Fortunately, (split-string-and-unquote (combine-and-quote-strings
+  # (x))) is guaranteed to be s. And providing the argument to
+  # (combine-and-quote-strings) can be done by "encoding" an arbitrary string by
+  # replacing all problematic chars, and then decoding that in elisp before
+  # passing it in. So we encode in Perl, command-line quoting doesn't mess
+  # anything up, then decode in elisp and make a list of the decoded strings,
+  # combine them, and pass them to (gud-gdb). Which will then split them back
+  # apart with split-string-and-unquote. Victory!
+  print "pre: @args\n";
+  foreach (@args) {
+    s/ /<SP>/g;
+    s/\"/<QQ>/g;
+    #s/\'/<Q>/g;
+    $_ = "(decode-stuff \"$_\")";
+  }
 
   # ARGH! Nothing simpler to get into the right directory works, because gud
   # cds back to something based on the jorendb.js path and setting
   # gud-chdir-before-run in normal ways fails.
   my $eval = <<"END";
 (custom-set-variables '(gud-chdir-before-run nil))
-(gud-gdb "$COMMAND @args")
+(defun decode-stuff (s) (string-replace "<QQ>" (string 34) (string-replace "<SP>" " " s)))
+(gud-gdb (combine-and-quote-strings (list "$COMMAND" @args))))
 END
-#   my $eval = <<"END";
-# (let ((default-directory "$cwd")
-#       (gud-chdir-before-run nil))
-#  (custom-set-variables '(gud-chdir-before-run nil))
-#  (cd "$cwd")
-#  (setq gud-chdir-before-run nil)
-#  (gud-gdb "$COMMAND @args"))
-# END
+
   $eval =~ s/\n/ /g;
 
   exec(@EMACS, "--eval", "(progn $eval)") or die;
