@@ -1,7 +1,10 @@
 #!/usr/bin/python
 
+# Import hg revisions into jj.
+
+# TODO:
 # [x] handle single linear series
-# [ ] better solution to finding the base. (Can't avoid mapping base hg rev.)
+# [x] better solution to finding the base. (Can't avoid mapping base hg rev.)
 #     - in actual git repo for jj (not workspace), git cinnabar hg2git
 #     - use that as base
 # [x] do a full tree:
@@ -13,7 +16,7 @@
 #       add resulting change to existing, where the id is the corresponding hg revision
 # [ ] expire or mark as imported the hg origination
 # [ ] also import any obsolete revs that descend from immutable revs? (optional!)
-# [ ] error out usefully when importing a changeset with unknown (non-trunk) parent
+# [x] error out usefully when importing a changeset with unknown (non-trunk) parent
 
 import argparse
 from collections import defaultdict
