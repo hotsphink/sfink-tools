@@ -10,6 +10,9 @@ format = "git"
 [git]
 subprocess = true
 
+[experimental-advance-branches]
+enabled-branches = ["glob:T.*"]
+
 [revset-aliases]
 'withparents(x)' = 'x | parents(x)'
 'topics' = 'visible_heads() ~ immutable()'
