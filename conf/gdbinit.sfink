@@ -25,3 +25,23 @@ define pretty4
   python sys.path.insert(0, '/home/sfink/src/mozilla4/js/src/gdb')
   empretty
 end
+
+define mlabel
+  set $_VP=vp
+  python
+import re
+argc = int(gdb.parse_and_eval("argc"))
+for i in range(3, argc + 2, 2):
+  namer = f"$_VP[{i}]"
+  m = re.search(r'::Value\("(.*?)"', str(gdb.parse_and_eval(namer)))
+  if not m:
+    print(f"Failed to match: {namer}")
+    continue
+  name = m.group(1)
+  setter = f"label {name}=$_VP[{i+1}].toGCThing()"
+  gdb.execute(setter)
+end
+end
+document mlabel
+Special-purpose tool for grabbing out things passed to Math.sin(0, "name1", val1, "name2", ...) and converting them to labels.
+end
