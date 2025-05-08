@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import requests
 import sys
 
@@ -23,6 +24,8 @@ parser.add_argument('-f', '--filename', default='text.txt',
                     help='name of file to create')
 parser.add_argument('-d', '--description', default='mkgist-created gist',
                     help='description of gist')
+parser.add_argument('--secret', action='store_true',
+                    help='create a secret gist instead of a public one')
 parser.add_argument('--update', default='',
                     help='update an existing gist instead of creating a new one')
 parser.add_argument('-a', '--all', action='store_true',
@@ -54,7 +57,7 @@ if not args.data:
 
 payload = {
     "description": args.description,
-    "public": True,
+    "public": not args.secret,
     "files": {
         args.filename: {
             "content": ' '.join(args.data)
@@ -66,6 +69,8 @@ auth = {'Authorization': 'bearer ' + args.token}
 
 if args.update:
     print("Updating gist")
+    if m := re.search(r'[0-9a-f]{32}', args.update):
+        args.update = m.group(0)
     r = requests.patch(args.url + '/' + args.update, headers=auth, data=json.dumps(payload))
 else:
     print("Posting gist")
