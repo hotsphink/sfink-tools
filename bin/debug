@@ -35,8 +35,14 @@ my $TMPDIR = tempdir(CLEANUP => 1);
 our $VERSION = "1.2";
 
 my @EMACS = qw(emacs);
+my $use_client;
 if ($ENV{DEBUG_EDITOR}) {
   @EMACS = $ENV{DEBUG_EDITOR} =~ /(\".*?\"|\'.*?\'|\S+)/g;
+} else {
+  if (system("emacsclient", "-e", "'server-detected") == 0) {
+    @EMACS = qw(emacsclient);
+    $use_client = 1;
+  }
 }
 
 my $gdb = "gdb";
@@ -706,7 +712,17 @@ foreach (@args) {
 
 chop($str) if @args;
 print ARGS $str, "\n";
-my $init_eval = <<"END";
+my $init_eval = "";
+
+if ($use_client) {
+    $init_eval .= <<"END";
+(dolist (buf (buffer-list))
+  (when (string-prefix-p "*gud-" (buffer-name buf))
+    (kill-buffer buf)))
+END
+}
+
+$init_eval .= <<"END";
  (insert "source $fname")
  (comint-send-input)
  (insert "cd $ENV{CWD}")
