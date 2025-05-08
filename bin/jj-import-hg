@@ -62,7 +62,7 @@ elif (Path(args.dir) / ".jj").is_dir():
         logger.critical("current working directory should be hg root")
     setattr(args, "hgdir", cwd)
 else:
-    logger.critical(f"directory {args.dir} does not appear to be either an hg nor jj checkout")
+    logger.critical(f"directory {args.dir} appears to be neither an hg nor jj checkout")
     sys.exit(1)
 
 def run_jj(cmd, **kwargs):
