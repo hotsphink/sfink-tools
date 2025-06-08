@@ -4,8 +4,9 @@
 # user.toml and this file. A cleaner way would be to set
 # JJ_CONFIG=$HOME/.config/jj.d and put the files there.
 
-[ui.diff]
-format = "git"
+[ui]
+#diff.format = "git"
+diff-formatter = ":git"
 
 [git]
 change_id = true
@@ -17,13 +18,17 @@ auto-track = 'all() ~ glob:"**/*.sf.txt"'
 enabled-branches = ["glob:GH.*"]
 
 [revsets]
-log = 'reachable(@, mutable())'
+# This revset is also used to determine what to use for the shortest unique
+# prefixes of change ids.
+log = 'ancestors(reachable(@, mutable()), 2)'
 
 [revset-aliases]
 current = 'latest((@ | @-) & ~empty())'
 'closest_bookmark(x)' = 'heads(::x & bookmarks())'
 
 junk = '(mutable() & empty()) ~ working_copies() ~ parents(..) ~ bookmarks()'
+
+nmerges = 'bookmarks(glob:"G.*")'
 
 branchroots = 'trunk()+ & trunk()::bookmarks(glob:"T.*")'
 'branchroot(x)' = 'trunk()+ & trunk()::bookmarks(x)'
@@ -32,6 +37,9 @@ branchroots = 'trunk()+ & trunk()::bookmarks(glob:"T.*")'
 'topic(x)' = 'trunk()+::x'
 
 'mut(s)' = 'mutable() & description(s)'
+
+'bug(s)' = 'description("Bug ") & description(s)'
+'mbug(s)' = 'mutable() & description("Bug ") & description(s)'
 
 # does not work! T.a ... T.b ... T.c ... trunk. xtopic(T.b) needs to exclude T.b+::T.a without excluding T.c::T.b.
 'other_topics(x)' = 'bookmarks(glob:"T.*") ~ x'
@@ -91,13 +99,17 @@ info = ["log", "--no-graph"]
 
 lg = ["log", "-T", "brief"]
 
-lst = ["info", "-T", "brief", "-r", "heads(ancestors(visible_heads() ~ immutable(), 2) ~ (empty() & description(exact:'')))"]
+lst = ["info", "-T", "brief", "-r", "(heads(ancestors(visible_heads() ~ immutable(), 2) ~ (empty() & description(exact:'')))) | nmerges-"]
 
 tug = ["bookmark", "move", "--from", "closest_bookmark(@-)", "--to", "current"]
 
 book = ["bookmark"]
 
+pushed = ["log", "--no-graph", "-r", "pushed-", "-Tbrief"]
+
 drop = ["abandon"]
+
+'op@' = ["op", "log", "-n1", "--no-graph", "-T", "id.short()"]
 
 ls = ["util", "exec", "--", "bash", "-c", """
     rev="${1:-@}"
@@ -105,14 +117,18 @@ ls = ["util", "exec", "--", "bash", "-c", """
 """, "jj-alias"]
 
 "show-" = ["show", "-r", "@-"]
-
 "desc-" = ["describe", "-r", "@-"]
+"diff-" = ["diff", "-r", "@-"]
 
+# Usage: jj addparent <child aka mergerev> <newparent>
+#
 # jj rebase -s <mergerev> -d all:<mergerev>- -d <newparent>
 addparent = ["util", "exec", "--", "bash", "-c", '''
     jj rebase -s $1 -d "all:$1-" -d $2
 ''', "jj-addparent"]
 
+# Usage: jj rmparent <child aka mergerev> <oldparent>
+#
 # jj rebase -s <mergerev> -d "all:<mergerev>- ~ <oldparent>"
 rmparent = ["util", "exec", "--", "bash", "-c", '''
     jj rebase -s $1 -d "all:$1- ~ $2"
@@ -123,7 +139,7 @@ rmparent = ["util", "exec", "--", "bash", "-c", '''
 #shove = ["b", "--ignore-immutable", "shove", "--hard"]
 
 export = ["util", "exec", "--", "python", "-c", '''
-if "indentation makes this more readable":
+if "indentation makes this config file more readable":
     import argparse
     import os
     import sys
@@ -138,6 +154,7 @@ if "indentation makes this more readable":
     parser.add_argument("--import", dest="destdir", nargs="?", const=os.path.expanduser("~/src/mozilla-ff/"), help="import patch(es) into repo at this path.")
     parser.add_argument("--dry-run", action='store_true', help="only display command to execute")
     args = parser.parse_args()
+    os.putenv("GIT_DIR", check_output(["jj", "git", "root"]))
     want_export_only = any(bool(opt) for opt in (args.output,))
     want_import = any(bool(opt) for opt in (args.destdir, args.bookmark))
     if want_import and want_export_only:
@@ -216,19 +233,29 @@ phab = ["util", "exec", "--", "bash", "-c", """
     fi
 """, "jj-phab"]
 
-# "Back" button for the working directory: go back to the last change that @ was
-# editing.
+# "Back" button for the working directory: go back to (edit) the last (or Nth
+# last) change that @ was editing, in op log order.
+#
+# Usage: jj back [N]
 back = ["util", "exec", "--", "bash", "-c", """
+    if [[ $# -gt 0 ]]; then N=$1; shift; else N=1; fi
     resolve () { jj log --no-graph -r@ -T'change_id.short() ++ "\\n"' "$@"; }
     current=$(resolve)
     jj op log --no-graph -T 'id.short() ++ "\\n"' | while read op; do
         old=$(resolve --at-op $op)
         if [[ $old != $current ]]; then
-            if ! jj edit $old 2>/dev/null; then
-                old_commit=$(jj evolog -r $old --at-op $op --no-graph -T 'commit_id.short()')
-                jj edit $old_commit
+            echo -n "$N      \r"
+            N=$(( $N - 1 ))
+            if [[ $N -eq 0 ]]; then
+                echo -n "        \r"
+                if ! jj edit $old 2>/dev/null; then
+                    old_commit=$(jj evolog -r $old --at-op $op --no-graph -T 'commit_id.short()')
+                    echo "$old not found, trying commit $old_commit"
+                    jj edit $old_commit
+                fi
+                exit 0
             fi
-            exit 0
+            current="$old"
         fi
     done
 """, "jj-back"]
@@ -246,37 +273,39 @@ back = ["util", "exec", "--", "bash", "-c", """
 # at a linear stack of patches ending in @-
 #
 yeet = ["util", "exec", "--", "python", "-c", '''
-if "indentation makes this more readable":
+if "indentation makes this config file more readable":
+    import argparse
     import re
     import shlex
     import sys
     from subprocess import run, Popen, PIPE
 
-    # Skip -c and empty string, which probably should not be there.
-    args = sys.argv[1:]
-    debug = "--debug" in args
-    args = [a for a in args if a != "--debug"]
+    parser = argparse.ArgumentParser("jj yeet", description="submit a single-bug stack of patches via moz-phab", add_help=False)
+    parser.add_argument("--help", "-h", action="help", help=argparse.SUPPRESS)
+    parser.add_argument("--debug", "-d", action="store_true", help="log debug info")
+    parser.add_argument("--bug", default=False, help="submit only revisions for given bug")
+    parser.add_argument("--source", "-s", help="source revision (base of the stack to submit)")
+    args, rest = parser.parse_known_args()
 
-    # Here is where it gets weird. If the first option does not start with a
-    # dash, interpret it to mean that we want to yeet the stack ending at the
-    # given change/commit. But note that all remaining args are still sent to
-    # moz-phab.
-    target = "latest((@ | @-) ~ empty())"
-    if args and not args[0].startswith("-"):
-        target = args.pop(0)
+    if args.source:
+        target = args.source
+    elif rest and not rest[0].startswith("-"):
+        target = rest.pop(0)
+    else:
+        target = "latest((@ | @-) ~ empty())"
 
     #run(["jj", "bookmark", "move", "-B", "moz-phab", "--to", target], check=True)
 
-    bug = False
+    bug = args.bug
     upstream = None
-    cmd = ["jj", "log", "-r", f"::({target}) ~ immutable()", "-T", "commit_id.short()++' '++change_id.shortest()++' '++description.first_line()++'\n'", "--no-graph"]
+    cmd = ["jj", "log", "-r", f"::({target}) & mutable()", "-T", "commit_id.short()++' '++change_id.short(12)++' '++description.first_line()++'\n'", "--no-graph"]
     process = Popen(cmd, stdout=PIPE, text=True)
     keep = []
     earliest = None
     latest = None  # aka @-
     for line in process.stdout:
         line = line.rstrip("\r\n")
-        if debug:
+        if args.debug:
             print(f"line is <<{line}>>")
         rev, change, desc = line.split(' ', 2)
         latest = latest or change
@@ -300,7 +329,7 @@ if "indentation makes this more readable":
     for line in keep:
         print(f"  {line}")
 
-    cmd = ["moz-phab", "submit", "--upstream", upstream, earliest, latest] + args
+    cmd = ["moz-phab", "submit", "--upstream", upstream, earliest, latest] + rest
     print(shlex.join(["Running:"] + cmd))
     run(cmd)
 ''']
