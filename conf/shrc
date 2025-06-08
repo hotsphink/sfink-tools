@@ -69,3 +69,7 @@ function reconnect() {
     eval $(re-ssh-agent)
     export DISPLAY=localhost:10.0 # TEMPORARY HACK
 }
+
+function jgit() {
+    env GIT_DIR="$(jj git root)" git "$@"
+}
