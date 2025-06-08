@@ -72,3 +72,7 @@ define tcellzone
   set $zone=$arena->zone
   p $zone
 end
+
+define jsbt
+  p js::DumpBacktrace(cx)
+end
