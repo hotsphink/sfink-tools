@@ -683,9 +683,12 @@ END
 
 # From here on, we're going to use gdb or rr.
 
+use autodie;
+
 # Set the arguments
 my $fname = "$TMPDIR/debug-args/c-args-$$";
-open(ARGS, ">$fname") or die "create $fname: $!";
+open(my $args_fh, ">", $fname);
+my @escaped_args;
 my $str = "set args ";
 foreach (@args) {
     # Yet another hack. I haven't figured out a way to pass through newlines
@@ -700,36 +703,41 @@ foreach (@args) {
             # We're screwed. Just use the backslashes.
             warn "Warning: arguments contain both single- and double-quotes. 'debug' has no way of protecting them properly.\n";
             s/\'/\\\'/g;
-            $str .= "'$_' ";
+            push @escaped_args, "'$_'";
         } else {
-            $str .= "\"$_\" ";
+            push @escaped_args, "\"$_\"";
         }
     } else {
         s/\'/\\\'/g;
-        $str .= "'$_' ";
+        push @escaped_args, "'$_'";
     }
 }
 
-chop($str) if @args;
-print ARGS $str, "\n";
-my $init_eval = "";
+print $args_fh "set args @escaped_args\n";
+
+# emacs init script to kill existing debugger, start new debugger, set args, etc.
+
+my $eval_pre = "";
+my $eval_post = "";
 
 if ($use_client) {
-    $init_eval .= <<"END";
+    $eval_pre .= <<"LISP";
 (dolist (buf (buffer-list))
   (when (string-prefix-p "*gud-" (buffer-name buf))
-    (kill-buffer buf)))
-END
+    (let ((kill-buffer-query-functions
+           (remq 'process-kill-buffer-query-function kill-buffer-query-functions)))
+      (kill-buffer buf))))
+LISP
 }
 
-$init_eval .= <<"END";
+$eval_post .= <<"LISP";
  (insert "source $fname")
  (comint-send-input)
  (insert "cd $ENV{CWD}")
  (comint-send-input)
  (insert "set annotate 1")
  (comint-send-input)
-END
+LISP
 
 # if DBG_DISPLAY is defined in the environment, run the debugged command with
 # its DISPLAY set to the current $DISPLAY, if any, but run emacs itself with
@@ -737,7 +745,7 @@ END
 if (defined $ENV{DBG_DISPLAY}) {
   my $app_display = $ENV{DISPLAY};
   $ENV{DISPLAY} = $ENV{DBG_DISPLAY};
-  $init_eval .= <<"END";
+  $eval_post .= <<"END";
  (insert "set env DISPLAY $app_display")
  (comint-send-input)
 END
@@ -747,7 +755,7 @@ END
 # to run the program. Otherwise, run immediately.
 unless ($opt{interactive}) {
     print STDERR "Running $COMMAND immediately\n";
-    $init_eval .= <<"END";
+    $eval_post .= <<"END";
  (insert "run")
  (comint-send-input)
 END
@@ -757,7 +765,7 @@ END
 # and exit. We're probably being called by some driver script that will
 # keep going.
 if ($opt{pattern}) {
-  $init_eval .= <<"END";
+  $eval_post .= <<"END";
   (beginning-of-buffer)
   (if (re-search-forward "$opt{pattern}") nil (kill-emacs))
 END
@@ -770,13 +778,13 @@ if ($debugger eq 'rr') {
         $taskset = "taskset -c $rr_cpu ";
         $rr_args .= " -u";
     }
-    exec(@EMACS, "--eval", "(progn (gud-gdb \"${taskset}rr replay @dbg_args -p $rrpid $rr_args\") $init_eval)");
+    exec(@EMACS, "--eval", "(progn $eval_pre (gud-gdb \"${taskset}rr replay @dbg_args -p $rrpid $rr_args\") $eval_post)");
 } elsif ($debugger eq 'record') {
     print "Running " . join(" ", 'rr', 'record', @rr_args, $COMMAND, @args) . "\n";
     system('rr', 'record', @rr_args, $COMMAND, @args);
-    exec($0, grep { !/--record/ } @local_args);
+    exec($0, grep { !/^--record/ } @local_args);
 } else {
-    exec(@EMACS, "--eval", "(progn (gud-gdb \"$gdb --fullname $COMMAND\") $init_eval)");
+    exec(@EMACS, "--eval", "(progn $eval_pre (gud-gdb \"$gdb --fullname $COMMAND\") $eval_post)");
 }
 
 # Copyright 2002-2016 by Steve Fink. All rights reserved.
