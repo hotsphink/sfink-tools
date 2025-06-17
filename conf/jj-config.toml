@@ -249,7 +249,9 @@ back = ["util", "exec", "--", "bash", "-c", """
             if [[ $N -eq 0 ]]; then
                 echo -n "        \r"
                 if ! jj edit $old 2>/dev/null; then
-                    old_commit=$(jj evolog -r $old --at-op $op --no-graph -T 'commit_id.short()')
+                    # Handle temporary problem with evolution moving to the op log.
+                    old_commit="$(jj evolog -r $old --at-op $op --no-graph -n1 -T 'commit_id.short() ++ ":"')"
+                    old_commit="${old_commit%%:*}"
                     echo "$old not found, trying commit $old_commit"
                     jj edit $old_commit
                 fi
