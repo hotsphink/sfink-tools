@@ -29,7 +29,7 @@ enabled-branches = ["glob:GH.*"]
 log = 'rooted_branch'
 
 [revset-aliases]
-current = 'latest((@ | @-) & ~empty())'
+current = 'latest((@ & ~empty()) | @-)'
 'closest_bookmark(x)' = 'heads(::x & bookmarks())'
 
 junk = '(mutable() & empty()) ~ working_copies() ~ parents(..) ~ bookmarks()'
