@@ -9,8 +9,14 @@
 # log -e[dit]
 
 import gdb
+import json
 import os
 import re
+
+from pathlib import Path
+
+if not hasattr(gdb, "commands"):
+    gdb.commands = {}
 
 class PythonPrint(gdb.Command):
     """Print the value of the python expression given"""
@@ -20,8 +26,8 @@ class PythonPrint(gdb.Command):
     def invoke(self, arg, from_tty):
         print(eval(arg))
 
-PythonPrint("pp")
-PythonPrint("pprint")
+gdb.commands["pp"] = PythonPrint("pp")
+gdb.commands["pprint"] = PythonPrint("pprint")
 
 ######################################################################
 
@@ -73,7 +79,7 @@ class PDo(gdb.Command):
                 gdb.write("(pdo) " + cmd + "\n")
             gdb.execute(cmd)
 
-PDo("pdo")
+gdb.commands["pdo"] = PDo("pdo")
 
 ######################################################################
 
@@ -94,7 +100,7 @@ class RepeatedAppend(gdb.Command):
       gdb.execute(cmd)
       cmd = cmd + tail
 
-RepeatedAppend("reappend")
+gdb.commands["reappend"] = RepeatedAppend("reappend")
 
 ######################################################################
 
@@ -147,14 +153,19 @@ class Labels(dict):
         """Set a label named `name` to the value `token` (probably a numeric
         value) cast according to `typestr`, which is a raw cast expression.
         gdbval is... figuring that out now."""
-        #print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
+        print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
         if gdbval is None:
             try:
                 # Look for a pointer type, eg in `(JSObject *) 0xdeadbeef`
-                if m := re.match(r'(.*?)( *\**)$', typestr):
+                if m := re.match(r'([^ ]*?)( *\**)$', typestr):
                     t, ptrs = m.groups()
                 else:
                     t, ptrs = (typestr, '')
+                #print("scanning `" + valstr + "` for " + re.escape(typestr) + ' ((?:0x)?[0-9a-f]{1,16})')
+                #if m := re.search(re.escape(typestr) + ' ((?:0x)?[0-9a-f]{1,16})', valstr):
+                #    gdbval = gdb.parse_and_eval(f"('{t}'{ptrs}) {m.group(1)}")
+                #else:
+                #    gdbval = gdb.parse_and_eval(f"('{t}'{ptrs}) {token}")
                 gdbval = gdb.parse_and_eval(f"('{t}'{ptrs}) {token}")
             except gdb.error as e:
                 # This can happen if we load in a set of labels before the type
@@ -177,7 +188,7 @@ class Labels(dict):
         if dict.get(self, key) == pair:
             return
         #print(f"all occurrences of {key} will be replaced with ${pair[0]} of type {pair[1]}")
-        
+
         # Remove all old keys referring to $name so that the old key will not be replaced
         # with the updated $name.
         deadkeys = {key for key, (name, t) in labels.items() if name == pair[0]}
@@ -290,9 +301,10 @@ class LabelCmd(gdb.Command):
 
     With no arguments, display all current labels.
 
-    With one argument, display the named label.
+    With just a NAME argument, do the same as `label NAME=$` (label the
+    previous gdb value).
 
-    With two arguments, evaluate VALUE and then extract the first numeric value seen
+    With NAME=VALUE, evaluate VALUE and then extract the first numeric value seen
     from it. All further `p` command output will have that numeric value replaced
     with $<NAME>. Also, the convenience variable $<NAME> will be set to VALUE.
 
@@ -310,7 +322,8 @@ class LabelCmd(gdb.Command):
       $1 = (JSObject *) $GLOBAL
       gdb> p $GLOBAL
       $2 = (JSObject *) $GLOBAL
-   """
+
+    """
 
     def __init__(self, name):
         super(LabelCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_NONE)
@@ -330,12 +343,12 @@ class LabelCmd(gdb.Command):
             return
 
         pos = index_of_first(arg, [' ', '='])
-        if pos is not None:
+        if pos is None:
+            name = arg
+            val = '$'
+        else:
             name, val = (arg[0:pos], arg[pos+1:])
-            self.set_label(name, val.lstrip())
-            return
-
-        self.get_label(arg)
+        self.set_label(name, val.lstrip())
 
     def get_label(self, name):
         for key, (n, t) in labels.items():
@@ -393,7 +406,8 @@ class LabelCmd(gdb.Command):
         gdb.write("valstr = " + valstr + "\n");
         if mm := re.search(r'\(([^\(\)]+ *\*+)\) *' + numeric, valstr):
             gdb.write("  type = " + mm.group(1) + "\n")
-            labels.label(numeric, name, mm.group(1), gdbval=v)
+            #labels.label(numeric, name, mm.group(1), gdbval=v)
+            labels.label(numeric, name, mm.group(1))
         else:
             labels.label(m.group(0), name, str(v.type), gdbval=v)
 
@@ -404,7 +418,7 @@ class LabelCmd(gdb.Command):
                 seen.add(name)
                 gdb.write(f"${name} = ({t}) {key}\n")
 
-LabelCmd('label')
+gdb.commands["label"] = LabelCmd('label')
 
 class UnlabelCmd(gdb.Command):
     def __init__(self, name):
@@ -416,7 +430,7 @@ class UnlabelCmd(gdb.Command):
         for key in deadkeys.keys():
             del labels[key]
 
-UnlabelCmd('unlabel')
+gdb.commands["unlabel"] = UnlabelCmd('unlabel')
 
 class util:
     def split_command_arg(arg, allow_dash=False):
@@ -480,6 +494,40 @@ class util:
             if ts in s:
                 return s
         return "(%s) %s" % (ts, s)
+
+    def grab_commands(start=0):
+        gdb_cmd = "show commands"
+        if start > 0:
+            gdb_cmd += f" {start}"
+        out = gdb.execute(gdb_cmd, to_string=True)
+        def parse_line(s):
+            m = re.match(r'\s*(\d+)\s+(.*)', s)
+            idx, cmd = m.groups()
+            return (int(idx), cmd)
+        result = [parse_line(line) for line in out.splitlines()]
+        print(f"Got {result[0][0]}..{result[-1][0]} from {start}: {gdb_cmd}")
+        return result
+
+    def history_commands():
+        cmd_buffer = util.grab_commands()
+        chunksize = None
+        if cmd_buffer[0][0] != 1 and not chunksize:
+            # if `show commands` begins with > 1, it isn't truncated.
+            chunksize = len(cmd_buffer)
+
+        while True:
+            idx, command = cmd_buffer.pop()
+            yield command
+            if idx == 1:
+                return
+            if cmd_buffer:
+                continue
+            start = max(1, idx - chunksize // 2)
+            #print(f"start = max(1, {idx} - {chunksize} / 2) = {start}")
+            cmd_buffer = util.grab_commands(start)
+            # First batch (starting at command 1) may give commands we've already seen.
+            while cmd_buffer[-1][0] >= idx:
+                cmd_buffer.pop()
 
 class PrintCmd(gdb.Command):
     """\
@@ -550,4 +598,140 @@ times.
                 output = labels.apply(output, verbose)
             gdb.write(output)
 
-PrintCmd('p')
+gdb.commands["p"] = PrintCmd('p')
+
+class MacroCmd(gdb.Command):
+    """\
+Record and restore persistent command macros.
+
+macro start NAME - start macro recording
+macro end - end macro recording, save to persistent store
+macro grab NAME START [END] - grab out the commands between START and END (substrings) and save as NAME
+macro load NAME - load macro from persistent store
+macro list - list all macro names\
+"""
+
+    def __init__(self, name):
+        super(MacroCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_COMMAND)
+
+    def state_file(self):
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+        dirpath = base / "gdb-macros"
+        dirpath.mkdir(parents=True, exist_ok=True)
+        return dirpath / "macros.json"
+
+    def _load_macros(self):
+        try:
+            return json.loads(self.state_file().read_text())
+        except OSError as e:
+            return {}
+
+    def _save_macros(self, macros):
+        path = self.state_file()
+        path.write_text(json.dumps(macros, indent=2))
+
+    def invoke(self, arg, from_tty):
+        _opts, arg = util.split_command_arg(arg)
+        # _fmt = ''.join(o[0] for o in opts)
+
+        parts = arg.split(' ')
+        if not parts:
+            gdb.write("usage: macro {start,end,load} args...\n")
+            return
+
+        if parts[0] == "start":
+            name = parts[1]  # FIXME: error checking
+            gdb.write(f"Recording macro '{name}'\n")
+            # Nothing to do.
+        elif parts[0] == "end":
+            macro = []
+            for cmd in util.history_commands():
+                print(f"considering: {cmd}")
+                if m := re.match(r"macro.*\s+start\s+([\w\-]+)$", cmd):
+                    name = m.group(1)
+                    self.record_macro(name, macro)
+                    gdb.write(f"recorded macro '{name}' with {len(macro)} commands\n")
+                    return
+                elif m := re.match(r"macro\b", cmd):
+                    pass
+                else:
+                    macro.append(cmd)
+            gdb.write("no `macro start NAME` command found\n")
+            return
+        elif parts[0] == "grab":
+            name = parts[1]
+            substr = parts[2]
+            end_substr = parts[3] if len(parts) > 3 else None
+            macro = []
+            reverse_commands = util.history_commands()
+            next(reverse_commands)  # Skip this macro grab command
+            for cmd in reverse_commands:
+                print(f"considering: {cmd}")
+                if end_substr is not None and end_substr not in cmd:
+                    continue
+                end_substr = None
+                if substr in cmd:
+                    macro.append(cmd)
+                    self.record_macro(name, macro)
+                    gdb.write(f"recorded macro '{name}' with {len(macro)} commands\n")
+                    return
+                elif m := re.match(r"macro\b", cmd):
+                    pass
+                else:
+                    macro.append(cmd)
+            gdb.write("substring not found\n")
+            return
+        elif parts[0] == "run":
+            name = parts[1]  # FIXME
+            macro = self.load_macro(name)
+            self.run(macro)
+        elif parts[0] in ("list", "ls"):
+            self.list_macros()
+        elif parts[0] in ("delete", "rm"):
+            name = parts[1]  # FIXME
+            self.delete(name)
+        elif parts[0] == "show":
+            self.show(parts[1])
+        else:
+            gdb.write("unknown subcommand\n")
+
+    def record_macro(self, name, commands):
+        macros = self._load_macros()
+        macros[name] = commands
+        self._save_macros(macros)
+
+    def load_macro(self, name):
+        macros = self._load_macros()
+        return macros.get(name)
+
+    def run(self, commands):
+        for cmd in commands:
+            gdb.execute(cmd, from_tty=False)
+
+    def list_macros(self):
+        macros = self._load_macros()
+        if macros:
+            gdb.write("defined macros:\n")
+            for macro in macros.keys():
+                gdb.write(f"  {macro}\n")
+        else:
+            gdb.write("no macros defined in " + str(self.state_file()) + "\n")
+
+    def show(self, name):
+        macros = self._load_macros()
+        macro = macros.get(name)
+        if macro:
+            for line in macro:
+                gdb.write(line + "\n")
+        else:
+            gdb.write(f"macro '{name}' not found\n")
+
+    def delete(self, name):
+        macros = self._load_macros()
+        if name in macros:
+            del macros[name]
+            self._save_macros(macros)
+        else:
+            gdb.write(f"macro '{name}' not found\n")
+
+gdb.commands["macro"] = MacroCmd("macro")
