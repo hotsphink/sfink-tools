@@ -325,6 +325,8 @@ class LabelCmd(gdb.Command):
 
     """
 
+    CAST_TO_POINTER = r'\(([^\(\)]+ *\*+)\) *'
+
     def __init__(self, name):
         super(LabelCmd, self).__init__(name, gdb.COMMAND_USER, gdb.COMPLETE_NONE)
 
@@ -333,6 +335,8 @@ class LabelCmd(gdb.Command):
             self.show_all_labels()
             return
 
+        # label variable MYVAL=<expr>
+        # label variable MYVAL <expr>
         if arg.startswith('variable '):
             start=len('variable ')
             pos = index_of_first(arg, [' ', '='], start)
@@ -342,6 +346,8 @@ class LabelCmd(gdb.Command):
             self.set_label(arg[start:pos], arg[pos+1:])
             return
 
+        # label MYVAR=expr
+        # label MYVAR expr
         pos = index_of_first(arg, [' ', '='])
         if pos is None:
             name = arg
@@ -369,7 +375,6 @@ class LabelCmd(gdb.Command):
                 return
 
         v = gdb.parse_and_eval(value)
-
         # FIXME! If there is a pretty printer for v that displays a different
         # hex value than its address, then we will label using that instead.
         # (Example: Symbol displays its desc address, though in the 0x0 case we
@@ -402,11 +407,11 @@ class LabelCmd(gdb.Command):
         # should set $SOMETHING to the actual value of $3
 
         # If the numeric value is preceded by something that looks like a cast to a pointer, use the cast as the type.
-        gdb.write("pattern = " + r'\(([\w:]+ *\*+)\) *' + numeric + "\n");
+        pattern = self.CAST_TO_POINTER + numeric
+        gdb.write("pattern = " + pattern + "\n");
         gdb.write("valstr = " + valstr + "\n");
-        if mm := re.search(r'\(([^\(\)]+ *\*+)\) *' + numeric, valstr):
+        if mm := re.search(pattern, valstr):
             gdb.write("  type = " + mm.group(1) + "\n")
-            #labels.label(numeric, name, mm.group(1), gdbval=v)
             labels.label(numeric, name, mm.group(1))
         else:
             labels.label(m.group(0), name, str(v.type), gdbval=v)
