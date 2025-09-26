@@ -43,11 +43,6 @@ rooted_branch = 'ancestors(branch(@), 2)'
 'bug(s)' = 'description("Bug ") & description(s)'
 'mbug(s)' = 'mutable() & description("Bug ") & description(s)'
 
-# does not work! T.a ... T.b ... T.c ... trunk. xtopic(T.b) needs to exclude T.b+::T.a without excluding T.c::T.b.
-'other_topics(x)' = 'bookmarks(glob:"T.*") ~ x'
-'exclusive_topic(x)' = 'topic(x) ~ trunk()::other_topics(x)'
-'xtopic(x)' = 'exclusive_topic(x)'
-
 # These are not quite the same.
 'why_immutable(r)' = '(r & immutable()) | roots(r:: & immutable_heads())'
 'why_in(r, domain)' = '(r & domain) | roots(r:: & heads(domain))'
