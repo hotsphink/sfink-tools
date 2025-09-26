@@ -20,7 +20,9 @@ enabled-branches = ["glob:GH.*"]
 [revsets]
 # This revset is also used to determine what to use for the shortest unique
 # prefixes of change ids.
-log = 'ancestors(reachable(@, mutable()), 2)'
+#log = 'ancestors(reachable(@, mutable()), 2)'
+#log = 'ancestors(mutable(), 2)'
+log = 'rooted_branch'
 
 [revset-aliases]
 current = 'latest((@ | @-) & ~empty())'
@@ -30,11 +32,11 @@ junk = '(mutable() & empty()) ~ working_copies() ~ parents(..) ~ bookmarks()'
 
 nmerges = 'bookmarks(glob:"G.*")'
 
-branchroots = 'trunk()+ & trunk()::bookmarks(glob:"T.*")'
-'branchroot(x)' = 'trunk()+ & trunk()::bookmarks(x)'
-
-# non-trunk ancestors of T.foo
-'topic(x)' = 'trunk()+::x'
+# Topological branch
+'branch(x)' = 'reachable(x, mutable())'
+branch = 'branch(@)'
+'rooted_branch(x)' = 'ancestors(branch(x), 2)'
+rooted_branch = 'ancestors(branch(@), 2)'
 
 'mut(s)' = 'mutable() & description(s)'
 
