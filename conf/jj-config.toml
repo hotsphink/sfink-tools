@@ -315,6 +315,8 @@ phab = ["util", "exec", "--", "bash", "-c", """
     fi
 """, "jj-phab"]
 
+# Update https://github.com/jj-vcs/jj/issues/2871#issuecomment-2864858069 with changes.
+#
 # "Back" button for the working directory: go back to (edit) the last (or Nth
 # last) change that @ was editing, in op log order.
 #
@@ -332,7 +334,7 @@ back = ["util", "exec", "--", "bash", "-c", """
                 echo -n "        \r"
                 if ! jj edit $old 2>/dev/null; then
                     # Handle temporary problem with evolution moving to the op log.
-                    old_commit="$(jj evolog -r $old --at-op $op --no-graph -n1 -T 'commit_id.short() ++ ":"')"
+                    old_commit="$(jj evolog -r $old --at-op $op --no-graph -n1 -T 'commit.commit_id().short() ++ ":"')"
                     old_commit="${old_commit%%:*}"
                     echo "$old not found, trying commit $old_commit"
                     jj edit $old_commit
