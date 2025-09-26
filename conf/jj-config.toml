@@ -73,6 +73,7 @@ brief = 'brief_line ++ "\n"'
 brief_line = '''
 separate(" ",
   format_short_change_id_with_hidden_and_divergent_info(self),
+  format_short_commit_id(commit_id),
   self.bookmarks(),
   self.tags(),
   self.working_copies(),
