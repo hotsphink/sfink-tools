@@ -224,6 +224,14 @@ defer = ["util", "exec", "--", "bash", "-c", '''
 
 #shove = ["b", "--ignore-immutable", "shove", "--hard"]
 
+# Manually fighting imports;
+#  - jj log -r <base> -T 'committer.timestamp()'
+#  - jj export <root> <tip> > /tmp/p
+#  - cd <dest>
+#  - jgit checkout -f <basecommit>
+#  - jgit am -3 /tmp/p
+#  - jj git import
+#  - jj log -r 'mutable() & description("...")' # to figure out where it went
 export = ["util", "exec", "--", "python", "-c", '''
 if "indentation makes this config file more readable":
     import argparse
@@ -240,7 +248,7 @@ if "indentation makes this config file more readable":
     parser.add_argument("--import", dest="destdir", nargs="?", const=os.path.expanduser("~/src/mozilla-ff/"), help="import patch(es) into repo at this path.")
     parser.add_argument("--dry-run", action='store_true', help="only display command to execute")
     args = parser.parse_args()
-    os.putenv("GIT_DIR", check_output(["jj", "git", "root"]))
+    os.putenv("GIT_DIR", check_output(["jj", "git", "root"]).strip())
     want_export_only = any(bool(opt) for opt in (args.output,))
     want_import = any(bool(opt) for opt in (args.destdir, args.bookmark))
     if want_import and want_export_only:
