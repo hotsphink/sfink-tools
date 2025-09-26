@@ -15,8 +15,8 @@ define watchmark
   # Note that it is often handy to make the resulting watchpoint conditional on
   # having a matching address (since it will be breaking for anything sharing the
   # mark word)
-  set $word = js::debug::GetMarkWordAddress($arg0)
-  set $mask = js::debug::GetMarkMask($arg0, $arg1)
+  set $word = js::debug::GetMarkWordAddress((js::gc::Cell*)$arg0)
+  set $mask = js::debug::GetMarkMask((js::gc::Cell*)$arg0, $arg1)
   watch -l *$word
 end
 
