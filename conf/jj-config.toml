@@ -180,10 +180,14 @@ landed = ["util", "exec", "--", "bash", "-x", "-c", """
 
 'op@' = ["op", "log", "-n1", "--no-graph", "-T", "id.short()"]
 
-ls = ["util", "exec", "--", "bash", "-c", """
-    rev="${1:-@}"
-    jj log -r "ancestors(::$rev ~ immutable(), 2) | $rev:: | $rev" -Tbrief
-""", "jj-alias"]
+# Use `jj amend --into xyz` to move changes from @ to xyz even when @ is one of
+# my merge commits (eg G.review): don't drop the merge commit, don't try to
+# squash its description into the destination.
+amend = ["squash", "--keep-emptied", "--use-destination-message"]
+
+# `jj ls X` is like `jj lg` only it shows the branch containing X instead of @.
+# (just `jj ls` is the same as `jj lg`.)
+ls = ["util", "exec", "--", "bash", "-c", 'jj lg -r "rooted_branch(${1:-@})"', "jj-ls"]
 
 "show-" = ["show", "-r", "@-"]
 "desc-" = ["describe", "-r", "@-"]
