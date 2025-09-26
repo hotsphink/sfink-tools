@@ -4,6 +4,10 @@
 # user.toml and this file. A cleaner way would be to set
 # JJ_CONFIG=$HOME/.config/jj.d and put the files there.
 
+[fsmonitor]
+#Causes random large slowdowns for me (??!)
+backend = "watchman"
+
 [ui]
 #diff.format = "git"
 diff-formatter = ":git"
