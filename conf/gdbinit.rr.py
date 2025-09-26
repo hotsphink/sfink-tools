@@ -76,14 +76,20 @@ DEFAULT_LOG_DIR = setup_log_dir()
 
 
 def when():
-    when = gdb.execute("when", False, True)
-    m = re.search(r'(\d+)', when)
+    if not running_rr():
+        seq = getattr(when, 'ticktock', 0) + 1
+        when.ticktock = seq
+        return seq
+    val = gdb.execute("when", False, True)
+    m = re.search(r'(\d+)', val)
     if not m:
         raise Exception("when returned invalid string")
     return int(m.group(1))
 
 
 def when_ticks():
+    if not running_rr():
+        return 0
     when = gdb.execute("when-ticks", False, True)
     m = re.search(r'(\d+)', when)
     if not m:
@@ -339,7 +345,11 @@ class PythonLog(gdb.Command):
             if out != arg:
                 do_print = True
             if self.LogFile:
-                gdb_out = gdb.execute("checkpoint", to_string=True)
+                gdb_out = ''
+                try:
+                    gdb_out = gdb.execute("checkpoint", to_string=True)
+                except:
+                    pass
                 action = {'type': 'log', 'event': when(), 'thread': thread_id(), 'tname': thread_detail(), 'ticks': when_ticks(), 'message': out}
                 if m := re.search(r'Checkpoint (\d+)', gdb_out):
                     action['checkpoint'] = m.group(1)
