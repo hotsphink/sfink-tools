@@ -125,7 +125,9 @@ info = ["log", "--no-graph"]
 
 lg = ["log", "-T", "brief"]
 
-lst = ["info", "-T", "brief", "-r", "(heads(ancestors(visible_heads() ~ immutable(), 2) ~ (empty() & description(exact:'')))) | nmerges-"]
+lst = ["info", "-T", "brief", "-r", "(heads(ancestors(visible_heads() ~ immutable(), 2) ~ (empty() & description(exact:'')))) | nmerges- ~ present(G.deferred-)"]
+
+current = ["info", "-r", "latest(::@ & mutable() ~ empty())", "-T", "bookmarks"]
 
 tug = ["bookmark", "move", "--from", "closest_bookmark(@-)", "--to", "current"]
 
@@ -134,6 +136,47 @@ book = ["bookmark"]
 pushed = ["log", "--no-graph", "-r", "pushed-", "-Tbrief"]
 
 drop = ["abandon"]
+
+# Rebase revset $1 and descendants, not including G.* named "marker" merges,
+# onto main. This seems to magically "remove" them from the marker merges, but
+# I'm not clear on why.
+#
+# I originally wanted this to automatically include ancestors. Or maybe
+# descendants, but not marker merges. But then I realized that I might only land
+# a subset of a stack, so decided that the user has to specify the exact revs. I
+# do want them removed from the G.* marker merges, though. But not the unlanded
+# stuff. TODO?
+#
+# Come to think of it... it would be good to have a simple command to take a
+# parent of G.pushed and "land" it (as in, remove from G.pushed, rebase onto
+# main with --skip-emptied). That means ancestors, up to...? Perhaps it would be
+# (1) remove from G.pushed, (2) rebase -b <rev> -d main? I'll prototype as G.land.
+landed = ["util", "exec", "--", "bash", "-x", "-c", """
+    revset="(($1)::bookmarks(glob:'G.*') ~ bookmarks(glob:'G.*')) & mutable()"
+    jj lg -r "$revset"
+    jj rebase -d main --skip-emptied -r "$revset"
+""", "jj-landed"]
+
+# Mark a rev as awaiting review. (Add it as a parent of G.review.)
+'G.review' = ["rebase", "-r", "G.review", "-d", "G.review-", "-d"]
+
+# Move rev from G.review (if it is there) to G.pushed (regardless).
+'G.push' = ["util", "exec", "--", "bash", "-e", "-c", """
+    echo "Add to G.pushed"
+    jj rebase -s G.pushed -d "G.pushed-" -d "$1"
+    echo "Remove from G.review"
+    jj rebase -s G.review -d "G.review- ~ ($1)"
+""", "jj-G.push"]
+
+# Remove and "land" a G.pushed/G.review parent.
+'G.land' = ["util", "exec", "--", "bash", "-e", "-c", """
+    echo "Remove from G.review"
+    jj rebase -s G.review -d "G.review- ~ ($1)"
+    echo "Remove from G.pushed"
+    jj rebase -s G.pushed -d "G.pushed- ~ ($1)"
+    echo "Rebase on main"
+    jj rebase -d main --skip-emptied -b "$1"
+""", "jj-G.land"]
 
 'op@' = ["op", "log", "-n1", "--no-graph", "-T", "id.short()"]
 
@@ -159,6 +202,19 @@ addparent = ["util", "exec", "--", "bash", "-c", '''
 rmparent = ["util", "exec", "--", "bash", "-c", '''
     jj rebase -s $1 -d "all:$1- ~ $2"
 ''', "jj-rmparent"]
+
+# Add revision $1 as a parent of G.pushed and remove it from G.review.
+land = ["util", "exec", "--", "bash", "-c", '''
+    echo "Adding to G.pushed"
+    jj rebase -s G.pushed -d "all:G.pushed-" -d "$1"
+    echo "Removing from G.review (if needed)"
+    jj rebase -s G.review -d "all:G.review- ~ $1"
+''', "jj-land"]
+
+# Add revision $1 as a parent of G.deferred.
+defer = ["util", "exec", "--", "bash", "-c", '''
+    jj rebase -s G.deferred -d "all:G.deferred-" -d "$1"
+''', "jj-defer"]
 
 #bookmark.shove = ["bookmark", "move", "--allow-backwards"]
 
