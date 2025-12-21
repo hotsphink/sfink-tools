@@ -23,11 +23,14 @@ auto-track = 'all() ~ glob:"**/*.sf.txt"'
 enabled-branches = ["glob:GH.*"]
 
 [revsets]
-# This revset is also used to determine what to use for the shortest unique
-# prefixes of change ids.
 #log = 'ancestors(reachable(@, mutable()), 2)'
 #log = 'ancestors(mutable(), 2)'
 log = 'rooted_branch'
+
+# DO NOT INCLUDE tags()! The firefox repo has >2600 tags, almost all
+# of which I don't care about.
+#short-prefixes = "ancestors(mutable(), 2) | bookmarks() | tags()"
+short-prefixes = "ancestors(mutable(), 2) | bookmarks()"
 
 [revset-aliases]
 current = 'latest((@ & ~empty()) | @-)'
