@@ -39,6 +39,8 @@ parser.add_argument("--bookmark", "--book", "--label",
     help="create a bookmark pointing to the last new change created")
 parser.add_argument("--map", default="/tmp/hg-to-git.txt",
     help="filename of hg rev -> jj (git) commit mapping")
+parser.add_argument("--mappings", default="",
+    help="comma-separated list of hg=git rev hash mappings")
 parser.add_argument("hg_revset", help="revset to migrate")
 parser.add_argument("dir", help="directory containing hg or jj checkout (current working directory will be used for the other)")
 
@@ -146,10 +148,20 @@ def resolve_hg_revset(revset):
     return revs
 
 def migrate(args):
+    import pdb; pdb.set_trace()
     import_revs = resolve_hg_revset(args.hg_revset)
 
     hg2git = {}
-    for base in resolve_hg_revset(f"parents(roots({'+'.join(import_revs)}))"):
+
+    if args.mappings:
+        for mapping in args.mappings.split(','):
+            src_hg, dst_git = mapping.split('=')
+            hg2git[src_hg] = dst_git
+
+    bases = resolve_hg_revset(f"parents(roots({'+'.join(import_revs)}))")
+    for base in bases:
+        if base in hg2git:
+            continue
         git = hg_to_git(base)
         if git == "0000000000000000000000000000000000000000":
             logging.critical(f"parent revision {base} not found in jj checkout")
@@ -203,7 +215,7 @@ def migrate(args):
                     "JJ_EMAIL": email,
                     "JJ_TIMESTAMP": timestamp
                 })
-                run_jj(["jj", "describe", "--reset-author", "-m", description.rstrip()], env=env)
+                run_jj(["jj", "metaedit", "--update-author", "-m", description.rstrip()], env=env)
             elif item[0] == 'patch':
                 (action, line, input) = item
                 logger.debug(f"PATCHING hg rev={rev}")
