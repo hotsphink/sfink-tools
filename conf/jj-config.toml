@@ -41,7 +41,7 @@ nmerges = 'bookmarks(glob:"G.*")'
 'branch(x)' = 'reachable(x, mutable())'
 branch = 'branch(@)'
 'rooted_branch(x)' = 'ancestors(branch(x), 2)'
-rooted_branch = 'ancestors(branch(@), 2)'
+rooted_branch = 'rooted_branch(@)'
 
 'mut(s)' = 'mutable() & description(s)'
 
