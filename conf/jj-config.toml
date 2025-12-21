@@ -225,7 +225,9 @@ defer = ["util", "exec", "--", "bash", "-c", '''
     jj rebase -s G.deferred -d "G.deferred-" -d "$1"
 ''', "jj-defer"]
 
+# WIP - test for subcommand aliases.
 #bookmark.shove = ["bookmark", "move", "--allow-backwards"]
+#shove = ["b", "--ignore-immutable", "shove", "--hard"]
 
 # Note: for the github-review and phab-review aliases, I additionally
 # alias plain "review" to the appropriate one in the repo config file.
