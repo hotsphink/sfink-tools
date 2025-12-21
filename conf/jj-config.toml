@@ -109,7 +109,7 @@ opid = ["op", "log", "-T", "id.short()", "--no-graph", "-n1"]
 # jj bookop - show all named operation ids
 # jj bookop -v - show all named operation ids (including past associations)
 bookop = ["util", "exec", "--", "bash", "-c", """
-    OPBOOK="$(jj root)"/.jj/var/operations.txt
+    OPBOOK="$(jj git root)"/../.jj/var/operations.txt
     if [ $# -eq 0 ]; then
         sort -k2,2 -s "$OPBOOK" | tac | perl -lane 'print unless $seen{$F[1]}++' | tac
     elif [[ "$1" = "-v" ]]; then
