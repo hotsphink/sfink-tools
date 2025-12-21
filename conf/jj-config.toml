@@ -13,9 +13,6 @@ backend = "watchman"
 diff-formatter = ":git"
 editor = "code -w"
 
-[git]
-change_id = true
-
 [snapshot]
 auto-track = 'all() ~ glob:"**/*.sf.txt"'
 
@@ -56,6 +53,12 @@ rooted_branch = 'ancestors(branch(@), 2)'
 'why_in(r, domain)' = '(r & domain) | roots(r:: & heads(domain))'
 
 [templates]
+git_push_bookmark = '"sfink/push-" ++ change_id.short()'
+
+# Consider conner's
+#git_push_bookmark = '"sfink/" ++ stringify(truncate_end(32, description.first_line().lower())).replace(regex:"[^a-zA-Z0-9]+", "-").replace(regex:"^-.*", "").replace(regex:"-*$", "") ++ "-" ++ change_id.short()'
+# thomasa88 said ^-.* should be ^-* ??
+
 draft_commit_description = '''
     concat(
     coalesce(description, "\n"),
