@@ -199,29 +199,29 @@ ls = ["util", "exec", "--", "bash", "-c", 'jj lg -r "rooted_branch(${1:-@})"', "
 
 # Usage: jj addparent <child aka mergerev> <newparent>
 #
-# jj rebase -s <mergerev> -d all:<mergerev>- -d <newparent>
+# jj rebase -s <mergerev> -d <mergerev>- -d <newparent>
 addparent = ["util", "exec", "--", "bash", "-c", '''
-    jj rebase -s "$1" -d "all:$1-" -d "$2"
+    jj rebase -s "$1" -d "$1-" -d "$2"
 ''', "jj-addparent"]
 
 # Usage: jj rmparent <child aka mergerev> <oldparent>
 #
-# jj rebase -s <mergerev> -d "all:<mergerev>- ~ <oldparent>"
+# jj rebase -s <mergerev> -d "<mergerev>- ~ <oldparent>"
 rmparent = ["util", "exec", "--", "bash", "-c", '''
-    jj rebase -s $1 -d "all:$1- ~ $2"
+    jj rebase -s $1 -d "$1- ~ $2"
 ''', "jj-rmparent"]
 
-# Add revision $1 as a parent of G.pushed and remove it from G.review.
+# Move revision $1 from (a parent of) G.review to G.pushed.
 land = ["util", "exec", "--", "bash", "-c", '''
     echo "Adding to G.pushed"
-    jj rebase -s G.pushed -d "all:G.pushed-" -d "$1"
+    jj rebase -s G.pushed -d "G.pushed-" -d "$1"
     echo "Removing from G.review (if needed)"
-    jj rebase -s G.review -d "all:G.review- ~ $1"
+    jj rebase -s G.review -d "G.review- ~ $1"
 ''', "jj-land"]
 
 # Add revision $1 as a parent of G.deferred.
 defer = ["util", "exec", "--", "bash", "-c", '''
-    jj rebase -s G.deferred -d "all:G.deferred-" -d "$1"
+    jj rebase -s G.deferred -d "G.deferred-" -d "$1"
 ''', "jj-defer"]
 
 #bookmark.shove = ["bookmark", "move", "--allow-backwards"]
