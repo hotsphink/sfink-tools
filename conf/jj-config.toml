@@ -196,6 +196,7 @@ ls = ["util", "exec", "--", "bash", "-c", 'jj lg -r "rooted_branch(${1:-@})"', "
 "show-" = ["show", "-r", "@-"]
 "desc-" = ["describe", "-r", "@-"]
 "diff-" = ["diff", "-r", "@-"]
+"split-" = ["split", "-r", "@-"]
 
 # Usage: jj addparent <child aka mergerev> <newparent>
 #
