@@ -226,7 +226,47 @@ defer = ["util", "exec", "--", "bash", "-c", '''
 
 #bookmark.shove = ["bookmark", "move", "--allow-backwards"]
 
-#shove = ["b", "--ignore-immutable", "shove", "--hard"]
+# Note: for the github-review and phab-review aliases, I additionally
+# alias plain "review" to the appropriate one in the repo config file.
+
+github-review = ["util", "exec", "--", "bash", "-e", "-c", """
+    REV="${1:-@}"
+    CHANGE=$(jj log -G -r"$REV" -T "change_id.short()")
+    export GIT_DIR=$(jj git root)
+    REMOTE_COMMIT=$(git ls-remote origin "refs/heads/push-$CHANGE" | cut -f1)
+    if [[ -z "$REMOTE_COMMIT" ]]; then
+        echo "Unable to find push-$CHANGE branch" >&2
+        ORIGIN=$(jj git remote list | grep '^origin ' | cut -d" " -f2)
+        for COMMIT in $(jj evolog -G -r"$REV" -T 'commit.commit_id().short() ++ "\n"'); do
+            echo Trying commit $COMMIT...
+            PR=$(curl -s -H "Accept: application/json" "${ORIGIN}/branch_commits/$COMMIT" | jq '.branches[].prs[].number' | head -1)
+            if [ -n "$PR" ]; then
+                break
+            fi
+        done
+    else
+        PR=$(git ls-remote origin 'refs/pull/*/head' | grep "$REMOTE_COMMIT" | perl -lne 'print $1 if m!refs/pull/(\\d+)!')
+    fi
+    if [[ -n "$PR" ]]; then
+        URL=$(jj git remote list | grep origin | cut -d" " -f2)"/pull/$PR"
+        echo "Opening $URL"
+        code --openExternal "$URL"
+    else
+        echo "Unable to find github PR URL for $REV" >&2
+    fi
+""", "jj-github-review"]
+
+phab-review = ["util", "exec", "--", "bash", "-c", """
+    REV="${1:-@}"
+    URL=$(jj log -r"$REV" -T "description" | perl -lne 'print $1 if /Differential Revision: (https.+)/')
+    if [[ -n "$URL" ]]; then
+        echo "Opening $URL"
+        code --openExternal "$URL"
+    else
+        echo "Unable to find phabricator revision URL for $REV" >&2
+    fi
+""", "jj-phab-review"]
+
 
 # Manually fighting imports;
 #  - jj log -r <base> -T 'committer.timestamp()'
@@ -319,17 +359,6 @@ _export = ["util", "exec", "--", "bash", "-e", "-c", """
       echo "Tacked onto previous @"
     fi
 """, "jj-export"]
-
-phab = ["util", "exec", "--", "bash", "-c", """
-    REV="${1:-@}"
-    URL=$(jj log -r"$REV" -T "description" | perl -lne 'print $1 if /Differential Revision: (https.+)/')
-    if [[ -n "$URL" ]]; then
-        echo "Opening $URL"
-        code --openExternal "$URL"
-    else
-        echo "Unable to find phabricator revision URL for $REV" >&2
-    fi
-""", "jj-phab"]
 
 # Update https://github.com/jj-vcs/jj/issues/2871#issuecomment-2864858069 with changes.
 #
