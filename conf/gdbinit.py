@@ -513,7 +513,9 @@ class util:
         print(f"Got {result[0][0]}..{result[-1][0]} from {start}: {gdb_cmd}")
         return result
 
-    def history_commands():
+    def history_commands(indexes=False):
+        '''generator for commands from the history, in reverse order (most
+        recent to oldest aka first), optionally with indexes'''
         cmd_buffer = util.grab_commands()
         chunksize = None
         if cmd_buffer[0][0] != 1 and not chunksize:
@@ -522,7 +524,10 @@ class util:
 
         while True:
             idx, command = cmd_buffer.pop()
-            yield command
+            if indexes:
+                yield (idx, command)
+            else:
+                yield command
             if idx == 1:
                 return
             if cmd_buffer:
@@ -533,6 +538,24 @@ class util:
             # First batch (starting at command 1) may give commands we've already seen.
             while cmd_buffer[-1][0] >= idx:
                 cmd_buffer.pop()
+
+    def parse_ranges(spec, lastidx=None):
+        earliest = lastidx or 1e12
+        indexes = []
+        for r in spec.split(','):
+            if r.endswith('-'):
+                start = int(r.rstrip("-"))
+                if lastidx is None:
+                    raise ValueError("unterminated range requires lastidx")
+                end = lastidx
+            elif (pos := r.find("-")) != -1:
+                start = int(r[0:pos])
+                end = int(r[pos+1:])
+            else:
+                start = end = int(r)
+            indexes.extend(range(start, end + 1))
+            earliest = min(earliest, start)
+        return (indexes, earliest)
 
 class PrintCmd(gdb.Command):
     """\
@@ -612,8 +635,11 @@ Record and restore persistent command macros.
 macro start NAME - start macro recording
 macro end - end macro recording, save to persistent store
 macro grab NAME START [END] - grab out the commands between START and END (substrings) and save as NAME
-macro load NAME - load macro from persistent store
-macro list - list all macro names\
+macro run NAME - execute macro
+macro list - list all macro names
+macro show NAME - display commands in the named macro
+macro delete NAME - delete the named macro
+macro commands - list full command history\
 """
 
     def __init__(self, name):
@@ -644,48 +670,43 @@ macro list - list all macro names\
             gdb.write("usage: macro {start,end,load} args...\n")
             return
 
-        if parts[0] == "start":
+        if parts[0] in ("start", "begin"):
             name = parts[1]  # FIXME: error checking
             gdb.write(f"Recording macro '{name}'\n")
             # Nothing to do.
         elif parts[0] == "end":
-            macro = []
+            rmacro = []
             for cmd in util.history_commands():
                 print(f"considering: {cmd}")
                 if m := re.match(r"macro.*\s+start\s+([\w\-]+)$", cmd):
                     name = m.group(1)
-                    self.record_macro(name, macro)
-                    gdb.write(f"recorded macro '{name}' with {len(macro)} commands\n")
+                    self.record_macro(name, reversed(rmacro))
+                    gdb.write(f"recorded macro '{name}' with {len(rmacro)} commands\n")
                     return
                 elif m := re.match(r"macro\b", cmd):
                     pass
                 else:
-                    macro.append(cmd)
+                    rmacro.append(cmd)
             gdb.write("no `macro start NAME` command found\n")
             return
         elif parts[0] == "grab":
             name = parts[1]
-            substr = parts[2]
-            end_substr = parts[3] if len(parts) > 3 else None
-            macro = []
-            reverse_commands = util.history_commands()
-            next(reverse_commands)  # Skip this macro grab command
-            for cmd in reverse_commands:
-                print(f"considering: {cmd}")
-                if end_substr is not None and end_substr not in cmd:
-                    continue
-                end_substr = None
-                if substr in cmd:
-                    macro.append(cmd)
-                    self.record_macro(name, macro)
-                    gdb.write(f"recorded macro '{name}' with {len(macro)} commands\n")
-                    return
-                elif m := re.match(r"macro\b", cmd):
-                    pass
-                else:
-                    macro.append(cmd)
-            gdb.write("substring not found\n")
-            return
+
+            reverse_commands = util.history_commands(indexes=True)
+            (lastidx, _) = next(reverse_commands)  # Skip this macro grab command
+            lastidx -= 1  # The biggest index we might want
+
+            (indexes, earliest) = util.parse_ranges(parts[2], lastidx)
+
+            commands = {}
+            for (idx, cmd) in reverse_commands:
+                commands[idx] = cmd
+                if idx <= earliest:
+                    break
+
+            macro = [commands[idx] for idx in indexes]
+            self.record_macro(name, macro)
+            gdb.write(f"recorded macro '{name}' with {len(macro)} commands\n")
         elif parts[0] == "run":
             name = parts[1]  # FIXME
             macro = self.load_macro(name)
@@ -697,6 +718,10 @@ macro list - list all macro names\
             self.delete(name)
         elif parts[0] == "show":
             self.show(parts[1])
+        elif parts[0] == "commands":
+            self.show_commands()
+        elif parts[0] == "path":
+            gdb.write(self.state_file() + "\n")
         else:
             gdb.write("unknown subcommand\n")
 
@@ -738,5 +763,16 @@ macro list - list all macro names\
             self._save_macros(macros)
         else:
             gdb.write(f"macro '{name}' not found\n")
+
+    def show_commands(self, limit=1000):
+        reverse_commands = util.history_commands(indexes=True)
+        next(reverse_commands)  # Skip this macro command
+        commands = []
+        for pair in reverse_commands:
+            if limit == 0:
+                break
+            commands.append(pair)
+        for (idx, cmd) in reversed(commands):
+            gdb.write(f"{idx} {cmd}\n")
 
 gdb.commands["macro"] = MacroCmd("macro")
