@@ -106,6 +106,8 @@ separate(" ",
 
 opid = ["op", "log", "-T", "id.short()", "--no-graph", "-n1"]
 
+blame = ["file", "annotate"]
+
 # jj bookop get <name> - show the operation id last associated with a name containing the given substring
 # jj bookop get -v <name> - show all operation ids ever associated with a name containing the given substring
 # jj bookop <name> - associate <name> with the current operation id
