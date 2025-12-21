@@ -11,6 +11,7 @@ backend = "watchman"
 [ui]
 #diff.format = "git"
 diff-formatter = ":git"
+editor = "code -w"
 
 [git]
 change_id = true
