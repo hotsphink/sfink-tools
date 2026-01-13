@@ -141,7 +141,7 @@ info = ["log", "--no-graph"]
 
 lg = ["log", "-T", "brief"]
 
-lst = ["info", "-T", "brief", "-r", "(heads(ancestors(visible_heads() ~ immutable(), 2) ~ (empty() & description(exact:'')))) | nmerges- ~ present(G.deferred-)"]
+lst = ["info", "-T", "brief", "-r", "(heads(ancestors(visible_heads() & mutable(), 2) ~ (empty() & description(exact:'')))) | nmerges- ~ present(G.deferred-)"]
 
 current = ["info", "-r", "latest(::@ & mutable() ~ empty())", "-T", "bookmarks"]
 
@@ -366,7 +366,7 @@ _export = ["util", "exec", "--", "bash", "-e", "-c", """
     fi
     REV="${1:-@}"
     GITBASE=$(jj log --no-graph -r "roots(::$REV & mutable())" -T "commit_id")
-    GITHEAD=$(jj log --no-graph -r "latest(($REV | $REV-) ~ empty())" -T "commit_id")
+    GITHEAD=$(jj log --no-graph -r "coalesce(($REV) ~ empty(), ($REV)-)" -T "commit_id")
     if [[ $TO_FF = 0 ]]; then
       exec git format-patch $OUTPUT --notes "$GITBASE"^.."$GITHEAD"
     else
@@ -416,7 +416,7 @@ back = ["util", "exec", "--", "bash", "-c", """
 # Use `jj yeet --debug` to see the input lines being processed.
 #
 # Extra command line options get passed to moz-phab. This only looks
-# at a linear stack of patches ending in @-
+# at a linear stack of patches ending in @ (or @-).
 #
 yeet = ["util", "exec", "--", "python", "-c", '''
 if "indentation makes this config file more readable":
