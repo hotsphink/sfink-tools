@@ -113,6 +113,8 @@ join(" ",
 ) ++ ": " ++ content
 """]
 
+logpast = ["evolog", "-T", 'commit.commit_id().shortest(8) ++ "\n"', "-G"]
+
 # jj bookop get <name> - show the operation id last associated with a name containing the given substring
 # jj bookop get -v <name> - show all operation ids ever associated with a name containing the given substring
 # jj bookop <name> - associate <name> with the current operation id
