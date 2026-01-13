@@ -431,20 +431,24 @@ if "indentation makes this config file more readable":
     parser.add_argument("--debug", "-d", action="store_true", help="log debug info")
     parser.add_argument("--bug", default=False, help="submit only revisions for given bug")
     revargs = parser.add_mutually_exclusive_group()
-    revargs.add_argument("--source", "-s", help="source revision (base of the stack to submit)")
+    revargs.add_argument("--base", "-b", help="base revision of the stack to submit")
     revargs.add_argument("--revisions", "--revision", "--rev", "-r", help="revision(s) to upload in isolation")
     revargs.add_argument("--reviewers", "--reviewer", "-R", action="append",
                          help="reviewer (can use multiple, prefix with ! to make blocking, multiple defaults to blocking so prefix with ? to make non-blocking)")
     args, rest = parser.parse_known_args()
 
-    if args.source:
-        target = "::" + args.source
-    elif args.revisions:
-        target = args.revisions
+    base = None
+    if args.revisions:
+        target = args.revisions + " ~ empty()"
+    elif args.base:
+        base = args.base
     elif rest and not rest[0].startswith("-"):
-        target = "::" + rest.pop(0)
+        base = rest.pop(0)
     else:
-        target = "::coalesce(@ ~ empty(), @-)"
+        target = "::@ ~ empty()"
+
+    if base:
+        target = f"coalesce({base}::@, {base}::) ~ empty()"
 
     if rest and rest[0] == "--":
         rest.pop(0)
@@ -500,11 +504,11 @@ if "indentation makes this config file more readable":
         base = change
 
     if process.returncode:
-        parser.error(f"no valid mutable revisions to upload (jj log exited with status {process.returncode})")
+        raise SystemExit(f"error: no valid mutable revisions to upload (jj log exited with status {process.returncode})")
     if not upstream:
-        parser.error("no upstream base found")
+        raise SystemExit("error: no upstream base found")
     if not base or not tip:
-        parser.error("could not resolve a coherent revision range")
+        raise SystemExit("error: could not resolve a coherent revision range")
 
     if bug is None:
         print(f"submitting rev with no bug number with upstream {upstream}")
