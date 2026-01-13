@@ -430,43 +430,81 @@ if "indentation makes this config file more readable":
     parser.add_argument("--help", "-h", action="help", help=argparse.SUPPRESS)
     parser.add_argument("--debug", "-d", action="store_true", help="log debug info")
     parser.add_argument("--bug", default=False, help="submit only revisions for given bug")
-    parser.add_argument("--source", "-s", help="source revision (base of the stack to submit)")
+    revargs = parser.add_mutually_exclusive_group()
+    revargs.add_argument("--source", "-s", help="source revision (base of the stack to submit)")
+    revargs.add_argument("--revisions", "--revision", "--rev", "-r", help="revision(s) to upload in isolation")
+    revargs.add_argument("--reviewers", "--reviewer", "-R", action="append",
+                         help="reviewer (can use multiple, prefix with ! to make blocking, multiple defaults to blocking so prefix with ? to make non-blocking)")
     args, rest = parser.parse_known_args()
 
     if args.source:
-        target = args.source
+        target = "::" + args.source
+    elif args.revisions:
+        target = args.revisions
     elif rest and not rest[0].startswith("-"):
-        target = rest.pop(0)
+        target = "::" + rest.pop(0)
     else:
-        target = "latest((@ | @-) ~ empty())"
+        target = "::coalesce(@ ~ empty(), @-)"
 
-    #run(["jj", "bookmark", "move", "-B", "moz-phab", "--to", target], check=True)
+    if rest and rest[0] == "--":
+        rest.pop(0)
 
-    bug = args.bug
-    upstream = None
-    cmd = ["jj", "log", "-r", f"::({target}) & mutable()", "-T", "commit_id.short()++' '++change_id.short(12)++' '++description.first_line()++'\n'", "--no-graph"]
+    if args.reviewers:
+        blocking = []
+        nonblocking = []
+        default = nonblocking if len(args.reviewers) == 1 else blocking
+        for r in args.reviewers:
+            if r.startswith("!"):
+                blocking.append(r[1:])
+            elif r.startswith("?"):
+                nonblocking.append(r[1:])
+            elif r.endswith("!"):
+                blocking.append(r[:-1])
+            elif r.endswith("?"):
+                nonblocking.append(r[:-1])
+            else:
+                default.append(r)
+        for r in blocking:
+            rest += ["--blocker", r]
+        for r in nonblocking:
+            rest += ["--reviewer", r]
+
+    cmd = ["jj", "log", "-r", f"({target}) & mutable()", "-T", "commit_id.short()++' '++change_id.short(12)++' '++description.first_line()++'\n'", "--no-graph"]
     process = Popen(cmd, stdout=PIPE, text=True)
+
+    upstream = None
     keep = []
-    earliest = None
-    latest = None  # aka @-
+    base = None
+    tip = None
+    bug = args.bug
+    # `jj log` will give revisions in child -> parent order.
     for line in process.stdout:
         line = line.rstrip("\r\n")
         if args.debug:
             print(f"line is <<{line}>>")
         rev, change, desc = line.split(' ', 2)
-        latest = latest or change
+        tip = tip or change
         upstream = rev
         rev_bug = None
         if m := re.match(r'[bB]ug (\d+)', desc):
             rev_bug = m.group(1)
 
-        # If not grabbing the first rev, and either the bug number changed or
-        # we went from None (no bug) -> None, done.
-        if bug is not False and ((bug != rev_bug) or (rev_bug is None)):
-            break
+        # If not grabbing the first rev
+        if bug is not False:
+            # Stop if either the bug number changed (from the previous or the
+            # requested), or we went from None (no bug) -> None.
+            if (bug != rev_bug) or (rev_bug is None):
+                break
         bug = rev_bug
         keep.append(line)
-        earliest = change
+        base = change
+
+    if process.returncode:
+        parser.error(f"no valid mutable revisions to upload (jj log exited with status {process.returncode})")
+    if not upstream:
+        parser.error("no upstream base found")
+    if not base or not tip:
+        parser.error("could not resolve a coherent revision range")
 
     if bug is None:
         print(f"submitting rev with no bug number with upstream {upstream}")
@@ -475,7 +513,7 @@ if "indentation makes this config file more readable":
     for line in keep:
         print(f"  {line}")
 
-    cmd = ["moz-phab", "submit", "--upstream", upstream, earliest, latest] + rest
-    print(shlex.join(["Running:"] + cmd))
+    cmd = ["moz-phab", "submit", "--upstream", upstream, base, tip] + rest
+    print(f"Running: {shlex.join(cmd)}")
     run(cmd)
 ''']
