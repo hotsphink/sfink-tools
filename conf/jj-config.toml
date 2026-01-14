@@ -439,16 +439,18 @@ if "indentation makes this config file more readable":
 
     base = None
     if args.revisions:
-        target = args.revisions + " ~ empty()"
+        target = args.revisions
     elif args.base:
         base = args.base
     elif rest and not rest[0].startswith("-"):
         base = rest.pop(0)
     else:
-        target = "::@ ~ empty()"
+        target = "::@"
 
     if base:
-        target = f"coalesce({base}::@, {base}::) ~ empty()"
+        target = f"coalesce({base}::@, {base}::)"
+
+    target += " ~ empty()"
 
     if rest and rest[0] == "--":
         rest.pop(0)
@@ -499,7 +501,12 @@ if "indentation makes this config file more readable":
             # requested), or we went from None (no bug) -> None.
             if (bug != rev_bug) or (rev_bug is None):
                 break
-        bug = rev_bug
+        if desc != "":
+            # Changes with no description at all should be slurped into an
+            # adjacent stack. They are different than bug-less descriptions,
+            # which are treated as an "unknown bug" and not lumped together with
+            # any known bug.
+            bug = rev_bug
         keep.append(line)
         base = change
 
