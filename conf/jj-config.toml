@@ -40,10 +40,12 @@ junk = '(mutable() & empty()) ~ working_copies() ~ parents(..) ~ bookmarks()'
 nmerges = 'bookmarks(glob:"G.*")'
 
 # Topological branch
-'branch(x)' = 'reachable(x, mutable())'
+'branch(x)' = 'reachable(x, mutable() ~ x..bookmarks(exact:"G.deferred"))'
 branch = 'branch(@)'
 'rooted_branch(x)' = 'ancestors(branch(x), 2)'
 rooted_branch = 'rooted_branch(@)'
+
+deferred = '(heads(mutable()) ~ G.deferred)..G.deferred'
 
 'mut(s)' = 'mutable() & description(s)'
 
