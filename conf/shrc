@@ -11,26 +11,36 @@ function mc () {
     if [ $? != 0 ]; then
         root="$(hg root 2>/dev/null)"
     fi
-    if [ $# = 0 ]; then
-        { echo -n "MOZCONFIG is " >&2; echo "${MOZCONFIG:-unset}" }
-    fi
-    if [ $# = 0 ] || [[ $1 = "-l" ]]; then
-        if [ -z "$MOZCONFIG" ]; then
-            local n
-            n=0
-            for f in $(ls "$root" | fgrep mozconfig. | fgrep -v '~'); do
-                [ $n -eq 0 ] && echo "available:"
-                n=$(( $n + 1 ))
-                echo "  ${f#*mozconfig.}"
-            done
-            [ $n -eq 0 ] && echo "no mozconfig.* files available in $root"
+    local action
+    action=set
+    if [[ $# = 0 ]]; then
+        if [[ -z "$MOZCONFIG" ]]; then
+            action=select
+        else
+            { echo -n "MOZCONFIG is " >&2; echo "${MOZCONFIG:-unset}" }
+            return
         fi
+    elif [[ $# = 0 || $1 = "-s" || $1 = "." ]]; then
+        action=select
+    elif [[ $1 = "-l" ]]; then
+        action=list
+    fi
+
+    if [[ $action = list ]]; then
+        local n
+        n=0
+        for f in $(ls "$root" | fgrep mozconfig. | fgrep -v '~'); do
+            [ $n -eq 0 ] && echo "available:"
+            n=$(( $n + 1 ))
+            echo "  ${f#*mozconfig.}"
+        done
+        [ $n -eq 0 ] && echo "no mozconfig.* files available in $root"
         return
     fi
 
     local mozconfig
 
-    if [[ $1 = "-s" ]] || [[ $1 = "." ]]; then
+    if [[ $action = select ]]; then
       mozconfig="$root/"$(ls "$root" | fgrep mozconfig. | fgrep -v '~' | fzf)
     else
       mozconfig="$root/mozconfig.$1"
