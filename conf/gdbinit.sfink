@@ -10,11 +10,15 @@ define empretty
   python mozilla.autoload.register(gdb.current_objfile())
 end
 define pretty
-  python sys.path.insert(0, '/home/sfink/src/mozilla/js/src/gdb')
+  python sys.path.insert(0, '/home/sfink/src/mozilla-ff/js/src/gdb')
+  empretty
+end
+define pretty1
+  python sys.path.insert(0, '/home/sfink/src/mozilla1/js/src/gdb')
   empretty
 end
 define pretty2
-  python sys.path.insert(0, '/home/sfink/src/mozilla2/js/src/gdb')
+  python sys.path.insert(0, '/home/sfink/src/mozilla-ff/js/src/gdb')
   empretty
 end
 define pretty3
@@ -27,18 +31,25 @@ define pretty4
 end
 
 define mlabel
-  set $_VP=vp
+  set $_ARGS=vp + 2
   python
 import re
 argc = int(gdb.parse_and_eval("argc"))
-for i in range(3, argc + 2, 2):
-  namer = f"$_VP[{i}]"
-  m = re.search(r'::Value\("(.*?)"', str(gdb.parse_and_eval(namer)))
+for i in range(1, argc, 2):
+  namer = str(gdb.parse_and_eval(f"$_ARGS[{i}]"))
+  m = re.search(r'::Value\("(.*?)"', namer)
   if not m:
     print(f"Failed to match: {namer}")
     continue
   name = m.group(1)
-  setter = f"label {name}=$_VP[{i+1}].toGCThing()"
+  valstr = str(gdb.parse_and_eval(f"$_ARGS[{i+1}]"))
+  #setter = f"label {name}=$_ARGS[{i+1}].toGCThing()"
+
+  if m := re.search(r'(\(\w+ \*\) 0x\w+)', valstr):
+    setter = f"label {name}={m.group(1)}"
+  else:
+    valstr = str(gdb.parse_and_eval(f"$_ARGS[{i+1}].toGCThing()"))
+    setter = f"label {name}=(js::gc::Cell*){valstr}"
   gdb.execute(setter)
 end
 end

@@ -153,7 +153,7 @@ class Labels(dict):
         """Set a label named `name` to the value `token` (probably a numeric
         value) cast according to `typestr`, which is a raw cast expression.
         gdbval is... figuring that out now."""
-        print("Setting label {} := {} of type {} gdbval={}".format(token, name, typestr, gdbval))
+        print(f"Setting label {name} := {token} of type {typestr} gdbval={gdbval}")
         if gdbval is None:
             try:
                 # Look for a pointer type, eg in `(JSObject *) 0xdeadbeef`
