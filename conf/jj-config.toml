@@ -207,6 +207,10 @@ amend = ["squash", "--keep-emptied", "--use-destination-message"]
 # (just `jj ls` is the same as `jj lg`.)
 ls = ["util", "exec", "--", "bash", "-c", 'jj lg -r "rooted_branch(${1:-@})"', "jj-ls"]
 
+# "linear ls" - show a linear series of changes, which currently is a lie
+# because descendant branches will be included.
+lls = ["lg", "-r", "ancestors(trunk()..@ | @::, 2)"]
+
 "show-" = ["show", "-r", "@-"]
 "desc-" = ["describe", "-r", "@-"]
 "diff-" = ["diff", "-r", "@-"]
