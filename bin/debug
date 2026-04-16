@@ -68,6 +68,7 @@ if (qx(lspci -s 00:00.0) =~ /Advanced Micro Devices/) {
 my $debugger;
 my $jorendb;
 my $rrpid;
+my $rrthread;
 my $rr_args = '';
 my $rr_cpu;
 my $rr_at;
@@ -87,6 +88,8 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
 
   if ($_ eq '-i') {
     $opt{interactive} = 1;
+  } elsif ($_ eq '--no-client') {
+    $use_client = 0;
   } elsif ($_ eq '-p') {
     die if $debugger;
     $debugger = 'perl';
@@ -96,6 +99,10 @@ while (@ARGV && ($ARGV[0] =~ /^-/ || ($ARGV[0] =~ /^(\w+)=(\S+)/))) {
   } elsif ($_ eq '--record') {
     die if $debugger;
     $debugger = 'record';
+  } elsif ($_ eq '--rrthread') {
+    $rrthread = shift(@ARGV);
+  } elsif ($_ =~ /--rrthread=(.*)/) {
+    $rrthread = $1;
   } elsif ($_ eq '--rrpid') {
     $rrpid = shift(@ARGV);
   } elsif ($_ =~ /--rrpid=(.*)/) {
@@ -181,6 +188,7 @@ Usage: debug [env=VAL...] [options] <program> args...
    --rrpid=PID      The pid to debug (default is to guess; crashes are preferred)
                     The pid can also be NAME, which will be matched against the
                     basename of commands
+   --rrthread=TID   The tid to debug (useful if a pid never exec'ed)
    --rr='args'      Additional arguments to pass to 'rr replay'.
    --js[=PATH]      Jorendb mode, with optional PATH to jorendb.js
    --check PATTERN  Run the command and scan its output for PATTERN. If it is
@@ -572,7 +580,7 @@ if ($debugger eq 'rr') {
     $debugger = 'rr';
     $rrpid = choose_pid_for_rr($rrpid);
     @dbg_args = choose_debugger_for_rr($rrpid);
-    die "no matching process found\n" if ! defined $rrpid;
+    die "no matching process found\n" if ! defined $rrpid && ! defined $rrthread;
     $COMMAND = '';
     $opt{interactive} = 1;
 }
@@ -778,7 +786,12 @@ if ($debugger eq 'rr') {
         $taskset = "taskset -c $rr_cpu ";
         $rr_args .= " -u";
     }
-    exec(@EMACS, "--eval", "(progn $eval_pre (gud-gdb \"${taskset}rr replay @dbg_args -p $rrpid $rr_args\") $eval_post)");
+    if (defined $rrthread) {
+      $rr_args .= " -f $rrthread"
+    } elsif (defined $rrpid) {
+      $rr_args .= " -p $rrpid";
+    }
+    exec(@EMACS, "--eval", "(progn $eval_pre (gud-gdb \"${taskset}rr replay @dbg_args $rr_args\") $eval_post)");
 } elsif ($debugger eq 'record') {
     print "Running " . join(" ", 'rr', 'record', @rr_args, $COMMAND, @args) . "\n";
     system('rr', 'record', @rr_args, $COMMAND, @args);
