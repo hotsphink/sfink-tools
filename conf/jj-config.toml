@@ -215,6 +215,10 @@ lls = ["lg", "-r", "ancestors(trunk()..@ | @::, 2)"]
 "desc-" = ["describe", "-r", "@-"]
 "diff-" = ["diff", "-r", "@-"]
 "split-" = ["split", "-r", "@-"]
+"diffedit-" = ["diffedit", "-r", "@-"]
+"drop-" = ["drop", "-r", "@-"]
+"abandon-" = ["abandon", "-r", "@-"]
+"edit-" = ["edit", "@-"]
 
 # Usage: jj addparent <child aka mergerev> <newparent>
 #
@@ -249,6 +253,8 @@ defer = ["util", "exec", "--", "bash", "-c", '''
 
 # Note: for the github-review and phab-review aliases, I additionally
 # alias plain "review" to the appropriate one in the repo config file.
+
+review- = ["review", "@-"]
 
 github-review = ["util", "exec", "--", "bash", "-e", "-c", """
     REV="${1:-@}"
