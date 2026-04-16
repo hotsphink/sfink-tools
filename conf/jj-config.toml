@@ -220,6 +220,17 @@ lls = ["lg", "-r", "ancestors(trunk()..@ | @::, 2)"]
 "abandon-" = ["abandon", "-r", "@-"]
 "edit-" = ["edit", "@-"]
 
+enbug = ["util", "exec", "--", "bash", "-ec", '''
+    # Pop last arg
+    bug="${@: -1}"
+    set -- "${@:1:$#-1}"
+
+    DESC="$(jj log $@ -G -T description)"
+    jj desc "$@" -m "Bug $bug - $DESC"
+''', "jj-enbug"]
+
+"enbug-" = ["enbug", "-r", "@-"]
+
 # Usage: jj addparent <child aka mergerev> <newparent>
 #
 # jj rebase -s <mergerev> -d <mergerev>- -d <newparent>
