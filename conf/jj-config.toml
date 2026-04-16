@@ -30,6 +30,8 @@ log = 'rooted_branch'
 short-prefixes = "ancestors(mutable(), 2) | bookmarks()"
 
 [revset-aliases]
+'/' = 'trunk()'
+
 current = 'latest((@ & ~empty()) | @-)'
 'closest_bookmark(x)' = 'heads(::x & bookmarks())'
 
