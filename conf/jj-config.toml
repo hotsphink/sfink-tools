@@ -141,13 +141,11 @@ bookop = ["util", "exec", "--", "bash", "-c", """
     fi
 """, "jj-bookop"]
 
-info = ["log", "--no-graph"]
-
 lg = ["log", "-T", "brief"]
 
-lst = ["info", "-T", "brief", "-r", "(heads(ancestors(visible_heads() & mutable(), 2) ~ (empty() & description(exact:'')))) | nmerges- ~ present(G.deferred-)"]
+lst = ["log", "-G", "-T", "brief", "-r", "(heads(ancestors(visible_heads() & mutable(), 2) ~ (empty() & description(exact:'')))) | nmerges- ~ present(G.deferred-)"]
 
-current = ["info", "-r", "latest(::@ & mutable() ~ empty())", "-T", "bookmarks"]
+current = ["log", "-G", "-r", "latest(::@ & mutable() ~ empty())", "-T", "bookmarks"]
 
 tug = ["bookmark", "move", "--from", "closest_bookmark(@-)", "--to", "current"]
 
