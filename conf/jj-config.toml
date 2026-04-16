@@ -295,7 +295,7 @@ github-review = ["util", "exec", "--", "bash", "-e", "-c", """
 """, "jj-github-review"]
 
 phab-review = ["util", "exec", "--", "bash", "-c", """
-    REV="${1:-@}"
+    REV="${1:-coalesce(@ ~ empty(), @-)}"
     URL=$(jj log -r"$REV" -T "description" | perl -lne 'print $1 if /Differential Revision: (https.+)/')
     if [[ -n "$URL" ]]; then
         echo "Opening $URL"
@@ -304,7 +304,6 @@ phab-review = ["util", "exec", "--", "bash", "-c", """
         echo "Unable to find phabricator revision URL for $REV" >&2
     fi
 """, "jj-phab-review"]
-
 
 # Manually fighting imports;
 #  - jj log -r <base> -T 'committer.timestamp()'
@@ -453,16 +452,18 @@ if "indentation makes this config file more readable":
     parser.add_argument("--help", "-h", action="help", help=argparse.SUPPRESS)
     parser.add_argument("--debug", "-d", action="store_true", help="log debug info")
     parser.add_argument("--bug", default=False, help="submit only revisions for given bug")
+    parser.add_argument("--reviewers", "--reviewer", "-R", action="append",
+                         help="reviewer (can use multiple, prefix with ! to make blocking, multiple defaults to blocking so prefix with ? to make non-blocking)")
     revargs = parser.add_mutually_exclusive_group()
     revargs.add_argument("--base", "-b", help="base revision of the stack to submit")
     revargs.add_argument("--revisions", "--revision", "--rev", "-r", help="revision(s) to upload in isolation")
-    revargs.add_argument("--reviewers", "--reviewer", "-R", action="append",
-                         help="reviewer (can use multiple, prefix with ! to make blocking, multiple defaults to blocking so prefix with ? to make non-blocking)")
     args, rest = parser.parse_known_args()
 
     base = None
+    forced_target = False
     if args.revisions:
         target = args.revisions
+        forced_target = True
     elif args.base:
         base = args.base
     elif rest and not rest[0].startswith("-"):
@@ -518,12 +519,13 @@ if "indentation makes this config file more readable":
         if m := re.match(r'[bB]ug (\d+)', desc):
             rev_bug = m.group(1)
 
-        # If not grabbing the first rev
-        if bug is not False:
-            # Stop if either the bug number changed (from the previous or the
-            # requested), or we went from None (no bug) -> None.
-            if (bug != rev_bug) or (rev_bug is None):
-                break
+        if not forced_target:
+            # If not grabbing the first rev
+            if bug is not False:
+                # Stop if either the bug number changed (from the previous or the
+                # requested), or we went from None (no bug) -> None.
+                if (bug != rev_bug) or (rev_bug is None):
+                    break
         if desc != "":
             # Changes with no description at all should be slurped into an
             # adjacent stack. They are different than bug-less descriptions,
